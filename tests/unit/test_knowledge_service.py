@@ -1,0 +1,165 @@
+"""Tests for KnowledgeService — document indexing, search, and multi-backend aggregation."""
+
+import json
+from typing import Any, AsyncIterator
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from gilbert.config import GilbertConfig
+from gilbert.core.documents.chunking import chunk_text
+from gilbert.core.documents.extractors import extract_text
+from gilbert.interfaces.knowledge import (
+    DocumentBackend,
+    DocumentContent,
+    DocumentMeta,
+    DocumentType,
+    SearchResponse,
+    SearchResult,
+)
+
+
+# --- Document type and metadata ---
+
+
+class TestDocumentMeta:
+    def test_document_id(self) -> None:
+        meta = DocumentMeta(source_id="local:docs", path="report.pdf", name="report.pdf",
+                           document_type=DocumentType.PDF)
+        assert meta.document_id == "local:docs:report.pdf"
+
+    def test_document_id_with_subpath(self) -> None:
+        meta = DocumentMeta(source_id="gdrive:lib", path="folder/doc.txt", name="doc.txt",
+                           document_type=DocumentType.TEXT)
+        assert meta.document_id == "gdrive:lib:folder/doc.txt"
+
+
+# --- Text extraction ---
+
+
+class TestExtractors:
+    def test_text_extraction(self) -> None:
+        meta = DocumentMeta(source_id="test", path="f.txt", name="f.txt",
+                           document_type=DocumentType.TEXT)
+        content = DocumentContent(meta=meta, data=b"Hello world")
+        assert extract_text(content) == "Hello world"
+
+    def test_markdown_extraction(self) -> None:
+        meta = DocumentMeta(source_id="test", path="f.md", name="f.md",
+                           document_type=DocumentType.MARKDOWN)
+        content = DocumentContent(meta=meta, data=b"# Title\n\nBody text")
+        assert "Title" in extract_text(content)
+        assert "Body text" in extract_text(content)
+
+    def test_json_extraction(self) -> None:
+        meta = DocumentMeta(source_id="test", path="f.json", name="f.json",
+                           document_type=DocumentType.JSON)
+        content = DocumentContent(meta=meta, data=b'{"key": "value"}')
+        text = extract_text(content)
+        assert "key" in text
+        assert "value" in text
+
+    def test_csv_extraction(self) -> None:
+        meta = DocumentMeta(source_id="test", path="f.csv", name="f.csv",
+                           document_type=DocumentType.CSV)
+        content = DocumentContent(meta=meta, data=b"name,age\nAlice,30\nBob,25")
+        text = extract_text(content)
+        assert "Alice" in text
+
+    def test_unknown_falls_back_to_text(self) -> None:
+        meta = DocumentMeta(source_id="test", path="f.xyz", name="f.xyz",
+                           document_type=DocumentType.UNKNOWN)
+        content = DocumentContent(meta=meta, data=b"some text")
+        assert extract_text(content) == "some text"
+
+
+# --- Chunking ---
+
+
+class TestChunking:
+    def test_basic_chunking(self) -> None:
+        text = "Paragraph one.\n\nParagraph two.\n\nParagraph three."
+        chunks = chunk_text(text, "doc1", chunk_size=50, chunk_overlap=10)
+        assert len(chunks) >= 1
+        assert all(c.document_id == "doc1" for c in chunks)
+
+    def test_respects_chunk_size(self) -> None:
+        # Create text with many paragraphs
+        text = "\n\n".join(f"Paragraph {i} with some content." for i in range(20))
+        chunks = chunk_text(text, "doc1", chunk_size=100, chunk_overlap=20)
+        for c in chunks:
+            # Allow some tolerance for overlap
+            assert len(c.text) <= 200  # chunk_size + reasonable overlap
+
+    def test_empty_text_returns_empty(self) -> None:
+        assert chunk_text("", "doc1") == []
+        assert chunk_text("   ", "doc1") == []
+
+    def test_single_paragraph(self) -> None:
+        chunks = chunk_text("Hello world.", "doc1")
+        assert len(chunks) == 1
+        assert chunks[0].text == "Hello world."
+        assert chunks[0].chunk_index == 0
+
+    def test_page_number_detection(self) -> None:
+        text = "--- Page 1 ---\nContent on page 1.\n\n--- Page 2 ---\nContent on page 2."
+        chunks = chunk_text(text, "doc1", chunk_size=5000)
+        assert chunks[0].page_number == 1
+
+    def test_chunks_have_sequential_indices(self) -> None:
+        text = "\n\n".join(f"Para {i}." for i in range(10))
+        chunks = chunk_text(text, "doc1", chunk_size=30, chunk_overlap=5)
+        indices = [c.chunk_index for c in chunks]
+        assert indices == list(range(len(chunks)))
+
+
+# --- Config ---
+
+
+class TestConfig:
+    def test_knowledge_defaults(self) -> None:
+        config = GilbertConfig.model_validate({})
+        assert config.knowledge.enabled is False
+        assert config.knowledge.chunk_size == 1000
+        assert config.knowledge.sources == []
+
+    def test_knowledge_full(self) -> None:
+        raw = {
+            "knowledge": {
+                "enabled": True,
+                "sync_interval_seconds": 120,
+                "sources": [
+                    {"type": "local", "name": "docs", "path": "/tmp/docs"},
+                    {"type": "gdrive", "name": "lib", "account": "drive", "folder_id": "abc123"},
+                ],
+            }
+        }
+        config = GilbertConfig.model_validate(raw)
+        assert config.knowledge.enabled is True
+        assert len(config.knowledge.sources) == 2
+        assert config.knowledge.sources[0].type == "local"
+        assert config.knowledge.sources[1].folder_id == "abc123"
+
+
+# --- SearchResult / SearchResponse ---
+
+
+class TestSearchModels:
+    def test_search_response(self) -> None:
+        results = [
+            SearchResult(
+                document_id="local:docs:report.pdf",
+                source_id="local:docs",
+                path="report.pdf",
+                name="report.pdf",
+                chunk_text="Revenue increased by 15%.",
+                relevance_score=0.92,
+                chunk_index=3,
+                page_number=5,
+                document_type=DocumentType.PDF,
+            )
+        ]
+        response = SearchResponse(query="revenue growth", results=results, total_documents_searched=50)
+        assert response.query == "revenue growth"
+        assert len(response.results) == 1
+        assert response.results[0].relevance_score == 0.92

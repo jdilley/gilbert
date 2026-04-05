@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Gilbert — Documents{% endblock %}
+{% block content %}
+<h1>Document Knowledge Store</h1>
+<p class="subtitle">{{ documents | length }} documents across {{ sources | length }} sources</p>
+
+<div style="margin-bottom:1rem;display:flex;gap:0.5rem;align-items:center">
+    <a href="/documents" class="btn-sm {% if not current_source %}btn-primary{% endif %}" style="text-decoration:none">All</a>
+    {% for src in sources %}
+    <a href="/documents?source={{ src.source_id }}" class="btn-sm {% if current_source == src.source_id %}btn-primary{% endif %}" style="text-decoration:none">
+        {{ src.display_name }}
+    </a>
+    {% endfor %}
+    <span class="nav-spacer"></span>
+    <a href="/documents/search" class="btn-sm" style="text-decoration:none">Search</a>
+</div>
+
+<table class="config-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Source</th>
+            <th>Type</th>
+            <th>Size</th>
+            <th>Modified</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for doc in documents %}
+        <tr>
+            <td><a href="{{ doc.serve_url }}" class="entity-link">{{ doc.name }}</a></td>
+            <td><span class="badge badge-muted">{{ doc.source_id }}</span></td>
+            <td><code>{{ doc.type }}</code></td>
+            <td><span class="muted">{{ "%.1f KB" | format(doc.size / 1024) if doc.size else '—' }}</span></td>
+            <td><span class="muted">{{ doc.modified[:10] if doc.modified else '—' }}</span></td>
+        </tr>
+        {% endfor %}
+        {% if not documents %}
+        <tr><td colspan="5" class="muted" style="text-align:center">No documents found</td></tr>
+        {% endif %}
+    </tbody>
+</table>
+{% endblock %}

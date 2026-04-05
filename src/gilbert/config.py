@@ -181,6 +181,30 @@ class PresenceConfig(BaseModel):
     settings: dict[str, Any] = {}
 
 
+class DocumentSourceConfig(BaseModel):
+    """Configuration for a single document source/backend."""
+
+    type: str  # "local" or "gdrive"
+    name: str
+    enabled: bool = True
+    path: str = ""  # local filesystem path
+    account: str = ""  # google account profile name
+    folder_id: str = ""  # google drive folder ID
+    shared_drive_id: str = ""  # google shared drive ID
+
+
+class KnowledgeConfig(BaseModel):
+    """Document knowledge store configuration."""
+
+    enabled: bool = False
+    sources: list[DocumentSourceConfig] = []
+    sync_interval_seconds: int = 300
+    chunk_size: int = 1000
+    chunk_overlap: int = 200
+    max_search_results: int = 10
+    chromadb_path: str = ".gilbert/chromadb"
+
+
 class DoorbellConfig(BaseModel):
     """Doorbell monitoring configuration."""
 
@@ -212,6 +236,7 @@ class GilbertConfig(BaseModel):
     auth: AuthConfig = AuthConfig()
     google: GoogleConfig = GoogleConfig()
     tunnel: TunnelConfig = TunnelConfig()
+    knowledge: KnowledgeConfig = KnowledgeConfig()
     presence: PresenceConfig = PresenceConfig()
     doorbell: DoorbellConfig = DoorbellConfig()
     speaker: SpeakerConfig = SpeakerConfig()

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Gilbert — Document Search{% endblock %}
+{% block content %}
+<div class="breadcrumb">
+    <a href="/documents">Documents</a> &rsaquo; <strong>Search</strong>
+</div>
+<h1>Document Search</h1>
+
+<form method="GET" action="/documents/search" style="margin-bottom:1.5rem;display:flex;gap:0.5rem">
+    <input type="text" name="q" value="{{ query }}" placeholder="Search documents..." class="form-row" style="flex:1;padding:8px 12px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;font-size:0.95rem">
+    <button type="submit" class="btn-primary">Search</button>
+</form>
+
+{% if query %}
+<p class="subtitle">{{ results | length }} results for "{{ query }}"</p>
+
+{% for result in results %}
+<div class="service-card" style="padding:1rem;margin-bottom:0.75rem;border:1px solid var(--border);border-radius:8px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+        <strong>
+            <a href="{{ result.serve_url }}" class="entity-link">{{ result.name }}</a>
+        </strong>
+        <span>
+            <span class="badge badge-muted">{{ result.source_id }}</span>
+            <span class="badge">{{ result.relevance }}</span>
+            {% if result.page %}<span class="badge badge-muted">page {{ result.page }}</span>{% endif %}
+        </span>
+    </div>
+    <p class="muted" style="margin:0;font-size:0.9rem;line-height:1.5">{{ result.text }}</p>
+</div>
+{% endfor %}
+
+{% if not results and query %}
+<p class="muted">No results found.</p>
+{% endif %}
+{% endif %}
+{% endblock %}

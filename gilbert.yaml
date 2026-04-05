@@ -83,6 +83,23 @@ auth:
 #       scopes:
 #         - https://www.googleapis.com/auth/admin.directory.user.readonly
 
+knowledge:
+  enabled: false
+  sync_interval_seconds: 300
+  chunk_size: 1000
+  chunk_overlap: 200
+  max_search_results: 10
+  chromadb_path: .gilbert/chromadb
+  sources: []
+  # sources:
+  #   - type: local
+  #     name: docs
+  #     path: ./documents
+  #   - type: gdrive
+  #     name: library
+  #     account: drive
+  #     folder_id: "your-folder-id"
+
 presence:
   enabled: false
   backend: unifi

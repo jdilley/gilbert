@@ -162,6 +162,11 @@ class Gilbert:
                 MusicService(music_backend, self.config.music.credential)
             )
 
+        if self.config.knowledge.enabled:
+            from gilbert.core.services.knowledge import KnowledgeService
+
+            self.service_manager.register(KnowledgeService())
+
         if self.config.presence.enabled:
             from gilbert.core.services.presence import PresenceService
 

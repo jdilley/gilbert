@@ -17,6 +17,13 @@ _ALL_CARDS = [
         "required_role": "everyone",
     },
     {
+        "title": "Documents",
+        "description": "Browse and search the document knowledge store.",
+        "url": "/documents",
+        "icon": "&#128196;",  # page
+        "required_role": "user",
+    },
+    {
         "title": "Roles & Access",
         "description": "Manage roles, user permissions, and tool access.",
         "url": "/roles",

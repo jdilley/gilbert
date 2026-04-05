@@ -18,3 +18,4 @@
 - [Scheduler Service](memory-scheduler-service.md) — system and user timers/alarms with asyncio task loops
 - [Doorbell Service](memory-doorbell-service.md) — UniFi Protect ring detection, publishes doorbell.ring events
 - [Access Control](memory-access-control.md) — RBAC with role hierarchy (admin/user/everyone), per-tool permissions
+- [Knowledge Service](memory-knowledge-service.md) — document store with ChromaDB vector search, local + Google Drive backends

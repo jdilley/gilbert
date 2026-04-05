@@ -1,0 +1,538 @@
+"""Knowledge service — document indexing, vector search, and multi-backend aggregation."""
+
+import json
+import logging
+from pathlib import Path
+from typing import Any
+
+from gilbert.core.documents.chunking import chunk_text
+from gilbert.core.documents.extractors import extract_text
+from gilbert.interfaces.knowledge import (
+    DocumentBackend,
+    DocumentMeta,
+    DocumentType,
+    SearchResponse,
+    SearchResult,
+)
+from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
+from gilbert.interfaces.tools import (
+    ToolDefinition,
+    ToolParameter,
+    ToolParameterType,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class KnowledgeService(Service):
+    """Aggregates multiple DocumentBackend instances and provides
+    ChromaDB-based vector search across all of them.
+
+    Capabilities: knowledge, ai_tools
+    """
+
+    def __init__(self) -> None:
+        self._backends: dict[str, DocumentBackend] = {}
+        self._chroma_client: Any = None
+        self._collection: Any = None
+        self._chunk_size: int = 1000
+        self._chunk_overlap: int = 200
+        self._max_results: int = 10
+        self._sync_interval: int = 300
+
+    def service_info(self) -> ServiceInfo:
+        return ServiceInfo(
+            name="knowledge",
+            capabilities=frozenset({"knowledge", "ai_tools"}),
+            optional=frozenset({"scheduler", "google_api", "configuration", "credentials"}),
+        )
+
+    @property
+    def backends(self) -> dict[str, DocumentBackend]:
+        return dict(self._backends)
+
+    def get_backend(self, source_id: str) -> DocumentBackend | None:
+        return self._backends.get(source_id)
+
+    async def start(self, resolver: ServiceResolver) -> None:
+        # Load config
+        config_svc = resolver.get_capability("configuration")
+        sources: list[dict[str, Any]] = []
+        if config_svc is not None:
+            from gilbert.core.services.configuration import ConfigurationService
+
+            if isinstance(config_svc, ConfigurationService):
+                section = config_svc.get_section("knowledge")
+                self._chunk_size = int(section.get("chunk_size", 1000))
+                self._chunk_overlap = int(section.get("chunk_overlap", 200))
+                self._max_results = int(section.get("max_search_results", 10))
+                self._sync_interval = int(section.get("sync_interval_seconds", 300))
+                sources = section.get("sources", [])
+                chromadb_path = section.get("chromadb_path", ".gilbert/chromadb")
+
+        # Initialize ChromaDB
+        try:
+            import chromadb
+
+            persist_dir = str(Path(chromadb_path if 'chromadb_path' in dir() else ".gilbert/chromadb"))
+            Path(persist_dir).mkdir(parents=True, exist_ok=True)
+            self._chroma_client = chromadb.PersistentClient(path=persist_dir)
+            self._collection = self._chroma_client.get_or_create_collection(
+                name="documents",
+                metadata={"hnsw:space": "cosine"},
+            )
+            logger.info("ChromaDB initialized at %s", persist_dir)
+        except ImportError:
+            logger.error("chromadb not installed — knowledge search disabled")
+        except Exception:
+            logger.exception("Failed to initialize ChromaDB")
+
+        # Initialize backends from config
+        google_svc = resolver.get_capability("google_api")
+
+        for src in sources:
+            if not isinstance(src, dict):
+                continue
+            if not src.get("enabled", True):
+                continue
+            src_type = src.get("type", "")
+            src_name = src.get("name", "")
+
+            try:
+                if src_type == "local":
+                    from gilbert.integrations.local_documents import LocalDocumentBackend
+
+                    backend = LocalDocumentBackend(name=src_name, base_path=src.get("path", ""))
+                    await backend.initialize({})
+                    self._backends[backend.source_id] = backend
+                    logger.info("Registered document source: %s", backend.source_id)
+
+                elif src_type == "gdrive":
+                    from gilbert.integrations.gdrive_documents import GoogleDriveDocumentBackend
+
+                    backend = GoogleDriveDocumentBackend(
+                        name=src_name,
+                        account=src.get("account", ""),
+                        folder_id=src.get("folder_id", ""),
+                        shared_drive_id=src.get("shared_drive_id", ""),
+                    )
+                    await backend.initialize({"_google_service": google_svc})
+                    self._backends[backend.source_id] = backend
+                    logger.info("Registered document source: %s", backend.source_id)
+
+                else:
+                    logger.warning("Unknown document source type: %s", src_type)
+            except Exception:
+                logger.exception("Failed to initialize document source: %s:%s", src_type, src_name)
+
+        # Register sync job with scheduler
+        scheduler = resolver.get_capability("scheduler")
+        if scheduler is not None and self._backends:
+            from gilbert.core.services.scheduler import SchedulerService
+            from gilbert.interfaces.scheduler import Schedule
+
+            if isinstance(scheduler, SchedulerService):
+                scheduler.add_job(
+                    name="knowledge-sync",
+                    schedule=Schedule.every(self._sync_interval),
+                    callback=self._sync_all,
+                    system=True,
+                )
+
+        logger.info(
+            "Knowledge service started — %d sources, ChromaDB %s",
+            len(self._backends),
+            "ready" if self._collection else "unavailable",
+        )
+
+    async def stop(self) -> None:
+        for backend in self._backends.values():
+            await backend.close()
+        self._backends.clear()
+
+    # --- Indexing ---
+
+    async def index_document(self, backend: DocumentBackend, meta: DocumentMeta) -> int:
+        """Index a single document into ChromaDB. Returns number of chunks created."""
+        if self._collection is None:
+            return 0
+
+        content = await backend.get_document(meta.path)
+        if content is None:
+            return 0
+
+        text = extract_text(content)
+        if not text.strip():
+            logger.debug("No text extracted from %s", meta.document_id)
+            return 0
+
+        chunks = chunk_text(
+            text, meta.document_id,
+            chunk_size=self._chunk_size,
+            chunk_overlap=self._chunk_overlap,
+        )
+        if not chunks:
+            return 0
+
+        doc_id = meta.document_id
+
+        # Remove old chunks for this document
+        try:
+            self._collection.delete(where={"document_id": doc_id})
+        except Exception:
+            pass  # May not exist yet
+
+        # Upsert new chunks
+        self._collection.upsert(
+            ids=[f"{doc_id}#chunk{c.chunk_index}" for c in chunks],
+            documents=[c.text for c in chunks],
+            metadatas=[
+                {
+                    "document_id": doc_id,
+                    "source_id": meta.source_id,
+                    "path": meta.path,
+                    "name": meta.name,
+                    "document_type": meta.document_type.value,
+                    "last_modified": meta.last_modified,
+                    "chunk_index": c.chunk_index,
+                    "page_number": c.page_number or -1,
+                }
+                for c in chunks
+            ],
+        )
+
+        logger.debug("Indexed %s: %d chunks", doc_id, len(chunks))
+        return len(chunks)
+
+    async def _sync_backend(self, backend: DocumentBackend) -> int:
+        """Sync a single backend. Returns number of documents indexed."""
+        try:
+            docs = await backend.list_documents()
+        except Exception:
+            logger.warning("Failed to list documents from %s", backend.source_id, exc_info=True)
+            return 0
+
+        indexed = 0
+        for meta in docs:
+            # Check if already indexed with same checksum
+            if self._collection is not None and meta.checksum:
+                try:
+                    existing = self._collection.get(
+                        where={"document_id": meta.document_id},
+                        limit=1,
+                        include=["metadatas"],
+                    )
+                    if existing and existing.get("metadatas"):
+                        stored_modified = existing["metadatas"][0].get("last_modified", "")
+                        if stored_modified == meta.last_modified:
+                            continue
+                except Exception:
+                    pass
+
+            try:
+                chunks = await self.index_document(backend, meta)
+                if chunks > 0:
+                    indexed += 1
+            except Exception:
+                logger.warning("Failed to index %s", meta.document_id, exc_info=True)
+
+        return indexed
+
+    async def _sync_all(self) -> None:
+        """Sync all backends."""
+        total = 0
+        for backend in self._backends.values():
+            count = await self._sync_backend(backend)
+            total += count
+        if total:
+            logger.info("Knowledge sync: indexed %d documents", total)
+
+    # --- Search ---
+
+    async def search(
+        self, query: str, n_results: int = 10, source_filter: str | None = None
+    ) -> SearchResponse:
+        """Search documents using semantic similarity."""
+        if self._collection is None:
+            return SearchResponse(query=query)
+
+        where_filter: dict[str, Any] | None = None
+        if source_filter:
+            where_filter = {"source_id": source_filter}
+
+        try:
+            results = self._collection.query(
+                query_texts=[query],
+                n_results=min(n_results, self._max_results),
+                where=where_filter,
+                include=["documents", "metadatas", "distances"],
+            )
+        except Exception:
+            logger.warning("ChromaDB search failed", exc_info=True)
+            return SearchResponse(query=query)
+
+        search_results: list[SearchResult] = []
+        docs = results.get("documents", [[]])[0]
+        metas = results.get("metadatas", [[]])[0]
+        distances = results.get("distances", [[]])[0]
+
+        for i, doc_text in enumerate(docs):
+            meta = metas[i] if i < len(metas) else {}
+            distance = distances[i] if i < len(distances) else 1.0
+            page = meta.get("page_number", -1)
+
+            search_results.append(SearchResult(
+                document_id=meta.get("document_id", ""),
+                source_id=meta.get("source_id", ""),
+                path=meta.get("path", ""),
+                name=meta.get("name", ""),
+                chunk_text=doc_text,
+                relevance_score=round(1.0 - distance, 4),
+                chunk_index=meta.get("chunk_index", 0),
+                page_number=page if page != -1 else None,
+                document_type=DocumentType(meta.get("document_type", "unknown")),
+            ))
+
+        return SearchResponse(
+            query=query,
+            results=search_results,
+            total_documents_searched=self._collection.count(),
+        )
+
+    # --- Backend routing ---
+
+    def _resolve_backend(self, document_id: str) -> tuple[DocumentBackend, str]:
+        """Parse 'source_id:path' and return (backend, path)."""
+        for sid, backend in self._backends.items():
+            prefix = sid + ":"
+            if document_id.startswith(prefix):
+                return backend, document_id[len(prefix):]
+        raise KeyError(f"No backend found for document: {document_id}")
+
+    # --- ToolProvider protocol ---
+
+    @property
+    def tool_provider_name(self) -> str:
+        return "knowledge"
+
+    def get_tools(self) -> list[ToolDefinition]:
+        return [
+            ToolDefinition(
+                name="search_documents",
+                description=(
+                    "Search the document knowledge base using natural language. "
+                    "Returns relevant passages with source references."
+                ),
+                parameters=[
+                    ToolParameter(
+                        name="query", type=ToolParameterType.STRING,
+                        description="Natural language search query.",
+                    ),
+                    ToolParameter(
+                        name="max_results", type=ToolParameterType.INTEGER,
+                        description="Maximum results (default 5).",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="source", type=ToolParameterType.STRING,
+                        description="Filter by source_id. Omit to search all.",
+                        required=False,
+                    ),
+                ],
+                required_role="user",
+            ),
+            ToolDefinition(
+                name="get_document",
+                description="Retrieve the full text content of a document by its ID.",
+                parameters=[
+                    ToolParameter(
+                        name="document_id", type=ToolParameterType.STRING,
+                        description="Document ID (source_id:path).",
+                    ),
+                ],
+                required_role="user",
+            ),
+            ToolDefinition(
+                name="list_documents",
+                description="List documents available in the knowledge store.",
+                parameters=[
+                    ToolParameter(
+                        name="source", type=ToolParameterType.STRING,
+                        description="Filter by source_id. Omit to list all.",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="prefix", type=ToolParameterType.STRING,
+                        description="Filter by path prefix.",
+                        required=False,
+                    ),
+                ],
+                required_role="user",
+            ),
+            ToolDefinition(
+                name="list_document_sources",
+                description="List all registered document sources/backends.",
+                required_role="user",
+            ),
+            ToolDefinition(
+                name="upload_document",
+                description="Upload a new document to a writable source and index it.",
+                parameters=[
+                    ToolParameter(
+                        name="source", type=ToolParameterType.STRING,
+                        description="Target source_id for upload.",
+                    ),
+                    ToolParameter(
+                        name="path", type=ToolParameterType.STRING,
+                        description="File path within the source.",
+                    ),
+                    ToolParameter(
+                        name="content", type=ToolParameterType.STRING,
+                        description="Text content to store.",
+                    ),
+                ],
+                required_role="admin",
+            ),
+            ToolDefinition(
+                name="index_document",
+                description="Manually trigger re-indexing of a specific document.",
+                parameters=[
+                    ToolParameter(
+                        name="document_id", type=ToolParameterType.STRING,
+                        description="Document ID to re-index.",
+                    ),
+                ],
+                required_role="admin",
+            ),
+        ]
+
+    async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        match name:
+            case "search_documents":
+                return await self._tool_search(arguments)
+            case "get_document":
+                return await self._tool_get_document(arguments)
+            case "list_documents":
+                return await self._tool_list_documents(arguments)
+            case "list_document_sources":
+                return self._tool_list_sources()
+            case "upload_document":
+                return await self._tool_upload(arguments)
+            case "index_document":
+                return await self._tool_index(arguments)
+            case _:
+                raise KeyError(f"Unknown tool: {name}")
+
+    async def _tool_search(self, arguments: dict[str, Any]) -> str:
+        query = arguments["query"]
+        max_results = int(arguments.get("max_results", 5))
+        source = arguments.get("source")
+
+        response = await self.search(query, n_results=max_results, source_filter=source)
+        return json.dumps({
+            "query": response.query,
+            "total_searched": response.total_documents_searched,
+            "results": [
+                {
+                    "document_id": r.document_id,
+                    "name": r.name,
+                    "source_id": r.source_id,
+                    "relevance": r.relevance_score,
+                    "text": r.chunk_text,
+                    "page": r.page_number,
+                    "type": r.document_type.value,
+                }
+                for r in response.results
+            ],
+        })
+
+    async def _tool_get_document(self, arguments: dict[str, Any]) -> str:
+        document_id = arguments["document_id"]
+        try:
+            backend, path = self._resolve_backend(document_id)
+        except KeyError as e:
+            return json.dumps({"error": str(e)})
+
+        content = await backend.get_document(path)
+        if content is None:
+            return json.dumps({"error": f"Document not found: {document_id}"})
+
+        text = extract_text(content)
+        return json.dumps({
+            "document_id": document_id,
+            "name": content.meta.name,
+            "type": content.meta.document_type.value,
+            "text": text[:50000],  # Cap at 50K chars for AI context
+        })
+
+    async def _tool_list_documents(self, arguments: dict[str, Any]) -> str:
+        source = arguments.get("source")
+        prefix = arguments.get("prefix", "")
+
+        all_docs: list[dict[str, Any]] = []
+        backends = [self._backends[source]] if source and source in self._backends else self._backends.values()
+
+        for backend in backends:
+            try:
+                docs = await backend.list_documents(prefix=prefix)
+                for d in docs:
+                    all_docs.append({
+                        "document_id": d.document_id,
+                        "name": d.name,
+                        "source_id": d.source_id,
+                        "type": d.document_type.value,
+                        "size": d.size_bytes,
+                        "modified": d.last_modified,
+                    })
+            except Exception:
+                logger.warning("Failed to list from %s", backend.source_id)
+
+        return json.dumps(all_docs)
+
+    def _tool_list_sources(self) -> str:
+        sources = [
+            {
+                "source_id": b.source_id,
+                "display_name": b.display_name,
+                "read_only": b.read_only,
+            }
+            for b in self._backends.values()
+        ]
+        return json.dumps(sources)
+
+    async def _tool_upload(self, arguments: dict[str, Any]) -> str:
+        source = arguments["source"]
+        path = arguments["path"]
+        content = arguments["content"]
+
+        backend = self._backends.get(source)
+        if backend is None:
+            return json.dumps({"error": f"Source not found: {source}"})
+        if backend.read_only:
+            return json.dumps({"error": f"Source is read-only: {source}"})
+
+        try:
+            meta = await backend.upload_document(path, content.encode("utf-8"))
+            # Auto-index
+            chunks = await self.index_document(backend, meta)
+            return json.dumps({
+                "status": "uploaded",
+                "document_id": meta.document_id,
+                "chunks_indexed": chunks,
+            })
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    async def _tool_index(self, arguments: dict[str, Any]) -> str:
+        document_id = arguments["document_id"]
+        try:
+            backend, path = self._resolve_backend(document_id)
+        except KeyError as e:
+            return json.dumps({"error": str(e)})
+
+        meta = await backend.get_metadata(path)
+        if meta is None:
+            return json.dumps({"error": f"Document not found: {document_id}"})
+
+        chunks = await self.index_document(backend, meta)
+        return json.dumps({"status": "indexed", "document_id": document_id, "chunks": chunks})

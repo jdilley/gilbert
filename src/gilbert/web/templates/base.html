@@ -19,6 +19,9 @@
             {% if has_roles %}
             <a href="/chat">Chat</a>
             {% endif %}
+            {% if is_logged_in or has_roles %}
+            <a href="/documents">Documents</a>
+            {% endif %}
             {% if is_admin %}
             <a href="/roles">Roles</a>
             <a href="/entities">Entities</a>
