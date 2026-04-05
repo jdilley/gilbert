@@ -53,6 +53,9 @@ output_ttl_seconds: 3600  # seconds before service-generated files are cleaned u
   # - source: https://github.com/user/gilbert-plugin-sonos
   #   enabled: true
 
+users:
+  sync_ttl_seconds: 3600  # how often to refresh users from external providers (seconds)
+
 auth:
   enabled: false
   providers:
@@ -79,6 +82,23 @@ auth:
 #       delegated_user: admin@example.com
 #       scopes:
 #         - https://www.googleapis.com/auth/admin.directory.user.readonly
+
+presence:
+  enabled: false
+  backend: unifi
+  poll_interval_seconds: 30
+  unifi_network:
+    host: ""
+    credential: ""
+    verify_ssl: false
+  unifi_protect:
+    host: ""
+    credential: ""
+    verify_ssl: false
+  device_person_map: {}
+  zone_aliases: {}
+  face_lookback_minutes: 30
+  badge_lookback_hours: 24
 
 ai:
   enabled: false

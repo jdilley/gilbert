@@ -158,6 +158,29 @@ class MusicConfig(BaseModel):
     settings: dict[str, Any] = {}
 
 
+class UniFiControllerConfig(BaseModel):
+    """Connection config for a single UniFi OS controller."""
+
+    host: str = ""
+    credential: str = ""
+    verify_ssl: bool = False
+
+
+class PresenceConfig(BaseModel):
+    """Presence detection configuration."""
+
+    enabled: bool = False
+    backend: str = "unifi"
+    poll_interval_seconds: int = 30
+    unifi_network: UniFiControllerConfig = UniFiControllerConfig()
+    unifi_protect: UniFiControllerConfig = UniFiControllerConfig()
+    device_person_map: dict[str, str] = {}
+    zone_aliases: dict[str, list[str]] = {}
+    face_lookback_minutes: int = 30
+    badge_lookback_hours: int = 24
+    settings: dict[str, Any] = {}
+
+
 class SpeakerConfig(BaseModel):
     """Speaker system configuration."""
 
@@ -181,6 +204,7 @@ class GilbertConfig(BaseModel):
     auth: AuthConfig = AuthConfig()
     google: GoogleConfig = GoogleConfig()
     tunnel: TunnelConfig = TunnelConfig()
+    presence: PresenceConfig = PresenceConfig()
     speaker: SpeakerConfig = SpeakerConfig()
     music: MusicConfig = MusicConfig()
 

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -29,13 +30,21 @@ class UserService(Service):
     external users on demand.
     """
 
+    # Default: refresh from providers at most once per hour
+    _DEFAULT_SYNC_TTL_SECONDS = 3600
+
     def __init__(
-        self, root_password_hash: str = "", default_roles: list[str] | None = None
+        self,
+        root_password_hash: str = "",
+        default_roles: list[str] | None = None,
+        sync_ttl_seconds: int | None = None,
     ) -> None:
         self._root_password_hash = root_password_hash
         self._default_roles = default_roles or ["user"]
+        self._sync_ttl = sync_ttl_seconds if sync_ttl_seconds is not None else self._DEFAULT_SYNC_TTL_SECONDS
         self._backend: UserBackend | None = None
         self._resolver: ServiceResolver | None = None
+        self._last_sync: float = 0.0  # monotonic timestamp of last provider sync
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
@@ -59,6 +68,17 @@ class UserService(Service):
         await backend.ensure_indexes()
         self._backend = backend
         self._resolver = resolver
+
+        # Load sync TTL from configuration if available
+        config_svc = resolver.get_capability("configuration")
+        if config_svc is not None:
+            from gilbert.core.services.configuration import ConfigurationService
+
+            if isinstance(config_svc, ConfigurationService):
+                section = config_svc.get_section("users")
+                ttl = section.get("sync_ttl_seconds")
+                if ttl is not None:
+                    self._sync_ttl = int(ttl)
 
         await self._ensure_root_user()
 
@@ -184,7 +204,7 @@ class UserService(Service):
         )
         return user
 
-    async def sync_providers(self) -> int:
+    async def sync_providers(self, force: bool = False) -> int:
         """Sync all external providers. Returns total users synced."""
         count = 0
         for provider in self._get_providers():
@@ -202,7 +222,14 @@ class UserService(Service):
                 logger.exception(
                     "Failed to sync from %s provider", provider.provider_type
                 )
+        self._last_sync = time.monotonic()
         return count
+
+    async def sync_if_stale(self) -> None:
+        """Sync providers if the TTL has elapsed since the last sync."""
+        elapsed = time.monotonic() - self._last_sync
+        if elapsed >= self._sync_ttl:
+            await self.sync_providers()
 
     # ---- Public API (delegates to backend with root-user guards) ----
 
@@ -214,7 +241,12 @@ class UserService(Service):
         return await self.backend.create_user(user_id, data)
 
     async def get_user(self, user_id: str) -> dict[str, Any] | None:
-        return await self.backend.get_user(user_id)
+        user = await self.backend.get_user(user_id)
+        if user is None:
+            # Not found locally — maybe it exists in a provider we haven't synced recently
+            await self.sync_if_stale()
+            user = await self.backend.get_user(user_id)
+        return user
 
     async def get_user_by_email(self, email: str) -> dict[str, Any] | None:
         """Get user by email. Checks providers if not found locally."""
@@ -239,8 +271,8 @@ class UserService(Service):
     async def list_users(
         self, limit: int | None = None, offset: int = 0
     ) -> list[dict[str, Any]]:
-        """List users, syncing from providers first."""
-        await self.sync_providers()
+        """List users, lazily syncing from providers if stale."""
+        await self.sync_if_stale()
         return await self.backend.list_users(limit=limit, offset=offset)
 
     async def delete_user(self, user_id: str) -> None:
@@ -254,6 +286,28 @@ class UserService(Service):
         if user_id == _ROOT_USER_ID:
             raise ValueError("Cannot link external providers to the root user")
         await self.backend.add_provider_link(user_id, provider_type, provider_user_id)
+
+    # --- Configurable protocol ---
+
+    @property
+    def config_namespace(self) -> str:
+        return "users"
+
+    def config_params(self) -> list["ConfigParam"]:
+        from gilbert.interfaces.configuration import ConfigParam
+
+        return [
+            ConfigParam(
+                key="sync_ttl_seconds", type=ToolParameterType.INTEGER,
+                description="How often to refresh users from external providers (seconds).",
+                default=3600,
+            ),
+        ]
+
+    async def on_config_changed(self, config: dict[str, Any]) -> None:
+        ttl = config.get("sync_ttl_seconds")
+        if ttl is not None:
+            self._sync_ttl = int(ttl)
 
     # --- ToolProvider protocol ---
 

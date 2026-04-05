@@ -24,6 +24,7 @@ from gilbert.core.services.credentials import CredentialService
 from gilbert.interfaces.ai import AIBackend
 from gilbert.interfaces.events import EventBus
 from gilbert.interfaces.music import MusicBackend
+from gilbert.interfaces.presence import PresenceBackend
 from gilbert.interfaces.plugin import Plugin
 from gilbert.interfaces.service import Service
 from gilbert.interfaces.speaker import SpeakerBackend
@@ -151,6 +152,12 @@ class Gilbert:
                 MusicService(music_backend, self.config.music.credential)
             )
 
+        if self.config.presence.enabled:
+            from gilbert.core.services.presence import PresenceService
+
+            presence_backend = self._create_presence_backend(self.config.presence.backend)
+            self.service_manager.register(PresenceService(presence_backend))
+
         if self.config.ai.enabled:
             ai_backend = self._create_ai_backend(self.config.ai.backend)
             self.service_manager.register(
@@ -162,6 +169,7 @@ class Gilbert:
         config_svc.register_factory("ai", self._factory_ai)
         config_svc.register_factory("speaker", self._factory_speaker)
         config_svc.register_factory("music", self._factory_music)
+        config_svc.register_factory("presence", self._factory_presence)
 
         # 9. Also register in old registry for backward compat
         self.registry.register(StorageBackend, storage)
@@ -239,6 +247,15 @@ class Gilbert:
         raise ValueError(f"Unknown music backend: {backend_name}")
 
     @staticmethod
+    def _create_presence_backend(backend_name: str) -> PresenceBackend:
+        """Create a presence backend by name."""
+        if backend_name == "unifi":
+            from gilbert.integrations.unifi import UniFiPresenceBackend
+
+            return UniFiPresenceBackend()
+        raise ValueError(f"Unknown presence backend: {backend_name}")
+
+    @staticmethod
     def _create_speaker_backend(backend_name: str) -> SpeakerBackend:
         """Create a speaker backend by name."""
         if backend_name == "sonos":
@@ -277,6 +294,13 @@ class Gilbert:
         """Create a MusicService from a config section."""
         backend = self._create_music_backend(config.get("backend", "spotify"))
         return MusicService(backend=backend, credential_name=config.get("credential", ""))
+
+    def _factory_presence(self, config: dict[str, Any]) -> Service:
+        """Create a PresenceService from a config section."""
+        from gilbert.core.services.presence import PresenceService
+
+        backend = self._create_presence_backend(config.get("backend", "unifi"))
+        return PresenceService(backend=backend)
 
     # --- Storage init ---
 
