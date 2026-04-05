@@ -48,49 +48,17 @@ Contents:
 
 Users customize Gilbert by creating `.gilbert/config.yaml`. The deep merge means you only need to specify the values you want to change.
 
-### Project Structure
+### Key Directories
 
-```
-gilbert/
-├── CLAUDE.md
-├── README.md
-├── pyproject.toml
-├── gilbert.yaml            # Default config (committed)
-├── .python-version         # Python version for uv
-├── .gitignore
-├── .gilbert/               # Per-installation data (gitignored)
-│   ├── config.yaml         # User overrides
-│   ├── gilbert.db          # Database
-│   └── *.log               # Log files
-├── src/
-│   └── gilbert/
-│       ├── __init__.py
-│       ├── config.py        # Config loading with layered merge
-│       ├── core/            # Core logic, orchestration, AI assistant
-│       │   ├── app.py       # Application bootstrap (Gilbert class)
-│       │   ├── device_manager.py
-│       │   ├── events.py    # InMemoryEventBus
-│       │   ├── logging.py   # Logging setup (colored console + file)
-│       │   └── registry.py  # Service registry (DI)
-│       ├── interfaces/      # ABCs / protocol definitions
-│       │   ├── devices.py   # Device, Light, Thermostat, Lock, DeviceProvider, etc.
-│       │   ├── events.py    # Event, EventBus
-│       │   ├── plugin.py
-│       │   ├── storage.py   # StorageBackend, Query, Filter, Index
-│       │   └── tts.py       # TTSBackend, SynthesisRequest, Voice, etc.
-│       ├── integrations/    # Concrete backend implementations
-│       │   └── elevenlabs_tts.py  # ElevenLabs TTS backend
-│       ├── plugins/         # Plugin loader and registry
-│       │   └── loader.py
-│       ├── storage/         # Data layer implementations
-│       │   └── sqlite.py    # SQLite JSON document store
-│       └── api/             # External API (if applicable)
-├── tests/
-│   ├── conftest.py
-│   ├── unit/                # Unit tests with mocks
-│   └── integration/         # DB tests against test SQLite
-└── plugins/                 # Built-in / example plugins
-```
+- `src/gilbert/interfaces/` — ABCs and protocol definitions (devices, storage, events, TTS, plugins)
+- `src/gilbert/core/` — Application bootstrap, service manager, device manager, event bus, logging
+- `src/gilbert/core/services/` — Service wrappers that expose components as discoverable services
+- `src/gilbert/integrations/` — Concrete backend implementations (e.g., ElevenLabs TTS)
+- `src/gilbert/storage/` — Storage backend implementations (SQLite)
+- `src/gilbert/plugins/` — Plugin loader
+- `tests/unit/` — Unit tests with mocks
+- `tests/integration/` — Tests against real backends (e.g., SQLite)
+- `.gilbert/` — Per-installation data directory (gitignored): config overrides, database, logs
 
 ## Agent Memory System
 
