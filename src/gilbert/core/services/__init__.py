@@ -1,5 +1,6 @@
 """Core service wrappers — thin adapters making existing components discoverable."""
 
+from gilbert.core.services.access_control import AccessControlService
 from gilbert.core.services.ai import AIService
 from gilbert.core.services.auth import AuthService
 from gilbert.core.services.doorbell import DoorbellService
@@ -14,6 +15,7 @@ from gilbert.core.services.tts import TTSService
 from gilbert.core.services.users import UserService
 
 __all__ = [
+    "AccessControlService",
     "AIService",
     "AuthService",
     "DoorbellService",

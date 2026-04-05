@@ -234,10 +234,12 @@ class TTSService(Service):
                         required=False,
                     ),
                 ],
+                required_role="everyone",
             ),
             ToolDefinition(
                 name="list_voices",
                 description="List all available TTS voices.",
+                required_role="everyone",
             ),
         ]
 

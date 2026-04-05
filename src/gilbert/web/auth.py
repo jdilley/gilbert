@@ -89,15 +89,33 @@ async def require_authenticated(request: Request) -> UserContext:
 
 
 def require_role(role: str) -> Any:
-    """Factory returning a dependency that checks for a specific role."""
+    """Factory returning a dependency that checks for a role using the hierarchy.
+
+    Uses AccessControlService if available, otherwise falls back to a
+    hardcoded built-in hierarchy.
+    """
+    # Fallback hierarchy when AccessControlService is unavailable
+    _BUILTIN_LEVELS = {"admin": 0, "user": 100, "everyone": 200}
 
     async def _check(
+        request: Request,
         user: UserContext = Depends(require_authenticated),  # noqa: B008
     ) -> UserContext:
-        if role not in user.roles:
-            raise HTTPException(
-                status_code=403, detail=f"Requires role: {role}"
-            )
-        return user
+        gilbert = getattr(request.app.state, "gilbert", None)
+        if gilbert is not None:
+            acl_svc = gilbert.service_manager.get_by_capability("access_control")
+            if acl_svc is not None:
+                required_level = acl_svc.get_role_level(role)
+                effective_level = acl_svc.get_effective_level(user)
+                if effective_level <= required_level:
+                    return user
+                raise HTTPException(status_code=403, detail=f"Requires role: {role}")
+
+        # Fallback: hardcoded levels
+        required_level = _BUILTIN_LEVELS.get(role, 100)
+        user_level = min((_BUILTIN_LEVELS.get(r, 100) for r in user.roles), default=200)
+        if user_level <= required_level:
+            return user
+        raise HTTPException(status_code=403, detail=f"Requires role: {role}")
 
     return _check

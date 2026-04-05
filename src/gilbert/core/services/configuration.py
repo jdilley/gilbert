@@ -320,6 +320,7 @@ class ConfigurationService(Service):
                         required=False,
                     ),
                 ],
+                required_role="admin",
             ),
             ToolDefinition(
                 name="set_configuration",
@@ -336,6 +337,7 @@ class ConfigurationService(Service):
                         description="The new value (will be parsed as the appropriate type).",
                     ),
                 ],
+                required_role="admin",
             ),
             ToolDefinition(
                 name="describe_configuration",
@@ -348,6 +350,7 @@ class ConfigurationService(Service):
                         required=False,
                     ),
                 ],
+                required_role="admin",
             ),
         ]
 

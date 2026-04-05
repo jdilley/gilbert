@@ -72,7 +72,7 @@
             <h4>AI Tools</h4>
             {% for tool in svc.tools %}
             <div class="tool">
-                <strong>{{ tool.name }}</strong> — {{ tool.description }}
+                <strong>{{ tool.name }}</strong> <span class="badge badge-muted">{{ tool.required_role }}</span> — {{ tool.description }}
                 {% if tool.parameters %}
                 <ul class="tool-params">
                     {% for p in tool.parameters %}

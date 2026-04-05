@@ -328,6 +328,7 @@ class UserService(Service):
                         required=False,
                     ),
                 ],
+                required_role="user",
             ),
             ToolDefinition(
                 name="get_user",
@@ -339,6 +340,7 @@ class UserService(Service):
                         description="The user ID or email to look up.",
                     ),
                 ],
+                required_role="user",
             ),
             ToolDefinition(
                 name="create_user",
@@ -355,11 +357,13 @@ class UserService(Service):
                         description="Display name for the user.",
                     ),
                 ],
+                required_role="admin",
             ),
             ToolDefinition(
                 name="sync_users",
                 description="Sync users from all external providers (e.g., Google Workspace).",
                 parameters=[],
+                required_role="admin",
             ),
         ]
 

@@ -20,6 +20,7 @@ dependencies = [
     "google-api-python-client>=2.193.0",
     "pyngrok>=8.0.0",
     "soco>=0.30.15",
+    "python-multipart>=0.0.22",
 ]
 
 [project.optional-dependencies]

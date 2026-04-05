@@ -3,9 +3,11 @@
 import json
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 
 from gilbert.core.app import Gilbert
+from gilbert.interfaces.auth import UserContext
+from gilbert.web.auth import require_role
 from gilbert.interfaces.storage import Query, StorageBackend
 from gilbert.web import templates
 
@@ -21,7 +23,7 @@ def _get_storage(gilbert: Gilbert) -> StorageBackend | None:
 
 
 @router.get("")
-async def collections_list(request: Request) -> Any:
+async def collections_list(request: Request, user: UserContext = Depends(require_role("admin"))) -> Any:
     """List all collections with entity counts."""
     gilbert: Gilbert = request.app.state.gilbert
     storage = _get_storage(gilbert)
@@ -40,7 +42,8 @@ async def collections_list(request: Request) -> Any:
 
 @router.get("/{collection}")
 async def collection_detail(
-    request: Request, collection: str, page: int = 1
+    request: Request, collection: str, page: int = 1,
+    user: UserContext = Depends(require_role("admin")),
 ) -> Any:
     """Browse entities within a collection."""
     gilbert: Gilbert = request.app.state.gilbert
@@ -73,7 +76,7 @@ async def collection_detail(
 
 
 @router.get("/{collection}/{entity_id:path}")
-async def entity_detail(request: Request, collection: str, entity_id: str) -> Any:
+async def entity_detail(request: Request, collection: str, entity_id: str, user: UserContext = Depends(require_role("admin"))) -> Any:
     """View a single entity's full data."""
     gilbert: Gilbert = request.app.state.gilbert
     storage = _get_storage(gilbert)

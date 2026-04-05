@@ -2,9 +2,11 @@
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 
 from gilbert.core.app import Gilbert
+from gilbert.interfaces.auth import UserContext
+from gilbert.web.auth import require_role
 from gilbert.core.services.configuration import ConfigurationService
 from gilbert.interfaces.configuration import Configurable
 from gilbert.interfaces.tools import ToolProvider
@@ -61,6 +63,7 @@ def _gather_services(gilbert: Gilbert) -> list[dict[str, Any]]:
                 {
                     "name": t.name,
                     "description": t.description,
+                    "required_role": t.required_role,
                     "parameters": [
                         {
                             "name": p.name,
@@ -80,7 +83,7 @@ def _gather_services(gilbert: Gilbert) -> list[dict[str, Any]]:
 
 
 @router.get("/system")
-async def system_browser(request: Request):  # type: ignore[no-untyped-def]
+async def system_browser(request: Request, user: UserContext = Depends(require_role("admin"))):  # type: ignore[no-untyped-def]
     gilbert: Gilbert = request.app.state.gilbert
     services = _gather_services(gilbert)
     return templates.TemplateResponse(request, "system.html", {"services": services})

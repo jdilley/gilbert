@@ -323,14 +323,17 @@ class PresenceService(Service):
                         description="The user ID to check.",
                     ),
                 ],
+                required_role="everyone",
             ),
             ToolDefinition(
                 name="who_is_here",
                 description="List all users who are currently present or nearby.",
+                required_role="everyone",
             ),
             ToolDefinition(
                 name="list_all_presence",
                 description="List presence state for all tracked users.",
+                required_role="everyone",
             ),
         ]
 

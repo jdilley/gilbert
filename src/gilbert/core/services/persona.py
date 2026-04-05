@@ -125,6 +125,7 @@ class PersonaService(Service):
             ToolDefinition(
                 name="get_persona",
                 description="Get the current AI persona (personality, tone, and behavioral instructions).",
+                required_role="everyone",
             ),
             ToolDefinition(
                 name="update_persona",
@@ -139,10 +140,12 @@ class PersonaService(Service):
                         description="The new persona text (full replacement).",
                     ),
                 ],
+                required_role="admin",
             ),
             ToolDefinition(
                 name="reset_persona",
                 description="Reset the AI persona to the default.",
+                required_role="admin",
             ),
         ]
 

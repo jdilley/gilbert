@@ -323,6 +323,7 @@ class SpeakerService(Service):
             ToolDefinition(
                 name="list_speakers",
                 description="List all discovered speakers with their current state, volume, and group info.",
+                required_role="everyone",
             ),
             ToolDefinition(
                 name="play_audio",
@@ -391,10 +392,12 @@ class SpeakerService(Service):
                         description="Speaker name or alias.",
                     ),
                 ],
+                required_role="everyone",
             ),
             ToolDefinition(
                 name="set_speaker_alias",
-                description="Assign an alias name to a speaker (e.g., 'Living Room Speaker' for 'Speaker 2').",
+                description="Assign an alias name to a speaker (e.g., 'Living Room Speaker' for 'Speaker 2'). Admin only.",
+                required_role="admin",
                 parameters=[
                     ToolParameter(
                         name="speaker",
@@ -410,7 +413,8 @@ class SpeakerService(Service):
             ),
             ToolDefinition(
                 name="remove_speaker_alias",
-                description="Remove an alias from a speaker.",
+                description="Remove an alias from a speaker. Admin only.",
+                required_role="admin",
                 parameters=[
                     ToolParameter(
                         name="alias",

@@ -71,6 +71,11 @@ class Gilbert:
         # 4. CredentialService
         self.service_manager.register(CredentialService(self.config.credentials))
 
+        # 4b. Access control (early — other services declare required_role)
+        from gilbert.core.services.access_control import AccessControlService
+
+        self.service_manager.register(AccessControlService())
+
         # 5. User service (always — users are foundational)
         root_hash = self._hash_root_password(self.config.auth.root_password)
         self.service_manager.register(

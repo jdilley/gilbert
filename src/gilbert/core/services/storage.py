@@ -4,6 +4,7 @@ import json
 import logging
 from typing import Any
 
+from gilbert.core.context import get_current_user
 from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.storage import Filter, FilterOp, Query, SortField, StorageBackend
@@ -21,12 +22,17 @@ class StorageService(Service):
 
     def __init__(self, backend: StorageBackend) -> None:
         self._backend = backend
+        self._resolver: ServiceResolver | None = None
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="storage",
             capabilities=frozenset({"entity_storage", "query_storage", "ai_tools"}),
+            optional=frozenset({"access_control"}),
         )
+
+    async def start(self, resolver: ServiceResolver) -> None:
+        self._resolver = resolver
 
     @property
     def backend(self) -> StorageBackend:
@@ -86,6 +92,7 @@ class StorageService(Service):
                         description="The entity data to store.",
                     ),
                 ],
+                required_role="admin",
             ),
             ToolDefinition(
                 name="get_entity",
@@ -102,6 +109,7 @@ class StorageService(Service):
                         description="The entity ID.",
                     ),
                 ],
+                required_role="everyone",
             ),
             ToolDefinition(
                 name="query_entities",
@@ -136,10 +144,12 @@ class StorageService(Service):
                         required=False,
                     ),
                 ],
+                required_role="everyone",
             ),
             ToolDefinition(
                 name="list_collections",
                 description="List all entity collection names.",
+                required_role="everyone",
             ),
         ]
 
@@ -156,8 +166,27 @@ class StorageService(Service):
             case _:
                 raise KeyError(f"Unknown tool: {name}")
 
+    def _check_collection_access(self, collection: str, write: bool = False) -> str | None:
+        """Check collection-level ACL. Returns an error message or None if allowed."""
+        if self._resolver is None:
+            return None
+        acl_svc = self._resolver.get_capability("access_control")
+        if acl_svc is None:
+            return None
+        user = get_current_user()
+        if write:
+            if not acl_svc.check_collection_write(user, collection):
+                return f"Permission denied: cannot write to collection '{collection}'"
+        else:
+            if not acl_svc.check_collection_read(user, collection):
+                return f"Permission denied: cannot read from collection '{collection}'"
+        return None
+
     async def _tool_store_entity(self, arguments: dict[str, Any]) -> str:
         collection = arguments["collection"]
+        err = self._check_collection_access(collection, write=True)
+        if err:
+            return json.dumps({"error": err})
         entity_id = arguments["id"]
         data = arguments["data"]
         await self._backend.put(collection, entity_id, data)
@@ -169,6 +198,9 @@ class StorageService(Service):
 
     async def _tool_get_entity(self, arguments: dict[str, Any]) -> str:
         collection = arguments["collection"]
+        err = self._check_collection_access(collection, write=False)
+        if err:
+            return json.dumps({"error": err})
         entity_id = arguments["id"]
         entity = await self._backend.get(collection, entity_id)
         if entity is None:
@@ -177,6 +209,9 @@ class StorageService(Service):
 
     async def _tool_query_entities(self, arguments: dict[str, Any]) -> str:
         collection = arguments["collection"]
+        err = self._check_collection_access(collection, write=False)
+        if err:
+            return json.dumps({"error": err})
 
         filters = [
             Filter(

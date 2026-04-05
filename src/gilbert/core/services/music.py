@@ -261,6 +261,7 @@ class MusicService(Service):
                         required=False,
                     ),
                 ],
+                required_role="everyone",
             ),
             ToolDefinition(
                 name="get_track_info",
@@ -272,6 +273,7 @@ class MusicService(Service):
                         description="The track ID.",
                     ),
                 ],
+                required_role="everyone",
             ),
             ToolDefinition(
                 name="get_album_info",
@@ -289,6 +291,7 @@ class MusicService(Service):
                         required=False,
                     ),
                 ],
+                required_role="everyone",
             ),
             ToolDefinition(
                 name="get_playlist",
@@ -300,6 +303,7 @@ class MusicService(Service):
                         description="The playlist ID.",
                     ),
                 ],
+                required_role="everyone",
             ),
             ToolDefinition(
                 name="play_track",

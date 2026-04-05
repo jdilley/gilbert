@@ -7,6 +7,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+from gilbert.core.context import get_current_user
 from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.scheduler import (
     JobCallback,
@@ -103,6 +104,7 @@ class SchedulerService(Service):
         callback: JobCallback,
         system: bool = False,
         enabled: bool = True,
+        owner: str = "",
     ) -> JobInfo:
         """Register a job. System jobs are not user-editable.
 
@@ -112,6 +114,7 @@ class SchedulerService(Service):
             raise ValueError(f"Job '{name}' already registered")
 
         job = _Job(name=name, schedule=schedule, callback=callback, system=system, enabled=enabled)
+        job.info.owner = owner
         self._jobs[name] = job
 
         if enabled:
@@ -126,13 +129,19 @@ class SchedulerService(Service):
         )
         return job.info
 
-    def remove_job(self, name: str) -> None:
-        """Remove a job. System jobs cannot be removed."""
+    def remove_job(self, name: str, requester_id: str = "") -> None:
+        """Remove a job. System jobs cannot be removed.
+
+        Non-admin users can only remove jobs they own.
+        """
         job = self._jobs.get(name)
         if job is None:
             raise KeyError(f"Job not found: {name}")
         if job.info.system:
             raise ValueError(f"Cannot remove system job: {name}")
+        # Ownership check: if requester is set and doesn't match owner, deny
+        if requester_id and job.info.owner and requester_id != job.info.owner:
+            raise PermissionError(f"Job '{name}' is owned by '{job.info.owner}'")
         if job.task is not None:
             job.task.cancel()
         del self._jobs[name]
@@ -252,6 +261,7 @@ class SchedulerService(Service):
             ToolDefinition(
                 name="list_timers",
                 description="List all active timers and alarms (both system and user).",
+                required_role="everyone",
             ),
             ToolDefinition(
                 name="set_timer",
@@ -374,12 +384,14 @@ class SchedulerService(Service):
                 ))
             logger.info("Timer '%s' fired: %s", timer_name, message or "(no message)")
 
+        user = get_current_user()
         try:
             self.add_job(
                 name=timer_name,
                 schedule=Schedule.once_after(seconds),
                 callback=_fire,
                 system=False,
+                owner=user.user_id,
             )
         except ValueError as e:
             return json.dumps({"error": str(e)})
@@ -413,12 +425,14 @@ class SchedulerService(Service):
                 ))
             logger.info("Alarm '%s' fired: %s", alarm_name, message or "(no message)")
 
+        user = get_current_user()
         try:
             self.add_job(
                 name=alarm_name,
                 schedule=sched,
                 callback=_fire,
                 system=False,
+                owner=user.user_id,
             )
         except ValueError as e:
             return json.dumps({"error": str(e)})
@@ -427,8 +441,12 @@ class SchedulerService(Service):
 
     def _tool_cancel_timer(self, arguments: dict[str, Any]) -> str:
         timer_name = arguments["name"]
+        user = get_current_user()
+        # Admin can cancel any timer; others can only cancel their own
+        is_admin = "admin" in user.roles or user.user_id == "system"
+        requester_id = "" if is_admin else user.user_id
         try:
-            self.remove_job(timer_name)
-        except (KeyError, ValueError) as e:
+            self.remove_job(timer_name, requester_id=requester_id)
+        except (KeyError, ValueError, PermissionError) as e:
             return json.dumps({"error": str(e)})
         return json.dumps({"status": "cancelled", "name": timer_name})

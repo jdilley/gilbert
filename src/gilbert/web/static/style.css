@@ -526,3 +526,95 @@ code {
 
 .chat-input-area button:hover { opacity: 0.9; }
 .chat-input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* --- Role management forms --- */
+.inline-input {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+}
+.inline-input:focus {
+    outline: 1px solid var(--accent);
+    border-color: var(--accent);
+}
+select.inline-input {
+    font-family: var(--font);
+    padding: 2px 4px;
+}
+.btn-sm {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+.btn-sm:hover { opacity: 0.85; }
+.btn-danger {
+    background: var(--red);
+}
+.btn-muted {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+}
+.btn-primary {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 8px 20px;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    margin-top: 0.5rem;
+}
+.btn-primary:hover { opacity: 0.85; }
+.form-row {
+    margin-bottom: 0.75rem;
+}
+.form-row label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-weight: 500;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+.form-row input[type="text"],
+.form-row input[type="number"] {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    width: 100%;
+    max-width: 300px;
+}
+.form-row input:focus {
+    outline: 1px solid var(--accent);
+    border-color: var(--accent);
+}
+.role-form {
+    padding: 1rem 0;
+}
+.checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 12px;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+.checkbox-label input[type="checkbox"] {
+    accent-color: var(--accent);
+}
+.provider-header td {
+    background: var(--surface);
+    padding-top: 1rem !important;
+    border-bottom: 1px solid var(--border);
+}

@@ -64,6 +64,7 @@ class JobInfo:
     schedule: Schedule
     state: JobState = JobState.PENDING
     system: bool = False
+    owner: str = ""  # user_id of creator (empty for system jobs)
     enabled: bool = True
     run_count: int = 0
     last_run: str = ""

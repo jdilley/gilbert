@@ -58,13 +58,14 @@ class AIService(Service):
         self._storage: StorageBackend | None = None
         self._resolver: ServiceResolver | None = None
         self._persona_svc: Any | None = None
+        self._acl_svc: Any | None = None
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="ai",
             capabilities=frozenset({"ai_chat"}),
             requires=frozenset({"credentials", "entity_storage", "persona"}),
-            optional=frozenset({"ai_tools", "configuration"}),
+            optional=frozenset({"ai_tools", "configuration", "access_control"}),
         )
 
     @property
@@ -107,6 +108,9 @@ class AIService(Service):
 
         # Resolve persona service
         self._persona_svc = resolver.require_capability("persona")
+
+        # Resolve access control (optional — if missing, no filtering)
+        self._acl_svc = resolver.get_capability("access_control")
 
         # Save resolver for lazy tool discovery
         self._resolver = resolver
@@ -214,7 +218,7 @@ class AIService(Service):
         messages.append(Message(role=MessageRole.USER, content=user_message))
 
         # Discover tools from all ai_tools providers
-        tools_by_name = self._discover_tools()
+        tools_by_name = self._discover_tools(user_ctx=user_ctx)
         tool_defs = [defn for _, defn in tools_by_name.values()]
 
         # Agentic loop
@@ -242,7 +246,7 @@ class AIService(Service):
 
             # Execute tool calls and append results
             tool_results = await self._execute_tool_calls(
-                response.message.tool_calls, tools_by_name
+                response.message.tool_calls, tools_by_name, user_ctx=user_ctx
             )
             messages.append(Message(role=MessageRole.TOOL_RESULT, tool_results=tool_results))
         else:
@@ -283,8 +287,14 @@ class AIService(Service):
 
     # --- Tool Discovery ---
 
-    def _discover_tools(self) -> dict[str, tuple[ToolProvider, ToolDefinition]]:
-        """Find all started services that implement ToolProvider and collect their tools."""
+    def _discover_tools(
+        self, user_ctx: UserContext | None = None
+    ) -> dict[str, tuple[ToolProvider, ToolDefinition]]:
+        """Find all started services that implement ToolProvider and collect their tools.
+
+        If user_ctx is provided and AccessControlService is available, filters
+        tools to only those the user has permission to use.
+        """
         tools_by_name: dict[str, tuple[ToolProvider, ToolDefinition]] = {}
         if self._resolver is None:
             return tools_by_name
@@ -303,6 +313,25 @@ class AIService(Service):
                     continue
                 tools_by_name[tool_def.name] = (svc, tool_def)
 
+        # Filter by RBAC permissions
+        if user_ctx is not None and self._acl_svc is not None:
+            from gilbert.core.services.access_control import AccessControlService
+
+            if isinstance(self._acl_svc, AccessControlService):
+                filtered = {
+                    name: (prov, tdef)
+                    for name, (prov, tdef) in tools_by_name.items()
+                    if self._acl_svc.check_tool_access(user_ctx, tdef)
+                }
+                removed = len(tools_by_name) - len(filtered)
+                if removed:
+                    logger.debug(
+                        "Filtered %d tools for user %s (effective level %d)",
+                        removed, user_ctx.user_id,
+                        self._acl_svc.get_effective_level(user_ctx),
+                    )
+                tools_by_name = filtered
+
         return tools_by_name
 
     # --- Tool Execution ---
@@ -311,6 +340,7 @@ class AIService(Service):
         self,
         tool_calls: list[ToolCall],
         tools_by_name: dict[str, tuple[ToolProvider, ToolDefinition]],
+        user_ctx: UserContext | None = None,
     ) -> list[ToolResult]:
         """Execute a batch of tool calls and return results."""
         results: list[ToolResult] = []
@@ -323,7 +353,24 @@ class AIService(Service):
                     is_error=True,
                 ))
                 continue
-            provider, _ = provider_and_def
+            provider, tool_def = provider_and_def
+
+            # Defense in depth: re-check permission before execution
+            if user_ctx is not None and self._acl_svc is not None:
+                from gilbert.core.services.access_control import AccessControlService
+
+                if (
+                    isinstance(self._acl_svc, AccessControlService)
+                    and user_ctx.user_id != "system"
+                    and not self._acl_svc.check_tool_access(user_ctx, tool_def)
+                ):
+                    results.append(ToolResult(
+                        tool_call_id=tc.tool_call_id,
+                        content=f"Permission denied: tool '{tc.tool_name}' requires higher privileges",
+                        is_error=True,
+                    ))
+                    continue
+
             try:
                 result_text = await provider.execute_tool(tc.tool_name, tc.arguments)
                 results.append(ToolResult(
