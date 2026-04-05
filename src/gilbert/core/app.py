@@ -8,7 +8,13 @@ from gilbert.core.events import InMemoryEventBus
 from gilbert.core.logging import setup_logging
 from gilbert.core.registry import ServiceRegistry
 from gilbert.core.service_manager import ServiceManager
-from gilbert.core.services import EventBusService, StorageService, TTSService
+from gilbert.core.services import (
+    AuthService,
+    EventBusService,
+    StorageService,
+    TTSService,
+    UserService,
+)
 from gilbert.core.services.ai import AIService
 from gilbert.core.services.configuration import ConfigurationService
 from gilbert.core.services.credentials import CredentialService
@@ -59,7 +65,20 @@ class Gilbert:
         # 4. CredentialService
         self.service_manager.register(CredentialService(self.config.credentials))
 
-        # 5. Register optional services (structural deps via constructor)
+        # 5. User service (always — users are foundational)
+        root_hash = self._hash_root_password(self.config.auth.root_password)
+        self.service_manager.register(
+            UserService(
+                root_password_hash=root_hash,
+                default_roles=self.config.auth.default_roles,
+            )
+        )
+
+        # 6. Auth service (if enabled)
+        if self.config.auth.enabled:
+            self.service_manager.register(AuthService(self.config.auth))
+
+        # 7. Register optional services (structural deps via constructor)
         if self.config.tts.enabled:
             tts_backend = self._create_tts_backend(self.config.tts.backend)
             self.service_manager.register(
@@ -72,16 +91,16 @@ class Gilbert:
                 AIService(ai_backend, self.config.ai.credential)
             )
 
-        # 6. Register factories for hot-swap support
+        # 8. Register factories for hot-swap support
         config_svc.register_factory("tts", self._factory_tts)
         config_svc.register_factory("ai", self._factory_ai)
 
-        # 7. Also register in old registry for backward compat
+        # 9. Also register in old registry for backward compat
         self.registry.register(StorageBackend, storage)
         self.registry.register(EventBus, event_bus)
         self.registry.register(ServiceManager, self.service_manager)
 
-        # 8. Load plugins (they can register more services)
+        # 10. Load plugins (they can register more services)
         loader = PluginLoader()
         for source in self.config.plugins:
             if source.enabled:
@@ -92,7 +111,7 @@ class Gilbert:
                 except Exception:
                     logger.exception("Failed to load plugin: %s", source.source)
 
-        # 9. Start all services (dependency resolution happens here)
+        # 11. Start all services (dependency resolution happens here)
         await self.service_manager.start_all()
 
         started = len(self.service_manager.started_services)
@@ -119,6 +138,17 @@ class Gilbert:
         await self.service_manager.stop_all()
 
         logger.info("Gilbert stopped")
+
+    # --- Helpers ---
+
+    @staticmethod
+    def _hash_root_password(password: str) -> str:
+        """Hash the root password from config. Returns empty string if unset."""
+        if not password:
+            return ""
+        from argon2 import PasswordHasher
+
+        return PasswordHasher().hash(password)
 
     # --- Backend factories ---
 

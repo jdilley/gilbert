@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from gilbert.core.context import get_current_user
 from gilbert.interfaces.ai import (
     AIBackend,
     AIRequest,
@@ -13,10 +14,11 @@ from gilbert.interfaces.ai import (
     MessageRole,
     StopReason,
 )
-from gilbert.interfaces.configuration import ConfigParam, Configurable
+from gilbert.interfaces.auth import UserContext
+from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.credentials import ApiKeyCredential
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
-from gilbert.interfaces.storage import StorageBackend
+from gilbert.interfaces.storage import Filter, FilterOp, Query, SortField, StorageBackend
 from gilbert.interfaces.tools import (
     ToolCall,
     ToolDefinition,
@@ -183,16 +185,20 @@ class AIService(Service):
         self,
         user_message: str,
         conversation_id: str | None = None,
+        user_ctx: UserContext | None = None,
     ) -> tuple[str, str]:
         """Send a user message and get an AI response (with full agentic loop).
 
         Args:
             user_message: The user's input text.
             conversation_id: Existing conversation ID, or None to start new.
+            user_ctx: Optional user context. Falls back to contextvar if None.
 
         Returns:
             (response_text, conversation_id) tuple.
         """
+        if user_ctx is None:
+            user_ctx = get_current_user()
         # Load or create conversation
         if conversation_id:
             messages = await self._load_conversation(conversation_id)
@@ -242,8 +248,8 @@ class AIService(Service):
                 conversation_id,
             )
 
-        # Persist conversation
-        await self._save_conversation(conversation_id, messages)
+        # Persist conversation with user ownership
+        await self._save_conversation(conversation_id, messages, user_ctx)
 
         # Return final text response
         final_text = response.message.content if response else ""
@@ -309,15 +315,40 @@ class AIService(Service):
 
     # --- Conversation Persistence ---
 
-    async def _save_conversation(self, conv_id: str, messages: list[Message]) -> None:
-        """Persist a conversation to storage."""
+    async def _save_conversation(
+        self,
+        conv_id: str,
+        messages: list[Message],
+        user_ctx: UserContext | None = None,
+    ) -> None:
+        """Persist a conversation to storage with optional user ownership."""
         if self._storage is None:
             return
-        data = {
+        data: dict[str, Any] = {
             "messages": [self._serialize_message(m) for m in messages],
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
+        if user_ctx is not None and user_ctx.user_id != "system":
+            data["user_id"] = user_ctx.user_id
         await self._storage.put(_COLLECTION, conv_id, data)
+
+    async def list_conversations(
+        self, user_id: str | None = None, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """List conversations, optionally filtered by owning user."""
+        if self._storage is None:
+            return []
+        filters: list[Filter] = []
+        if user_id:
+            filters.append(Filter(field="user_id", op=FilterOp.EQ, value=user_id))
+        return await self._storage.query(
+            Query(
+                collection=_COLLECTION,
+                filters=filters,
+                sort=[SortField(field="updated_at", descending=True)],
+                limit=limit,
+            )
+        )
 
     async def _load_conversation(self, conv_id: str) -> list[Message]:
         """Load a conversation from storage. Returns empty list if not found."""

@@ -43,6 +43,23 @@ output_ttl_seconds: 3600  # seconds before service-generated files are cleaned u
   # - source: https://github.com/user/gilbert-plugin-sonos
   #   enabled: true
 
+auth:
+  enabled: false
+  providers:
+    - type: local
+      enabled: true
+  default_roles: ["user"]
+  session_ttl_seconds: 86400
+  root_password: ""
+  # providers:
+  #   - type: google
+  #     enabled: true
+  #     credential: google_admin
+  #     domain: example.com
+  #     role_mappings:
+  #       - group: admins
+  #         role: admin
+
 ai:
   enabled: false
   backend: anthropic

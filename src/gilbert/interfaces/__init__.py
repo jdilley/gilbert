@@ -1,9 +1,5 @@
 """Gilbert interfaces — ABCs and protocol definitions."""
 
-from gilbert.interfaces.configuration import (
-    ConfigParam,
-    Configurable,
-)
 from gilbert.interfaces.ai import (
     AIBackend,
     AIRequest,
@@ -12,6 +8,15 @@ from gilbert.interfaces.ai import (
     MessageRole,
     StopReason,
     TokenUsage,
+)
+from gilbert.interfaces.auth import (
+    AuthInfo,
+    AuthProvider,
+    UserContext,
+)
+from gilbert.interfaces.configuration import (
+    ConfigParam,
+    Configurable,
 )
 from gilbert.interfaces.credentials import (
     AnyCredential,
@@ -46,8 +51,11 @@ from gilbert.interfaces.tts import (
     TTSBackend,
     Voice,
 )
+from gilbert.interfaces.users import UserBackend
 
 __all__ = [
+    "AuthInfo",
+    "AuthProvider",
     "ConfigParam",
     "Configurable",
     "AIBackend",
@@ -85,6 +93,8 @@ __all__ = [
     "ToolParameterType",
     "ToolProvider",
     "ToolResult",
+    "UserBackend",
+    "UserContext",
     "UsernamePasswordCredential",
     "Voice",
 ]

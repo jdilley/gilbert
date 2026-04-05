@@ -93,6 +93,34 @@ class AIConfig(BaseModel):
     settings: dict[str, Any] = {}
 
 
+class AuthRoleMapping(BaseModel):
+    """Maps an external group to a Gilbert role."""
+
+    group: str
+    role: str
+
+
+class AuthProviderConfig(BaseModel):
+    """Configuration for a single auth provider."""
+
+    type: str
+    enabled: bool = True
+    credential: str = ""
+    domain: str = ""
+    role_mappings: list[AuthRoleMapping] = []
+    settings: dict[str, Any] = {}
+
+
+class AuthConfig(BaseModel):
+    """Authentication and user management configuration."""
+
+    enabled: bool = False
+    providers: list[AuthProviderConfig] = [AuthProviderConfig(type="local")]
+    default_roles: list[str] = ["user"]
+    session_ttl_seconds: int = 86400
+    root_password: str = ""
+
+
 class GilbertConfig(BaseModel):
     """Top-level Gilbert configuration."""
 
@@ -104,6 +132,7 @@ class GilbertConfig(BaseModel):
     output_ttl_seconds: int = 3600
     tts: TTSConfig = TTSConfig()
     ai: AIConfig = AIConfig()
+    auth: AuthConfig = AuthConfig()
 
 
 def load_config(path: str | Path | None = None) -> GilbertConfig:

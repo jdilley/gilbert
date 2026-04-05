@@ -10,3 +10,4 @@
 - [Configuration and Data Directory](memory-config-and-data-dir.md) — layered YAML config, .gilbert/ data folder
 - [Service Registry](memory-service-registry.md) — legacy DI container, coexists with ServiceManager
 - [Multi-backend Aggregator Pattern](memory-multi-backend-pattern.md) — services with multiple backends use aggregator pattern
+- [User & Auth System](memory-user-auth-system.md) — multi-user support with local accounts, external providers, roles, sessions

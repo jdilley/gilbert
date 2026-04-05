@@ -19,13 +19,20 @@ def create_app(gilbert: Gilbert) -> FastAPI:
     # Store gilbert instance for route access
     app.state.gilbert = gilbert
 
+    # Auth middleware (works even when auth is disabled — falls through to SYSTEM)
+    from gilbert.web.auth import AuthMiddleware
+
+    app.add_middleware(AuthMiddleware)
+
     # Static files
     app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
 
     # Routes
+    from gilbert.web.routes.auth import router as auth_router
     from gilbert.web.routes.dashboard import router as dashboard_router
     from gilbert.web.routes.system import router as system_router
 
+    app.include_router(auth_router)
     app.include_router(dashboard_router)
     app.include_router(system_router)
 
