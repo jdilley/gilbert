@@ -54,3 +54,8 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
+
+[dependency-groups]
+dev = [
+    "reportlab>=4.4.10",
+]

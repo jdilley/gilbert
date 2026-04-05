@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screen — Gilbert</title>
+    <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background: #0d1117; color: #e6edf3; font-size: 15px; line-height: 1.5;
+    }
+
+    /* Setup */
+    .setup-container { display: flex; align-items: center; justify-content: center; height: 100%; }
+    .setup-card {
+        background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+        padding: 3em; max-width: 480px; width: 90%; text-align: center;
+    }
+    .setup-card h1 { font-size: 22px; font-weight: 700; color: #58a6ff; margin-bottom: 0.3em; letter-spacing: 0.03em; }
+    .setup-card .subtitle { font-size: 14px; color: #8b949e; margin-bottom: 2em; }
+    .setup-card label { display: block; text-align: left; font-size: 14px; font-weight: 600; color: #c9d1d9; margin-bottom: 0.5em; }
+    .setup-card input[type="text"] {
+        width: 100%; padding: 0.7em 1em; font-size: 16px; background: #0d1117;
+        border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; outline: none; transition: border-color 0.2s;
+    }
+    .setup-card input[type="text"]:focus { border-color: #58a6ff; }
+    .setup-card input[type="text"]::placeholder { color: #484f58; }
+    .setup-card .url-label { margin-top: 1.2em; }
+    .setup-card .optional { font-weight: 400; color: #484f58; font-size: 12px; }
+    .setup-card .btn-connect {
+        display: inline-block; margin-top: 1.5em; padding: 0.7em 2.5em; font-size: 15px; font-weight: 600;
+        background: #238636; color: #fff; border: none; border-radius: 6px; cursor: pointer; transition: background 0.15s;
+    }
+    .setup-card .btn-connect:hover { background: #2ea043; }
+    .setup-card .hint { margin-top: 1.5em; font-size: 13px; color: #484f58; line-height: 1.6; }
+    .setup-card .hint code { background: #21262d; padding: 0.15em 0.4em; border-radius: 3px; font-size: 12px; color: #8b949e; }
+
+    /* Idle */
+    .idle-container { display: none; align-items: center; justify-content: center; height: 100%; text-align: center; }
+    .idle-container.active { display: flex; }
+    .idle-content h2 { font-size: 28px; font-weight: 300; color: #8b949e; margin-bottom: 0.3em; }
+    .idle-content .screen-label { font-size: 16px; color: #58a6ff; font-weight: 600; margin-bottom: 1.5em; }
+    .idle-content .hint { font-size: 14px; color: #484f58; }
+    .idle-content .hint code { background: #21262d; padding: 0.15em 0.4em; border-radius: 3px; font-size: 13px; color: #8b949e; }
+
+    /* Loading */
+    .loading-container { display: none; align-items: center; justify-content: center; height: 100%; text-align: center; }
+    .loading-container.active { display: flex; }
+    .loading-spinner {
+        width: 48px; height: 48px; border: 4px solid #21262d; border-top: 4px solid #58a6ff;
+        border-radius: 50%; animation: spin 0.9s linear infinite; margin: 0 auto 1.5em;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-message { font-size: 18px; color: #8b949e; font-weight: 300; }
+
+    /* Error */
+    .error-container { display: none; align-items: center; justify-content: center; height: 100%; text-align: center; }
+    .error-container.active { display: flex; }
+    .error-icon {
+        width: 48px; height: 48px; line-height: 48px; border-radius: 50%; background: #da3633;
+        color: #fff; font-size: 28px; font-weight: 700; margin: 0 auto 1em;
+    }
+    .error-message { font-size: 16px; color: #f85149; max-width: 500px; }
+
+    /* Default URL */
+    .default-url-container { display: none; height: 100%; }
+    .default-url-container.active { display: flex; }
+    .default-url-frame { width: 100%; height: 100%; border: none; }
+
+    /* Display */
+    .display-container { display: none; flex-direction: column; height: 100%; }
+    .display-container.active { display: flex; }
+    .display-header {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 0.5em 1.5em; background: #161b22; border-bottom: 1px solid #30363d; flex-shrink: 0; min-height: 40px;
+    }
+    .display-header .doc-title { font-size: 14px; font-weight: 600; color: #e6edf3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .display-header .screen-name { font-size: 13px; color: #8b949e; flex-shrink: 0; margin-left: 1em; }
+    .display-body { flex: 1; overflow: hidden; }
+    .display-pdf { width: 100%; height: 100%; border: none; }
+    .display-image { max-width: 100%; max-height: 100%; object-fit: contain; display: block; margin: auto; padding: 1em; }
+
+    /* Markdown */
+    .display-markdown {
+        width: 100%; height: 100%; padding: 2em 3em;
+        font-size: 15px; line-height: 1.7; color: #e6edf3; background: #0d1117; overflow: auto; word-wrap: break-word;
+    }
+    .display-markdown h1 { font-size: 24px; font-weight: 700; color: #f0f6fc; margin: 1.2em 0 0.5em; padding-bottom: 0.3em; border-bottom: 1px solid #21262d; }
+    .display-markdown h2 { font-size: 20px; font-weight: 600; color: #f0f6fc; margin: 1em 0 0.4em; padding-bottom: 0.2em; border-bottom: 1px solid #21262d; }
+    .display-markdown h3 { font-size: 17px; font-weight: 600; color: #e6edf3; margin: 0.8em 0 0.3em; }
+    .display-markdown p { margin: 0.6em 0; }
+    .display-markdown strong { font-weight: 700; color: #f0f6fc; }
+    .display-markdown em { font-style: italic; color: #c9d1d9; }
+    .display-markdown ul, .display-markdown ol { margin: 0.5em 0; padding-left: 1.8em; }
+    .display-markdown li { margin: 0.25em 0; }
+    .display-markdown hr { border: none; border-top: 1px solid #30363d; margin: 1.2em 0; }
+    .display-markdown code.md-code-inline {
+        background: #161b22; padding: 0.15em 0.4em; border-radius: 4px;
+        font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace; font-size: 0.9em; color: #79c0ff;
+    }
+    .display-markdown pre.md-code-block {
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 1em; margin: 0.8em 0; overflow-x: auto;
+    }
+    .display-markdown pre.md-code-block code {
+        font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace; font-size: 13px; line-height: 1.5; color: #e6edf3;
+    }
+
+    /* Image Gallery */
+    .gallery-grid { display: grid; gap: 8px; height: 100%; padding: 8px; }
+    .gallery-grid.cols-1 { grid-template-columns: 1fr; }
+    .gallery-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+    .gallery-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+    .gallery-item { overflow: hidden; display: flex; flex-direction: column; background: #161b22; border-radius: 6px; }
+    .gallery-image { flex: 1; object-fit: contain; width: 100%; min-height: 0; }
+    .gallery-caption { font-size: 12px; color: #8b949e; padding: 4px 8px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    </style>
+</head>
+<body>
+    <!-- Setup state -->
+    <div class="setup-container" id="state-setup">
+        <div class="setup-card">
+            <h1>GILBERT</h1>
+            <p class="subtitle">Display Screen</p>
+            <label for="screen-name">Give this screen a name</label>
+            <input type="text" id="screen-name" placeholder="e.g. battery assembly screen" autocomplete="off">
+            <label for="default-url" class="url-label">Default URL <span class="optional">(optional)</span></label>
+            <input type="text" id="default-url" placeholder="e.g. https://cameras.local/live" autocomplete="off">
+            <button class="btn-connect" id="btn-connect" onclick="connectScreen()">Connect</button>
+            <p class="hint">
+                Name should end with "screen" (e.g. "battery assembly screen").<br>
+                Once connected, say:<br>
+                <code>"Hey Gilbert, display the AEM VCU pinout on the battery assembly screen"</code>
+            </p>
+            <p class="hint">
+                Screens with a default URL show that page when idle.<br>
+                <code>"Hey Gilbert, clear the battery assembly screen"</code> returns to it.
+            </p>
+        </div>
+    </div>
+
+    <!-- Idle state -->
+    <div class="idle-container" id="state-idle">
+        <div class="idle-content">
+            <h2>Waiting for content...</h2>
+            <p class="screen-label" id="idle-screen-name"></p>
+            <p class="hint">
+                Say <code>"Hey Gilbert, display &lt;document&gt; on <span class="idle-name-slot"></span>"</code>
+            </p>
+        </div>
+    </div>
+
+    <!-- Default URL state -->
+    <div class="default-url-container" id="state-default-url">
+        <iframe id="default-url-frame" class="default-url-frame" src="about:blank"></iframe>
+    </div>
+
+    <!-- Loading state -->
+    <div class="loading-container" id="state-loading">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p class="loading-message" id="loading-message">Loading...</p>
+        </div>
+    </div>
+
+    <!-- Error state -->
+    <div class="error-container" id="state-error">
+        <div class="error-content">
+            <p class="error-icon">!</p>
+            <p class="error-message" id="error-message"></p>
+        </div>
+    </div>
+
+    <!-- Display state -->
+    <div class="display-container" id="state-display">
+        <div class="display-header">
+            <span class="doc-title" id="display-title"></span>
+            <span class="screen-name" id="display-screen-name"></span>
+        </div>
+        <div class="display-body" id="display-body"></div>
+    </div>
+
+    <script>
+    var screenName = '';
+    var defaultUrl = '';
+    var evtSource = null;
+    var errorTimer = null;
+
+    function getParam(name) {
+        return new URLSearchParams(window.location.search).get(name);
+    }
+
+    var ALL_STATES = ['setup', 'idle', 'default-url', 'loading', 'error', 'display'];
+
+    function setState(state) {
+        for (var i = 0; i < ALL_STATES.length; i++) {
+            var el = document.getElementById('state-' + ALL_STATES[i]);
+            if (!el) continue;
+            if (ALL_STATES[i] === state) {
+                el.style.display = 'flex';
+                el.classList.add('active');
+            } else {
+                el.style.display = 'none';
+                el.classList.remove('active');
+            }
+        }
+    }
+
+    function goIdle() {
+        if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
+        if (defaultUrl) {
+            document.getElementById('default-url-frame').src = defaultUrl;
+            setState('default-url');
+        } else {
+            setState('idle');
+        }
+    }
+
+    function connectScreen() {
+        var nameInput = document.getElementById('screen-name');
+        var name = nameInput.value.trim();
+        if (!name) { nameInput.focus(); return; }
+
+        // Auto-append "screen" if name doesn't end with a screen-type word
+        var lower = name.toLowerCase();
+        var screenWords = ['screen', 'tv', 'display', 'monitor', 'panel'];
+        var lastWord = lower.split(/\s+/).pop();
+        if (screenWords.indexOf(lastWord) === -1) {
+            name = name + ' screen';
+            nameInput.value = name;
+        }
+
+        screenName = name;
+        defaultUrl = document.getElementById('default-url').value.trim();
+
+        // Update URL for bookmarkability
+        var url = new URL(window.location);
+        url.searchParams.set('name', name);
+        if (defaultUrl) {
+            url.searchParams.set('default_url', defaultUrl);
+        } else {
+            url.searchParams.delete('default_url');
+        }
+        history.replaceState(null, '', url);
+
+        startSSE(name, defaultUrl);
+    }
+
+    function startSSE(name, defUrl) {
+        if (evtSource) { evtSource.close(); }
+
+        document.getElementById('idle-screen-name').textContent = name;
+        var slots = document.querySelectorAll('.idle-name-slot');
+        for (var i = 0; i < slots.length; i++) { slots[i].textContent = name; }
+
+        goIdle();
+
+        var streamUrl = '/screens/stream?name=' + encodeURIComponent(name);
+        if (defUrl) { streamUrl += '&default_url=' + encodeURIComponent(defUrl); }
+        evtSource = new EventSource(streamUrl);
+
+        evtSource.addEventListener('show_document', function(e) {
+            showDocument(JSON.parse(e.data));
+        });
+        evtSource.addEventListener('show_text', function(e) {
+            showText(JSON.parse(e.data));
+        });
+        evtSource.addEventListener('show_images', function(e) {
+            showImages(JSON.parse(e.data));
+        });
+        evtSource.addEventListener('loading', function(e) {
+            var data = JSON.parse(e.data);
+            showLoading(data.message || 'Loading...');
+        });
+        evtSource.addEventListener('error', function(e) {
+            try {
+                var data = JSON.parse(e.data);
+                showError(data.message || 'Something went wrong.');
+            } catch (err) {
+                // Native EventSource error — auto-reconnect handles it
+            }
+        });
+        evtSource.addEventListener('clear', function(e) {
+            var data = JSON.parse(e.data);
+            if (data.default_url) {
+                defaultUrl = data.default_url;
+                document.getElementById('default-url-frame').src = data.default_url;
+                setState('default-url');
+            } else {
+                goIdle();
+            }
+        });
+    }
+
+    function showLoading(message) {
+        if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
+        document.getElementById('loading-message').textContent = message;
+        setState('loading');
+    }
+
+    function showError(message) {
+        if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
+        document.getElementById('error-message').textContent = message;
+        setState('error');
+        errorTimer = setTimeout(function() { errorTimer = null; goIdle(); }, 6000);
+    }
+
+    function showDocument(data) {
+        if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
+        document.getElementById('display-title').textContent = data.title || 'Document';
+        document.getElementById('display-screen-name').textContent = screenName;
+
+        var body = document.getElementById('display-body');
+        body.innerHTML = '';
+
+        if (data.content_type === 'image' && !data.tmp_token) {
+            var img = document.createElement('img');
+            img.src = data.serve_url;
+            img.className = 'display-image';
+            img.alt = data.title || 'Image';
+            body.appendChild(img);
+        } else {
+            var iframe = document.createElement('iframe');
+            iframe.src = data.tmp_token ? '/screens/tmp/' + data.tmp_token : data.serve_url;
+            iframe.className = 'display-pdf';
+            body.appendChild(iframe);
+        }
+
+        setState('display');
+    }
+
+    function renderMarkdown(text) {
+        var html = text;
+        html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        // Fenced code blocks
+        html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+            return '<pre class="md-code-block"><code>' + code.replace(/\n$/, '') + '</code></pre>';
+        });
+        // Inline code
+        html = html.replace(/`([^`]+)`/g, '<code class="md-code-inline">$1</code>');
+        // Headers
+        html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+        html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+        html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+        // Bold and italic
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
+        // Horizontal rule
+        html = html.replace(/^[-*]{3,}$/gm, '<hr>');
+        // Unordered list items
+        html = html.replace(/^[*\-] (.+)$/gm, '<li>$1</li>');
+        html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+        // Ordered list items
+        html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+        html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, function(match) {
+            if (match.indexOf('<ul>') === -1 && match.indexOf('<ol>') === -1) {
+                return '<ol>' + match + '</ol>';
+            }
+            return match;
+        });
+        // Paragraphs
+        var blocks = html.split(/\n{2,}/);
+        html = blocks.map(function(block) {
+            block = block.trim();
+            if (!block) return '';
+            if (/^<[a-z]/.test(block)) return block;
+            return '<p>' + block.replace(/\n/g, '<br>') + '</p>';
+        }).join('\n');
+        return html;
+    }
+
+    function showText(data) {
+        if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
+        document.getElementById('display-title').textContent = data.title || 'Content';
+        document.getElementById('display-screen-name').textContent = screenName;
+
+        var body = document.getElementById('display-body');
+        body.innerHTML = '';
+        var container = document.createElement('div');
+        container.className = 'display-markdown';
+        container.innerHTML = renderMarkdown(data.content || '');
+        body.appendChild(container);
+        setState('display');
+    }
+
+    function showImages(data) {
+        if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
+        document.getElementById('display-title').textContent = data.title || 'Images';
+        document.getElementById('display-screen-name').textContent = screenName;
+
+        var body = document.getElementById('display-body');
+        body.innerHTML = '';
+
+        var images = data.images || [];
+        var cols = images.length === 1 ? 1 : images.length <= 4 ? 2 : 3;
+        var grid = document.createElement('div');
+        grid.className = 'gallery-grid cols-' + cols;
+
+        for (var i = 0; i < images.length; i++) {
+            var item = document.createElement('div');
+            item.className = 'gallery-item';
+            var img = document.createElement('img');
+            img.src = images[i].url;
+            img.className = 'gallery-image';
+            img.alt = images[i].caption || '';
+            item.appendChild(img);
+            if (images[i].caption) {
+                var caption = document.createElement('div');
+                caption.className = 'gallery-caption';
+                caption.textContent = images[i].caption;
+                item.appendChild(caption);
+            }
+            grid.appendChild(item);
+        }
+
+        body.appendChild(grid);
+        setState('display');
+    }
+
+    // Auto-connect from URL params
+    (function() {
+        var name = getParam('name');
+        if (name) {
+            screenName = name;
+            defaultUrl = getParam('default_url') || '';
+            document.getElementById('screen-name').value = name;
+            document.getElementById('default-url').value = defaultUrl;
+            startSSE(name, defaultUrl);
+        } else {
+            setState('setup');
+            document.getElementById('screen-name').focus();
+        }
+    })();
+
+    // Enter key to connect
+    document.getElementById('screen-name').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') connectScreen();
+    });
+    document.getElementById('default-url').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') connectScreen();
+    });
+    </script>
+</body>
+</html>

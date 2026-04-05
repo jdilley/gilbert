@@ -179,6 +179,11 @@ class Gilbert:
 
             self.service_manager.register(DoorbellService())
 
+        if self.config.screens.enabled:
+            from gilbert.core.services.screens import ScreenService
+
+            self.service_manager.register(ScreenService())
+
         if self.config.ai.enabled:
             ai_backend = self._create_ai_backend(self.config.ai.backend)
             self.service_manager.register(

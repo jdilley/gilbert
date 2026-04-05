@@ -24,6 +24,13 @@ _ALL_CARDS = [
         "required_role": "user",
     },
     {
+        "title": "Screens",
+        "description": "Set up remote display screens for documents and content.",
+        "url": "/screens",
+        "icon": "&#128187;",  # desktop computer
+        "required_role": "everyone",
+    },
+    {
         "title": "Roles & Access",
         "description": "Manage roles, user permissions, and tool access.",
         "url": "/roles",

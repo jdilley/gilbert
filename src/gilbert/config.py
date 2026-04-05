@@ -201,7 +201,7 @@ class KnowledgeConfig(BaseModel):
     sync_interval_seconds: int = 300
     chunk_size: int = 1000
     chunk_overlap: int = 200
-    max_search_results: int = 10
+    max_search_results: int = 20
     chromadb_path: str = ".gilbert/chromadb"
 
 
@@ -211,6 +211,14 @@ class DoorbellConfig(BaseModel):
     enabled: bool = False
     poll_interval_seconds: float = 5.0
     doorbell_names: dict[str, str] = {}  # camera name → friendly door name
+
+
+class ScreenConfig(BaseModel):
+    """Remote display screen configuration."""
+
+    enabled: bool = False
+    tmp_ttl_seconds: int = 1800
+    cleanup_interval_seconds: int = 300
 
 
 class SpeakerConfig(BaseModel):
@@ -239,6 +247,7 @@ class GilbertConfig(BaseModel):
     knowledge: KnowledgeConfig = KnowledgeConfig()
     presence: PresenceConfig = PresenceConfig()
     doorbell: DoorbellConfig = DoorbellConfig()
+    screens: ScreenConfig = ScreenConfig()
     speaker: SpeakerConfig = SpeakerConfig()
     music: MusicConfig = MusicConfig()
 

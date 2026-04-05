@@ -12,13 +12,13 @@ from gilbert.interfaces.auth import UserContext
 # Paths that bypass authentication.
 # Exact matches checked first, then prefixes.
 # Paths that bypass authentication on local access.
-_PUBLIC_EXACT = ("/", "/auth/login", "/auth/logout", "/auth/session")
-_PUBLIC_PREFIXES = ("/auth/login/", "/static/", "/output/")
+_PUBLIC_EXACT = ("/", "/auth/login", "/auth/logout", "/auth/session", "/screens")
+_PUBLIC_PREFIXES = ("/auth/login/", "/static/", "/output/", "/screens/")
 
 # On tunnel access, only auth-related paths are public — everything else
 # requires an authenticated user with at least "user" role.
-_TUNNEL_PUBLIC_EXACT = ("/auth/login", "/auth/logout", "/auth/session")
-_TUNNEL_PUBLIC_PREFIXES = ("/auth/login/", "/static/")
+_TUNNEL_PUBLIC_EXACT = ("/auth/login", "/auth/logout", "/auth/session", "/screens")
+_TUNNEL_PUBLIC_PREFIXES = ("/auth/login/", "/static/", "/screens/stream", "/screens/tmp/")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

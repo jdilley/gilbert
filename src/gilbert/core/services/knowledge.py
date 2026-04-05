@@ -38,7 +38,7 @@ class KnowledgeService(Service):
         self._collection: Any = None
         self._chunk_size: int = 1000
         self._chunk_overlap: int = 200
-        self._max_results: int = 10
+        self._max_results: int = 20
         self._sync_interval: int = 300
         self._event_bus: EventBus | None = None
         self._storage: Any = None
@@ -205,11 +205,15 @@ class KnowledgeService(Service):
 
         content = await backend.get_document(meta.path)
         if content is None:
+            logger.warning("Failed to download document: %s (get_document returned None)", meta.document_id)
             return 0
 
         text = extract_text(content)
         if not text.strip():
-            logger.debug("No text extracted from %s", meta.document_id)
+            logger.warning(
+                "No text extracted from %s (%s, %d bytes) — may be scanned/image-only",
+                meta.document_id, meta.document_type.value, meta.size_bytes,
+            )
             return 0
 
         chunks = chunk_text(
@@ -218,6 +222,7 @@ class KnowledgeService(Service):
             chunk_overlap=self._chunk_overlap,
         )
         if not chunks:
+            logger.warning("Chunking produced 0 chunks for %s (%d chars of text)", meta.document_id, len(text))
             return 0
 
         doc_id = meta.document_id
@@ -336,6 +341,8 @@ class KnowledgeService(Service):
                 chunks = await self.index_document(backend, meta)
                 if chunks > 0:
                     indexed += 1
+                else:
+                    logger.warning("Indexing produced 0 chunks: %s", meta.name)
             except Exception:
                 logger.warning("Failed to index %s", meta.document_id, exc_info=True)
 
@@ -429,24 +436,114 @@ class KnowledgeService(Service):
     async def search(
         self, query: str, n_results: int = 10, source_filter: str | None = None
     ) -> SearchResponse:
-        """Search documents using semantic similarity."""
+        """Search documents using hybrid name + vector approach.
+
+        1. First, find documents whose names match query terms (fast, precise).
+        2. If a name match is found, search within that document for best chunks.
+        3. Also do a broad vector search and merge results (name-matched first).
+        """
         if self._collection is None:
             return SearchResponse(query=query)
 
-        where_filter: dict[str, Any] | None = None
+        effective_n = min(n_results, self._max_results)
+
+        # Phase 1: Find documents by name match
+        name_matched_doc_id = await self._find_document_by_name(query)
+
+        # Phase 2: If we found a name match, search within it for best chunks
+        name_results: list[SearchResult] = []
+        if name_matched_doc_id:
+            name_results = self._vector_search(
+                query, effective_n,
+                where_filter={"document_id": name_matched_doc_id},
+            )
+            if name_results:
+                logger.debug(
+                    "Name-matched document %s: %d chunks found",
+                    name_matched_doc_id, len(name_results),
+                )
+
+        # Phase 3: Broad vector search (may find different documents)
+        broad_filter: dict[str, Any] | None = None
         if source_filter:
-            where_filter = {"source_id": source_filter}
+            broad_filter = {"source_id": source_filter}
+        broad_results = self._vector_search(query, effective_n, where_filter=broad_filter)
+
+        # Merge: name-matched results first, then broad results (deduplicated)
+        seen_ids: set[str] = set()
+        merged: list[SearchResult] = []
+        for r in name_results + broad_results:
+            chunk_id = f"{r.document_id}#chunk{r.chunk_index}"
+            if chunk_id not in seen_ids:
+                seen_ids.add(chunk_id)
+                merged.append(r)
+
+        total = self._collection.count() if self._collection else 0
+        return SearchResponse(
+            query=query,
+            results=merged[:effective_n],
+            total_documents_searched=total,
+        )
+
+    async def _find_document_by_name(self, query: str) -> str | None:
+        """Find the best document whose name matches the query terms.
+
+        Searches tracked documents by name using substring matching.
+        Returns the document_id of the best match, or None.
+        """
+        if self._storage is None:
+            return None
+
+        from gilbert.interfaces.storage import Query as StoreQuery
+
+        try:
+            tracked = await self._storage.query(StoreQuery(collection="knowledge_documents"))
+        except Exception:
+            return None
+
+        if not tracked:
+            return None
+
+        # Score each document by how many query terms appear in its name
+        terms = [t.lower() for t in query.split() if len(t) >= 3]
+        if not terms:
+            return None
+
+        best_doc_id: str | None = None
+        best_score = 0
+        for doc in tracked:
+            name = (doc.get("name") or "").lower()
+            path = (doc.get("path") or "").lower()
+            searchable = f"{name} {path}"
+            score = sum(1 for t in terms if t in searchable)
+            if score > best_score:
+                best_score = score
+                best_doc_id = doc.get("document_id")
+
+        # Require at least 2 term matches, or 1 if query is short
+        min_matches = 1 if len(terms) <= 2 else 2
+        if best_score >= min_matches:
+            return best_doc_id
+        return None
+
+    def _vector_search(
+        self, query: str, n_results: int,
+        where_filter: dict[str, Any] | None = None,
+    ) -> list[SearchResult]:
+        """Run a vector search on ChromaDB. Returns SearchResult list."""
+        if self._collection is None:
+            return []
 
         try:
             results = self._collection.query(
                 query_texts=[query],
-                n_results=min(n_results, self._max_results),
+                n_results=n_results,
                 where=where_filter,
                 include=["documents", "metadatas", "distances"],
             )
         except Exception:
             logger.warning("ChromaDB search failed", exc_info=True)
-            return SearchResponse(query=query)
+            return []
 
         search_results: list[SearchResult] = []
         docs = results.get("documents", [[]])[0]
@@ -470,11 +567,7 @@ class KnowledgeService(Service):
                 document_type=DocumentType(meta.get("document_type", "unknown")),
             ))
 
-        return SearchResponse(
-            query=query,
-            results=search_results,
-            total_documents_searched=self._collection.count(),
-        )
+        return search_results
 
     # --- Backend routing ---
 
@@ -581,6 +674,14 @@ class KnowledgeService(Service):
                 ],
                 required_role="admin",
             ),
+            ToolDefinition(
+                name="reindex_all",
+                description=(
+                    "Force a full re-index of all documents. Clears tracking data "
+                    "so every document is treated as new. Runs in the background."
+                ),
+                required_role="admin",
+            ),
         ]
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
@@ -597,6 +698,8 @@ class KnowledgeService(Service):
                 return await self._tool_upload(arguments)
             case "index_document":
                 return await self._tool_index(arguments)
+            case "reindex_all":
+                return await self._tool_reindex_all()
             case _:
                 raise KeyError(f"Unknown tool: {name}")
 
@@ -707,3 +810,29 @@ class KnowledgeService(Service):
 
         chunks = await self.index_document(backend, meta)
         return json.dumps({"status": "indexed", "document_id": document_id, "chunks": chunks})
+
+    async def _tool_reindex_all(self) -> str:
+        """Clear all tracking data and trigger a full re-index."""
+        # Clear tracking records so every document is treated as new
+        cleared = 0
+        if self._storage is not None:
+            from gilbert.interfaces.storage import Query
+
+            tracked = await self._storage.query(Query(collection="knowledge_documents"))
+            for doc in tracked:
+                doc_id = doc.get("_id", "")
+                if doc_id:
+                    await self._storage.delete("knowledge_documents", doc_id)
+                    cleared += 1
+
+        logger.info("Cleared %d tracking records — triggering full re-index", cleared)
+
+        # Trigger sync in background
+        import asyncio
+        asyncio.ensure_future(self._sync_all())
+
+        return json.dumps({
+            "status": "reindex_started",
+            "tracking_records_cleared": cleared,
+            "message": f"Cleared {cleared} tracking records. Full re-index running in background.",
+        })
