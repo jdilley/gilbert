@@ -1,27 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Gilbert — Chat{% endblock %}
 {% block content %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
 <div class="chat-layout">
     <!-- Sidebar: conversation history -->
     <aside class="chat-sidebar">
         <button id="new-chat" class="btn-primary btn-full">New Chat</button>
-        <div id="conversation-list" class="conversation-list">
-            {% for conv in conversations %}
-            <div class="conversation-item" data-id="{{ conv._id }}">
-                <span class="conversation-preview">
-                    {% set first_user = [] %}
-                    {% for m in conv.messages %}
-                        {% if m.role == "user" and not first_user %}
-                            {{ m.content[:60] }}
-                            {% if first_user.append(1) %}{% endif %}
-                        {% endif %}
-                    {% endfor %}
-                    {% if not first_user %}New conversation{% endif %}
-                </span>
-                <span class="conversation-meta muted">{{ conv.messages | length }} msgs</span>
-            </div>
-            {% endfor %}
-        </div>
+        <div id="conversation-list" class="conversation-list"></div>
     </aside>
 
     <!-- Main chat area -->
@@ -53,11 +39,22 @@
     const input = document.getElementById('chat-input');
     const submitBtn = document.getElementById('chat-submit');
     const newChatBtn = document.getElementById('new-chat');
+    const convListEl = document.getElementById('conversation-list');
     let conversationId = null;
     let sending = false;
 
     function scrollToBottom() {
         messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function renderMarkdown(text) {
+        if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+            return DOMPurify.sanitize(marked.parse(text));
+        }
+        // Fallback: escape HTML
+        const el = document.createElement('span');
+        el.textContent = text;
+        return el.innerHTML;
     }
 
     function appendMessage(role, content) {
@@ -74,7 +71,11 @@
 
         const body = document.createElement('div');
         body.className = 'chat-msg-body';
-        body.textContent = content;
+        if (role === 'assistant') {
+            body.innerHTML = renderMarkdown(content);
+        } else {
+            body.textContent = content;
+        }
 
         div.appendChild(label);
         div.appendChild(body);
@@ -119,6 +120,7 @@
                 const data = await resp.json();
                 conversationId = data.conversation_id;
                 appendMessage('assistant', data.response);
+                loadConversationList();
             } else if (resp.status === 401) {
                 window.location.href = '/auth/login';
             } else {
@@ -158,28 +160,82 @@
     newChatBtn.addEventListener('click', () => {
         conversationId = null;
         messagesEl.innerHTML = '<div class="chat-welcome"><h2>Chat with Gilbert</h2><p class="muted">Ask anything or request an action.</p></div>';
-        document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
+        convListEl.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
     });
 
-    // Load conversation from sidebar.
-    document.querySelectorAll('.conversation-item').forEach(el => {
-        el.addEventListener('click', async () => {
-            const id = el.dataset.id;
-            document.querySelectorAll('.conversation-item').forEach(e => e.classList.remove('active'));
-            el.classList.add('active');
+    // Load conversation list from API.
+    async function loadConversationList() {
+        try {
+            const resp = await fetch('/chat/conversations');
+            if (!resp.ok) return;
+            const convos = await resp.json();
+            convListEl.innerHTML = '';
+            convos.forEach(c => {
+                const el = document.createElement('div');
+                el.className = 'conversation-item';
+                if (c.conversation_id === conversationId) el.classList.add('active');
+                el.dataset.id = c.conversation_id;
+                el.innerHTML =
+                    '<span class="conversation-preview">' + escapeHtml(c.title || 'New conversation') + '</span>' +
+                    '<span class="conversation-actions">' +
+                        '<button class="conv-rename-btn" title="Rename">&#9998;</button>' +
+                    '</span>';
+                el.querySelector('.conversation-preview').addEventListener('click', () => loadConversation(c.conversation_id));
+                el.querySelector('.conv-rename-btn').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    renameConversation(c.conversation_id, c.title);
+                });
+                convListEl.appendChild(el);
+            });
+        } catch (e) { /* ignore */ }
+    }
 
-            try {
-                const resp = await fetch('/chat/conversations/' + id);
-                if (!resp.ok) return;
-                const data = await resp.json();
-                conversationId = data.conversation_id;
-                messagesEl.innerHTML = '';
-                data.messages.forEach(m => appendMessage(m.role, m.content));
-            } catch (e) {
-                // ignore
-            }
+    function escapeHtml(text) {
+        const el = document.createElement('span');
+        el.textContent = text;
+        return el.innerHTML;
+    }
+
+    async function loadConversation(id) {
+        convListEl.querySelectorAll('.conversation-item').forEach(e => e.classList.remove('active'));
+        const active = convListEl.querySelector('[data-id="' + id + '"]');
+        if (active) active.classList.add('active');
+
+        try {
+            const resp = await fetch('/chat/conversations/' + id);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            conversationId = data.conversation_id;
+            messagesEl.innerHTML = '';
+            data.messages.forEach(m => appendMessage(m.role, m.content));
+        } catch (e) { /* ignore */ }
+    }
+
+    async function renameConversation(id, currentTitle) {
+        const title = prompt('Rename conversation:', currentTitle || '');
+        if (title === null || !title.trim()) return;
+        try {
+            const resp = await fetch('/chat/conversations/' + id + '/rename', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: title.trim() }),
+            });
+            if (resp.ok) loadConversationList();
+        } catch (e) { /* ignore */ }
+    }
+
+    // Refresh conversation list after sending a message.
+    const origSendMessage = sendMessage;
+
+    // Load initial conversation list.
+    loadConversationList();
+
+    // Listen for real-time events via WebSocket.
+    if (window.GilbertEvents) {
+        GilbertEvents.on('chat.conversation.renamed', function(event) {
+            loadConversationList();
         });
-    });
+    }
 })();
 </script>
 {% endblock %}

@@ -84,16 +84,22 @@ class SchedulerService(Service):
         logger.info("Scheduler service started")
 
     async def stop(self) -> None:
-        """Cancel all running job tasks."""
+        """Cancel all running job tasks with a timeout."""
         for job in self._jobs.values():
             if job.task is not None:
                 job.task.cancel()
-        # Wait for all tasks to finish
+        # Wait briefly for tasks to finish, then move on
         tasks = [j.task for j in self._jobs.values() if j.task is not None]
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=3.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Scheduler stop timed out — some jobs may still be running")
         self._jobs.clear()
-        logger.info("Scheduler stopped — all jobs cancelled")
+        logger.info("Scheduler stopped")
 
     # --- Job management ---
 
@@ -328,7 +334,7 @@ class SchedulerService(Service):
             ),
             ToolDefinition(
                 name="cancel_timer",
-                description="Cancel a user timer or alarm by name.",
+                description="Cancel a user timer or alarm by name. Cannot cancel system timers.",
                 parameters=[
                     ToolParameter(
                         name="name",
@@ -336,6 +342,30 @@ class SchedulerService(Service):
                         description="Name of the timer/alarm to cancel.",
                     ),
                 ],
+            ),
+            ToolDefinition(
+                name="pause_timer",
+                description="Pause a timer or alarm (admin only). System timers can only be paused, not cancelled.",
+                parameters=[
+                    ToolParameter(
+                        name="name",
+                        type=ToolParameterType.STRING,
+                        description="Name of the timer/alarm to pause.",
+                    ),
+                ],
+                required_role="admin",
+            ),
+            ToolDefinition(
+                name="resume_timer",
+                description="Resume a paused timer or alarm (admin only).",
+                parameters=[
+                    ToolParameter(
+                        name="name",
+                        type=ToolParameterType.STRING,
+                        description="Name of the timer/alarm to resume.",
+                    ),
+                ],
+                required_role="admin",
             ),
         ]
 
@@ -349,6 +379,10 @@ class SchedulerService(Service):
                 return await self._tool_set_alarm(arguments)
             case "cancel_timer":
                 return self._tool_cancel_timer(arguments)
+            case "pause_timer":
+                return self._tool_pause_timer(arguments)
+            case "resume_timer":
+                return self._tool_resume_timer(arguments)
             case _:
                 raise KeyError(f"Unknown tool: {name}")
 
@@ -450,3 +484,19 @@ class SchedulerService(Service):
         except (KeyError, ValueError, PermissionError) as e:
             return json.dumps({"error": str(e)})
         return json.dumps({"status": "cancelled", "name": timer_name})
+
+    def _tool_pause_timer(self, arguments: dict[str, Any]) -> str:
+        timer_name = arguments["name"]
+        try:
+            self.disable_job(timer_name)
+        except KeyError as e:
+            return json.dumps({"error": str(e)})
+        return json.dumps({"status": "paused", "name": timer_name})
+
+    def _tool_resume_timer(self, arguments: dict[str, Any]) -> str:
+        timer_name = arguments["name"]
+        try:
+            self.enable_job(timer_name)
+        except KeyError as e:
+            return json.dumps({"error": str(e)})
+        return json.dumps({"status": "resumed", "name": timer_name})

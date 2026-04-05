@@ -14,8 +14,10 @@ Multi-backend document knowledge store with ChromaDB vector search. Indexes docu
 - Capabilities: `knowledge`, `ai_tools`
 - Aggregates multiple backends in `dict[str, DocumentBackend]`
 - ChromaDB `PersistentClient` at `.gilbert/chromadb/`, collection "documents"
-- Background sync via scheduler system job (default 5min)
+- Background sync via scheduler system timer `knowledge-sync` (default 5min)
+- Initial sync on startup before registering periodic timer
 - Change detection: compares `last_modified` against ChromaDB metadata
+- Removal detection: documents that disappear from backend are removed from index
 
 ### Document Processing
 - `src/gilbert/core/documents/extractors.py` — text extraction per type (text, MD, CSV, JSON, YAML, PDF via pypdf, Word via python-docx, Excel via openpyxl, PowerPoint via python-pptx)
@@ -37,6 +39,11 @@ Multi-backend document knowledge store with ChromaDB vector search. Indexes docu
 - `/documents/search` — search interface with relevance scores
 - `/documents/serve/{source_id}/{path}` — stream documents from any backend
 - Dashboard card: "Documents" (user role)
+
+### Events Published
+- `knowledge.document.discovered` — new document found during sync
+- `knowledge.document.indexed` — document chunked and embedded in ChromaDB
+- `knowledge.document.removed` — document disappeared from backend, removed from index
 
 ### Dependencies (heavy)
 - chromadb (pulls sentence-transformers + torch ~2GB)

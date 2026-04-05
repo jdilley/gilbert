@@ -98,8 +98,10 @@ async def list_conversations(
             if m.get("role") == "user":
                 preview = m.get("content", "")[:100]
                 break
+        title = c.get("title", "") or preview[:60] or "New conversation"
         results.append({
             "conversation_id": c["_id"],
+            "title": title,
             "preview": preview,
             "updated_at": c.get("updated_at", ""),
             "message_count": len(messages),
@@ -116,22 +118,22 @@ async def get_conversation(
     """Load a conversation's messages."""
     ai_svc = _get_ai_service(request)
     gilbert: Gilbert = request.app.state.gilbert
-    storage = gilbert.service_manager.get_by_capability("storage")
+    storage_svc = gilbert.service_manager.get_by_capability("entity_storage")
 
-    if storage is None:
+    if storage_svc is None:
         raise HTTPException(status_code=503, detail="Storage not available")
 
-    from gilbert.interfaces.storage import StorageBackend
-
-    if not isinstance(storage, StorageBackend):
+    storage = getattr(storage_svc, "backend", None)
+    if storage is None:
         raise HTTPException(status_code=503, detail="Storage not available")
 
     data = await storage.get("ai_conversations", conversation_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Ensure user owns this conversation.
-    if data.get("user_id") and data["user_id"] != user.user_id:
+    # Ensure user owns this conversation (skip for guest users).
+    conv_owner = data.get("user_id", "")
+    if conv_owner and user.user_id not in ("system", "guest") and conv_owner != user.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
     # Filter to user/assistant messages for display.
@@ -146,6 +148,55 @@ async def get_conversation(
 
     return {
         "conversation_id": conversation_id,
+        "title": data.get("title", ""),
         "messages": display_messages,
         "updated_at": data.get("updated_at", ""),
     }
+
+
+@router.post("/conversations/{conversation_id}/rename")
+async def rename_conversation(
+    request: Request,
+    conversation_id: str,
+    user: UserContext = Depends(require_authenticated),  # noqa: B008
+) -> dict[str, Any]:
+    """Rename a conversation."""
+    gilbert: Gilbert = request.app.state.gilbert
+    storage_svc = gilbert.service_manager.get_by_capability("entity_storage")
+    if storage_svc is None:
+        raise HTTPException(status_code=503, detail="Storage not available")
+
+    storage = getattr(storage_svc, "backend", None)
+    if storage is None:
+        raise HTTPException(status_code=503, detail="Storage not available")
+
+    data = await storage.get("ai_conversations", conversation_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    conv_owner = data.get("user_id", "")
+    if conv_owner and user.user_id not in ("system", "guest") and conv_owner != user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    body = await request.json()
+    title = body.get("title", "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required")
+
+    data["title"] = title
+    await storage.put("ai_conversations", conversation_id, data)
+
+    # Emit event for WebSocket clients
+    event_bus_svc = gilbert.service_manager.get_by_capability("event_bus")
+    if event_bus_svc is not None:
+        from gilbert.core.services.event_bus import EventBusService
+        from gilbert.interfaces.events import Event
+
+        if isinstance(event_bus_svc, EventBusService):
+            await event_bus_svc.bus.publish(Event(
+                event_type="chat.conversation.renamed",
+                data={"conversation_id": conversation_id, "title": title},
+                source="chat",
+            ))
+
+    return {"status": "ok", "title": title}

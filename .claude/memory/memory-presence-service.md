@@ -10,7 +10,7 @@ User presence detection with polling, event publishing, and AI tools. UniFi impl
 
 ### Service
 - `src/gilbert/core/services/presence.py` — `PresenceService`
-- Polls backend every `poll_interval_seconds` (default 30s)
+- Polls via scheduler system timer `presence-poll` (default 30s)
 - Publishes events: `presence.arrived`, `presence.departed`, `presence.changed`
 - Resolves credentials for subsystem controllers and passes full config to backend
 - AI tools: `check_presence`, `who_is_here`, `list_all_presence`

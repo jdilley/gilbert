@@ -35,6 +35,7 @@ class DocumentMeta:
     last_modified: str = ""
     mime_type: str = ""
     checksum: str = ""
+    external_url: str = ""  # URL to access the document in its native system
     metadata: dict[str, str] = field(default_factory=dict)
 
     @property

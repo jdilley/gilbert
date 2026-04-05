@@ -7,7 +7,6 @@ events on the event bus:
 - ``presence.changed`` — any state transition
 """
 
-import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -44,7 +43,6 @@ class PresenceService(Service):
         self._config: dict[str, object] = {}
         self._poll_interval: float = _DEFAULT_POLL_INTERVAL
         self._event_bus: EventBus | None = None
-        self._poll_task: asyncio.Task[None] | None = None
         self._storage: Any = None
         # Last-known state per user for change detection
         self._last_state: dict[str, PresenceState] = {}
@@ -53,7 +51,7 @@ class PresenceService(Service):
         return ServiceInfo(
             name="presence",
             capabilities=frozenset({"presence", "ai_tools"}),
-            optional=frozenset({"configuration", "event_bus", "credentials", "entity_storage", "users"}),
+            optional=frozenset({"configuration", "event_bus", "credentials", "entity_storage", "users", "scheduler"}),
         )
 
     @property
@@ -118,8 +116,19 @@ class PresenceService(Service):
         except Exception:
             logger.warning("Failed to seed initial presence state", exc_info=True)
 
-        # Start polling loop
-        self._poll_task = asyncio.create_task(self._poll_loop())
+        # Register polling with scheduler
+        scheduler = resolver.get_capability("scheduler")
+        if scheduler is not None:
+            from gilbert.core.services.scheduler import SchedulerService
+            from gilbert.interfaces.scheduler import Schedule
+
+            if isinstance(scheduler, SchedulerService):
+                scheduler.add_job(
+                    name="presence-poll",
+                    schedule=Schedule.every(self._poll_interval),
+                    callback=self._check_for_changes,
+                    system=True,
+                )
 
         logger.info(
             "Presence service started (poll_interval=%.0fs, tracking=%d users)",
@@ -167,27 +176,9 @@ class PresenceService(Service):
         self._apply_config(config)
 
     async def stop(self) -> None:
-        if self._poll_task is not None:
-            self._poll_task.cancel()
-            try:
-                await self._poll_task
-            except asyncio.CancelledError:
-                pass
-            self._poll_task = None
         await self._backend.close()
 
     # --- Polling and event detection ---
-
-    async def _poll_loop(self) -> None:
-        """Periodically poll the backend and emit events on state changes."""
-        while True:
-            try:
-                await asyncio.sleep(self._poll_interval)
-                await self._check_for_changes()
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                logger.exception("Presence poll error")
 
     async def _check_for_changes(self) -> None:
         """Poll backend, compare to last-known state, publish events for changes."""

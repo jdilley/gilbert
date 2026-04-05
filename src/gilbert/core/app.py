@@ -165,7 +165,8 @@ class Gilbert:
         if self.config.knowledge.enabled:
             from gilbert.core.services.knowledge import KnowledgeService
 
-            self.service_manager.register(KnowledgeService())
+            has_gdrive = any(s.type == "gdrive" for s in self.config.knowledge.sources if s.enabled)
+            self.service_manager.register(KnowledgeService(has_gdrive=has_gdrive))
 
         if self.config.presence.enabled:
             from gilbert.core.services.presence import PresenceService

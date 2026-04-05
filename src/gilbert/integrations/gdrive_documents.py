@@ -77,7 +77,9 @@ class GoogleDriveDocumentBackend(DocumentBackend):
         self._folder_id = folder_id
         self._shared_drive_id = shared_drive_id
         self._drive: Any = None
-        self._file_cache: dict[str, dict[str, Any]] = {}  # path → Drive file metadata
+        self._file_cache: dict[str, dict[str, Any]] = {}
+        # Lock to serialize Drive API calls — httplib2 is not thread-safe
+        self._api_lock = asyncio.Lock()
 
     @property
     def source_id(self) -> str:
@@ -109,63 +111,90 @@ class GoogleDriveDocumentBackend(DocumentBackend):
         return mime in _EXPORT_MAP
 
     async def _list_files(self, prefix: str = "") -> list[dict[str, Any]]:
-        """List files from Drive, handling pagination."""
+        """List files from Drive recursively, handling pagination and subfolders."""
         if self._drive is None:
             return []
 
-        query_parts = ["trashed = false"]
-        if self._folder_id:
-            query_parts.append(f"'{self._folder_id}' in parents")
+        root = self._folder_id or "root"
+        files: list[dict[str, Any]] = []
+        await self._list_files_recursive(root, "", prefix, files)
+        return files
 
+    async def _list_files_recursive(
+        self, folder_id: str, path_prefix: str, filter_prefix: str,
+        out: list[dict[str, Any]],
+    ) -> None:
+        """Recursively list files in a folder and its subfolders."""
+        if self._drive is None:
+            return
+
+        query_parts = [f"'{folder_id}' in parents", "trashed = false"]
         q = " and ".join(query_parts)
         kwargs: dict[str, Any] = {
             "q": q,
-            "fields": "nextPageToken, files(id, name, mimeType, size, modifiedTime, md5Checksum)",
+            "fields": "nextPageToken, files(id, name, mimeType, size, modifiedTime, md5Checksum, webViewLink)",
             "pageSize": 100,
+            "includeItemsFromAllDrives": True,
+            "supportsAllDrives": True,
         }
-        if self._shared_drive_id:
-            kwargs["driveId"] = self._shared_drive_id
-            kwargs["includeItemsFromAllDrives"] = True
-            kwargs["supportsAllDrives"] = True
-            kwargs["corpora"] = "drive"
 
-        files: list[dict[str, Any]] = []
         page_token: str | None = None
+        subfolders: list[tuple[str, str]] = []  # (folder_id, path)
 
         while True:
             if page_token:
                 kwargs["pageToken"] = page_token
-            result = await asyncio.to_thread(
-                self._drive.files().list(**kwargs).execute
-            )
+            try:
+                async with self._api_lock:
+                    result = await asyncio.to_thread(
+                        self._drive.files().list(**kwargs).execute
+                    )
+            except Exception:
+                logger.warning("Drive API error listing folder %s", folder_id, exc_info=True)
+                return
             for f in result.get("files", []):
-                # Skip folders
+                name = f.get("name", "")
+                full_path = f"{path_prefix}{name}" if not path_prefix else f"{path_prefix}/{name}"
+
                 if f.get("mimeType") == "application/vnd.google-apps.folder":
+                    subfolders.append((f["id"], full_path))
                     continue
-                if prefix and not f.get("name", "").startswith(prefix):
+
+                if filter_prefix and not full_path.startswith(filter_prefix):
                     continue
-                files.append(f)
-                self._file_cache[f["name"]] = f
+
+                # Skip files we can't extract text from
+                doc_type = _type_from_mime(f.get("mimeType", ""), name)
+                if doc_type == DocumentType.UNKNOWN:
+                    continue
+
+                f["_path"] = full_path
+                out.append(f)
+                self._file_cache[full_path] = f
 
             page_token = result.get("nextPageToken")
             if not page_token:
                 break
 
-        return files
+        # Recurse into subfolders
+        for sub_id, sub_path in subfolders:
+            await self._list_files_recursive(sub_id, sub_path, filter_prefix, out)
 
     def _file_to_meta(self, f: dict[str, Any]) -> DocumentMeta:
         """Convert a Drive file to DocumentMeta."""
         mime = f.get("mimeType", "")
         name = f.get("name", "")
+        path = f.get("_path", name)  # full path including subfolders
         return DocumentMeta(
             source_id=self.source_id,
-            path=name,  # Use filename as path (flat structure within folder)
+            path=path,
             name=name,
             document_type=_type_from_mime(mime, name),
             size_bytes=int(f.get("size", 0)),
             last_modified=f.get("modifiedTime", ""),
             mime_type=mime,
             checksum=f.get("md5Checksum", f.get("modifiedTime", "")),
+            external_url=f.get("webViewLink", ""),
             metadata={"file_id": f.get("id", "")},
         )
 
@@ -180,7 +209,7 @@ class GoogleDriveDocumentBackend(DocumentBackend):
         # Fetch fresh
         files = await self._list_files()
         for f in files:
-            if f.get("name") == path:
+            if f.get("_path", f.get("name", "")) == path:
                 return self._file_to_meta(f)
         return None
 
@@ -224,7 +253,8 @@ class GoogleDriveDocumentBackend(DocumentBackend):
                     _, done = downloader.next_chunk()
                 return buf.getvalue()
 
-            return await asyncio.to_thread(_do_download)
+            async with self._api_lock:
+                return await asyncio.to_thread(_do_download)
         except Exception:
             logger.warning("Failed to download file %s", file_id, exc_info=True)
             return None
@@ -255,9 +285,10 @@ class GoogleDriveDocumentBackend(DocumentBackend):
         if self._shared_drive_id:
             kwargs["supportsAllDrives"] = True
 
-        result = await asyncio.to_thread(
-            self._drive.files().create(**kwargs).execute
-        )
+        async with self._api_lock:
+            result = await asyncio.to_thread(
+                self._drive.files().create(**kwargs).execute
+            )
         self._file_cache[result["name"]] = result
         logger.info("Uploaded to Drive: %s", path)
         return self._file_to_meta(result)
@@ -274,7 +305,8 @@ class GoogleDriveDocumentBackend(DocumentBackend):
         if self._shared_drive_id:
             kwargs["supportsAllDrives"] = True
 
-        await asyncio.to_thread(self._drive.files().delete(**kwargs).execute)
+        async with self._api_lock:
+            await asyncio.to_thread(self._drive.files().delete(**kwargs).execute)
         self._file_cache.pop(path, None)
 
     async def stream_document(self, path: str) -> AsyncIterator[bytes]:

@@ -59,11 +59,12 @@ class AIService(Service):
         self._resolver: ServiceResolver | None = None
         self._persona_svc: Any | None = None
         self._acl_svc: Any | None = None
+        self._current_conversation_id: str | None = None
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="ai",
-            capabilities=frozenset({"ai_chat"}),
+            capabilities=frozenset({"ai_chat", "ai_tools"}),
             requires=frozenset({"credentials", "entity_storage", "persona"}),
             optional=frozenset({"ai_tools", "configuration", "access_control"}),
         )
@@ -213,6 +214,8 @@ class AIService(Service):
         else:
             conversation_id = str(uuid.uuid4())
             messages = []
+
+        self._current_conversation_id = conversation_id
 
         # Append user message
         messages.append(Message(role=MessageRole.USER, content=user_message))
@@ -499,6 +502,72 @@ class AIService(Service):
                 break
 
         return truncated
+
+    # --- ToolProvider protocol ---
+
+    @property
+    def tool_provider_name(self) -> str:
+        return "ai"
+
+    def get_tools(self) -> list[ToolDefinition]:
+        return [
+            ToolDefinition(
+                name="rename_conversation",
+                description="Rename the current chat conversation to a user-specified title.",
+                parameters=[
+                    ToolParameter(
+                        name="title",
+                        type=ToolParameterType.STRING,
+                        description="The new title for this conversation.",
+                    ),
+                ],
+                required_role="everyone",
+            ),
+        ]
+
+    async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        import json
+
+        match name:
+            case "rename_conversation":
+                return await self._tool_rename_conversation(arguments)
+            case _:
+                raise KeyError(f"Unknown tool: {name}")
+
+    async def _tool_rename_conversation(self, arguments: dict[str, Any]) -> str:
+        import json
+
+        title = arguments.get("title", "").strip()
+        if not title:
+            return json.dumps({"error": "Title is required"})
+        if not self._current_conversation_id or not self._storage:
+            return json.dumps({"error": "No active conversation"})
+
+        data = await self._storage.get("ai_conversations", self._current_conversation_id)
+        if data is None:
+            return json.dumps({"error": "Conversation not found"})
+
+        data["title"] = title
+        await self._storage.put("ai_conversations", self._current_conversation_id, data)
+
+        # Emit event so WebSocket clients can update their UI
+        if self._resolver:
+            event_bus_svc = self._resolver.get_capability("event_bus")
+            if event_bus_svc is not None:
+                from gilbert.core.services.event_bus import EventBusService
+                from gilbert.interfaces.events import Event
+
+                if isinstance(event_bus_svc, EventBusService):
+                    await event_bus_svc.bus.publish(Event(
+                        event_type="chat.conversation.renamed",
+                        data={
+                            "conversation_id": self._current_conversation_id,
+                            "title": title,
+                        },
+                        source="ai",
+                    ))
+
+        return json.dumps({"status": "renamed", "title": title})
 
     # --- Logging ---
 

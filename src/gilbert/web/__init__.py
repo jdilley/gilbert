@@ -58,6 +58,7 @@ def create_app(gilbert: Gilbert) -> FastAPI:
     from gilbert.web.routes.entities import router as entities_router
     from gilbert.web.routes.roles import router as roles_router
     from gilbert.web.routes.system import router as system_router
+    from gilbert.web.routes.websocket import router as ws_router
 
     app.include_router(auth_router)
     app.include_router(chat_router)
@@ -66,5 +67,6 @@ def create_app(gilbert: Gilbert) -> FastAPI:
     app.include_router(entities_router)
     app.include_router(roles_router)
     app.include_router(system_router)
+    app.include_router(ws_router)
 
     return app

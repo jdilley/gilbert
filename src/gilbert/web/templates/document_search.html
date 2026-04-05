@@ -18,7 +18,7 @@
 <div class="service-card" style="padding:1rem;margin-bottom:0.75rem;border:1px solid var(--border);border-radius:8px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
         <strong>
-            <a href="{{ result.serve_url }}" class="entity-link">{{ result.name }}</a>
+            <a href="{{ result.url }}" class="entity-link" {% if result.external %}target="_blank" rel="noopener"{% endif %}>{{ result.name }}{% if result.external %} &#8599;{% endif %}</a>
         </strong>
         <span>
             <span class="badge badge-muted">{{ result.source_id }}</span>

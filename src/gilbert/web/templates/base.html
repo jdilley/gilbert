@@ -41,5 +41,62 @@
     <main>
         {% block content %}{% endblock %}
     </main>
+    <script>
+    // Global event bus — connects via WebSocket, dispatches to page handlers.
+    window.GilbertEvents = (function() {
+        const handlers = {};
+        let ws = null;
+        let reconnectTimer = null;
+
+        function connect() {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(proto + '//' + location.host + '/ws/events');
+
+            ws.onmessage = function(e) {
+                try {
+                    const event = JSON.parse(e.data);
+                    dispatch(event.event_type, event);
+                } catch (err) { /* ignore */ }
+            };
+
+            ws.onclose = function() {
+                ws = null;
+                // Reconnect after 5 seconds
+                if (!reconnectTimer) {
+                    reconnectTimer = setTimeout(function() {
+                        reconnectTimer = null;
+                        connect();
+                    }, 5000);
+                }
+            };
+
+            ws.onerror = function() {
+                if (ws) ws.close();
+            };
+        }
+
+        function dispatch(eventType, event) {
+            // Exact match handlers
+            (handlers[eventType] || []).forEach(function(fn) { fn(event); });
+            // Wildcard handlers
+            (handlers['*'] || []).forEach(function(fn) { fn(event); });
+        }
+
+        function on(eventType, handler) {
+            if (!handlers[eventType]) handlers[eventType] = [];
+            handlers[eventType].push(handler);
+        }
+
+        function off(eventType, handler) {
+            if (!handlers[eventType]) return;
+            handlers[eventType] = handlers[eventType].filter(function(h) { return h !== handler; });
+        }
+
+        // Auto-connect
+        connect();
+
+        return { on: on, off: off };
+    })();
+    </script>
 </body>
 </html>

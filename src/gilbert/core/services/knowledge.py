@@ -7,6 +7,7 @@ from typing import Any
 
 from gilbert.core.documents.chunking import chunk_text
 from gilbert.core.documents.extractors import extract_text
+from gilbert.interfaces.events import Event, EventBus
 from gilbert.interfaces.knowledge import (
     DocumentBackend,
     DocumentMeta,
@@ -31,7 +32,7 @@ class KnowledgeService(Service):
     Capabilities: knowledge, ai_tools
     """
 
-    def __init__(self) -> None:
+    def __init__(self, has_gdrive: bool = False) -> None:
         self._backends: dict[str, DocumentBackend] = {}
         self._chroma_client: Any = None
         self._collection: Any = None
@@ -39,12 +40,19 @@ class KnowledgeService(Service):
         self._chunk_overlap: int = 200
         self._max_results: int = 10
         self._sync_interval: int = 300
+        self._event_bus: EventBus | None = None
+        self._storage: Any = None
+        self._has_gdrive = has_gdrive
 
     def service_info(self) -> ServiceInfo:
+        # If gdrive sources are configured, require google_api so we start after it
+        required: frozenset[str] = frozenset({"google_api"}) if self._has_gdrive else frozenset()
+        optional = frozenset({"scheduler", "google_api", "configuration", "credentials", "event_bus", "entity_storage"}) - required
         return ServiceInfo(
             name="knowledge",
             capabilities=frozenset({"knowledge", "ai_tools"}),
-            optional=frozenset({"scheduler", "google_api", "configuration", "credentials"}),
+            requires=required,
+            optional=optional,
         )
 
     @property
@@ -88,6 +96,22 @@ class KnowledgeService(Service):
             logger.exception("Failed to initialize ChromaDB")
 
         # Initialize backends from config
+        # Event bus
+        # Entity storage for document tracking metadata
+        storage_svc = resolver.get_capability("entity_storage")
+        if storage_svc is not None:
+            from gilbert.core.services.storage import StorageService
+
+            if isinstance(storage_svc, StorageService):
+                self._storage = storage_svc.backend
+
+        event_bus_svc = resolver.get_capability("event_bus")
+        if event_bus_svc is not None:
+            from gilbert.core.services.event_bus import EventBusService
+
+            if isinstance(event_bus_svc, EventBusService):
+                self._event_bus = event_bus_svc.bus
+
         google_svc = resolver.get_capability("google_api")
 
         for src in sources:
@@ -108,6 +132,14 @@ class KnowledgeService(Service):
                     logger.info("Registered document source: %s", backend.source_id)
 
                 elif src_type == "gdrive":
+                    if google_svc is None:
+                        logger.warning(
+                            "Cannot initialize gdrive source '%s': Google service not available. "
+                            "Ensure google.enabled is true in config.",
+                            src_name,
+                        )
+                        continue
+
                     from gilbert.integrations.gdrive_documents import GoogleDriveDocumentBackend
 
                     backend = GoogleDriveDocumentBackend(
@@ -135,6 +167,20 @@ class KnowledgeService(Service):
                 scheduler.add_job(
                     name="knowledge-sync",
                     schedule=Schedule.every(self._sync_interval),
+                    callback=self._sync_all,
+                    system=True,
+                )
+
+        # Schedule initial sync as a one-shot background job so it doesn't block startup.
+        # ChromaDB may need to download the embedding model on first use.
+        if scheduler is not None and self._backends and self._collection is not None:
+            from gilbert.core.services.scheduler import SchedulerService
+            from gilbert.interfaces.scheduler import Schedule
+
+            if isinstance(scheduler, SchedulerService):
+                scheduler.add_job(
+                    name="knowledge-initial-sync",
+                    schedule=Schedule.once_after(2),
                     callback=self._sync_all,
                     system=True,
                 )
@@ -201,51 +247,182 @@ class KnowledgeService(Service):
             ],
         )
 
-        logger.debug("Indexed %s: %d chunks", doc_id, len(chunks))
+        logger.info("Indexed %s: %d chunks", doc_id, len(chunks))
+
+        await self._track_document(meta, indexed_chunks=len(chunks))
+        await self._emit("knowledge.document.indexed", {
+            "document_id": doc_id,
+            "source_id": meta.source_id,
+            "name": meta.name,
+            "path": meta.path,
+            "type": meta.document_type.value,
+            "chunks": len(chunks),
+        })
+
         return len(chunks)
 
     async def _sync_backend(self, backend: DocumentBackend) -> int:
         """Sync a single backend. Returns number of documents indexed."""
+        logger.info("Syncing document source: %s", backend.source_id)
         try:
             docs = await backend.list_documents()
         except Exception:
             logger.warning("Failed to list documents from %s", backend.source_id, exc_info=True)
             return 0
 
+        logger.info("Found %d documents in %s", len(docs), backend.source_id)
+
+        # Track current document IDs for removal detection
+        current_doc_ids = {meta.document_id for meta in docs}
+
+        # Detect removed documents (were indexed but no longer in backend)
+        if self._collection is not None:
+            try:
+                stored = self._collection.get(
+                    where={"source_id": backend.source_id},
+                    include=["metadatas"],
+                )
+                stored_ids = {
+                    m["document_id"]
+                    for m in (stored.get("metadatas") or [])
+                    if "document_id" in m
+                }
+                removed_ids = stored_ids - current_doc_ids
+                for removed_id in removed_ids:
+                    try:
+                        self._collection.delete(where={"document_id": removed_id})
+                    except Exception:
+                        pass
+                    await self._untrack_document(removed_id)
+                    await self._emit("knowledge.document.removed", {
+                        "document_id": removed_id,
+                        "source_id": backend.source_id,
+                    })
+                    logger.info("Document removed from index: %s", removed_id)
+            except Exception:
+                pass
+
         indexed = 0
         for meta in docs:
-            # Check if already indexed with same checksum
-            if self._collection is not None and meta.checksum:
+            # Skip unsupported document types
+            if meta.document_type == DocumentType.UNKNOWN:
+                continue
+
+            # Check if already indexed and unchanged
+            is_new = True
+            if self._storage is not None:
                 try:
-                    existing = self._collection.get(
-                        where={"document_id": meta.document_id},
-                        limit=1,
-                        include=["metadatas"],
-                    )
-                    if existing and existing.get("metadatas"):
-                        stored_modified = existing["metadatas"][0].get("last_modified", "")
-                        if stored_modified == meta.last_modified:
-                            continue
+                    tracked = await self._storage.get("knowledge_documents", meta.document_id)
+                    if tracked:
+                        is_new = False
+                        stored_modified = tracked.get("last_modified", "")
+                        if stored_modified == meta.last_modified and tracked.get("indexed_at"):
+                            continue  # unchanged and already indexed
                 except Exception:
                     pass
 
+            if is_new:
+                await self._track_document(meta)
+                await self._emit("knowledge.document.discovered", {
+                    "document_id": meta.document_id,
+                    "source_id": meta.source_id,
+                    "name": meta.name,
+                    "path": meta.path,
+                    "type": meta.document_type.value,
+                })
+
             try:
+                logger.info("Indexing: %s (%s, %d bytes)", meta.name, meta.document_type.value, meta.size_bytes)
                 chunks = await self.index_document(backend, meta)
                 if chunks > 0:
                     indexed += 1
             except Exception:
                 logger.warning("Failed to index %s", meta.document_id, exc_info=True)
 
+        logger.info("Sync complete for %s: %d documents indexed", backend.source_id, indexed)
         return indexed
 
     async def _sync_all(self) -> None:
         """Sync all backends."""
+        logger.info("Starting knowledge sync across %d sources", len(self._backends))
         total = 0
         for backend in self._backends.values():
             count = await self._sync_backend(backend)
             total += count
-        if total:
-            logger.info("Knowledge sync: indexed %d documents", total)
+        logger.info("Knowledge sync complete: %d documents indexed total", total)
+
+    # --- Document tracking in entity store ---
+
+    async def _track_document(self, meta: DocumentMeta, indexed_chunks: int = 0) -> None:
+        """Store/update document tracking info in the entity store."""
+        if self._storage is None:
+            return
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        doc_id = meta.document_id
+
+        # Get existing record to preserve added_at
+        existing = await self._storage.get("knowledge_documents", doc_id)
+        added_at = existing.get("added_at", now) if existing else now
+
+        await self._storage.put("knowledge_documents", doc_id, {
+            "document_id": doc_id,
+            "source_id": meta.source_id,
+            "path": meta.path,
+            "name": meta.name,
+            "type": meta.document_type.value,
+            "size_bytes": meta.size_bytes,
+            "last_modified": meta.last_modified,
+            "external_url": meta.external_url,
+            "added_at": added_at,
+            "indexed_at": now if indexed_chunks > 0 else (existing or {}).get("indexed_at", ""),
+            "chunks": indexed_chunks or (existing or {}).get("chunks", 0),
+        })
+
+    async def _untrack_document(self, document_id: str) -> None:
+        """Remove document tracking info from entity store."""
+        if self._storage is None:
+            return
+        try:
+            await self._storage.delete("knowledge_documents", document_id)
+        except Exception:
+            pass
+
+    # --- Entity store queries ---
+
+    async def _list_from_entity_store(
+        self, source_filter: str | None = None, prefix: str = ""
+    ) -> list[dict[str, Any]]:
+        """List documents from the entity store (fast, no backend calls)."""
+        if self._storage is None:
+            return []
+        from gilbert.interfaces.storage import Filter, FilterOp, Query
+
+        filters: list[Filter] = []
+        if source_filter:
+            filters.append(Filter(field="source_id", op=FilterOp.EQ, value=source_filter))
+
+        docs = await self._storage.query(Query(
+            collection="knowledge_documents",
+            filters=filters,
+        ))
+
+        if prefix:
+            docs = [d for d in docs if d.get("path", "").startswith(prefix)]
+
+        return docs
+
+    # --- Events ---
+
+    async def _emit(self, event_type: str, data: dict[str, Any]) -> None:
+        """Publish an event if the event bus is available."""
+        if self._event_bus is not None:
+            await self._event_bus.publish(Event(
+                event_type=event_type,
+                data=data,
+                source="knowledge",
+            ))
 
     # --- Search ---
 
@@ -469,25 +646,19 @@ class KnowledgeService(Service):
         source = arguments.get("source")
         prefix = arguments.get("prefix", "")
 
-        all_docs: list[dict[str, Any]] = []
-        backends = [self._backends[source]] if source and source in self._backends else self._backends.values()
-
-        for backend in backends:
-            try:
-                docs = await backend.list_documents(prefix=prefix)
-                for d in docs:
-                    all_docs.append({
-                        "document_id": d.document_id,
-                        "name": d.name,
-                        "source_id": d.source_id,
-                        "type": d.document_type.value,
-                        "size": d.size_bytes,
-                        "modified": d.last_modified,
-                    })
-            except Exception:
-                logger.warning("Failed to list from %s", backend.source_id)
-
-        return json.dumps(all_docs)
+        docs = await self._list_from_entity_store(source_filter=source, prefix=prefix)
+        return json.dumps([
+            {
+                "document_id": d.get("document_id", ""),
+                "name": d.get("name", ""),
+                "source_id": d.get("source_id", ""),
+                "type": d.get("type", ""),
+                "size": d.get("size_bytes", 0),
+                "modified": d.get("last_modified", ""),
+                "indexed": bool(d.get("indexed_at")),
+            }
+            for d in docs
+        ])
 
     def _tool_list_sources(self) -> str:
         sources = [

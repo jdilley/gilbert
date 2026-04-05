@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 PID_FILE = DATA_DIR / "gilbert.pid"
 
+# Track signal count for force-exit
+_signal_count = 0
+
 
 def _write_pid() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -31,6 +34,8 @@ def _remove_pid() -> None:
 
 
 async def main() -> None:
+    global _signal_count
+
     config = load_config()
     gilbert = Gilbert(config)
 
@@ -47,16 +52,21 @@ async def main() -> None:
     )
     server = uvicorn.Server(uv_config)
 
-    loop = asyncio.get_running_loop()
-    shutdown_event = asyncio.Event()
+    # Disable uvicorn's own signal handling — we manage it ourselves
+    server.install_signal_handlers = lambda: None
 
-    def _handle_signal() -> None:
-        logger.info("Shutdown signal received")
-        shutdown_event.set()
+    def _handle_signal(signum: int, frame: object) -> None:
+        global _signal_count
+        _signal_count += 1
+        if _signal_count >= 2:
+            logger.warning("Forced shutdown (signal %d)", _signal_count)
+            _remove_pid()
+            os._exit(1)
+        logger.info("Shutdown signal received — press Ctrl+C again to force quit")
         server.should_exit = True
 
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
 
     try:
         await server.serve()
