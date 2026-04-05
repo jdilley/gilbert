@@ -612,7 +612,12 @@ class ScreenService(Service):
                     ToolParameter(
                         name="pages",
                         type=ToolParameterType.ARRAY,
-                        description="Specific page numbers to extract (1-indexed). PDF only. For show_document.",
+                        description=(
+                            "Specific page numbers to extract (1-indexed). PDF only. For show_document. "
+                            "IMPORTANT: If you already know the relevant page numbers from prior "
+                            "conversation or search results, pass them here directly instead of "
+                            "relying on automatic page detection. This is much more accurate."
+                        ),
                         required=False,
                     ),
                     ToolParameter(
