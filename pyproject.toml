@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gilbert"
+version = "0.1.0"
+description = "AI assistant for home and business automation"
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "aiosqlite>=0.19",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.0",
+    "mypy>=1.8",
+    "ruff>=0.3",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gilbert"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]

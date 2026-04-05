@@ -1,0 +1,30 @@
+# Gilbert installation data (per-instance config, database, logs, plugin cache)
+.gilbert/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+.venv/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# mypy
+.mypy_cache/
+
+# ruff
+.ruff_cache/

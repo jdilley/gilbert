@@ -1,0 +1,52 @@
+# Gilbert — default configuration
+# This file is committed to the repo and contains sensible defaults.
+# To override for your installation, create .gilbert/config.yaml
+# (that directory is gitignored — your customizations stay local).
+
+storage:
+  backend: sqlite
+  connection: .gilbert/gilbert.db
+
+logging:
+  level: INFO
+  file: .gilbert/gilbert.log
+  ai_log_file: .gilbert/ai_calls.log
+
+credentials: {}
+  # my-openai:
+  #   type: api_key
+  #   api_key: sk-abc123
+  #
+  # lutron-controller:
+  #   type: username_password
+  #   username: admin
+  #   password: secret123
+  #
+  # google-calendar:
+  #   type: google_service_account
+  #   service_account_file: .gilbert/credentials/calendar-sa.json
+  #   scopes:
+  #     - https://www.googleapis.com/auth/calendar.readonly
+
+plugins: []
+  # - source: ./plugins/example-plugin
+  #   enabled: true
+  # - source: https://github.com/user/gilbert-plugin-sonos
+  #   enabled: true
+
+tts:
+  enabled: false
+  backend: elevenlabs
+  credential: ""
+  default_voice: ""
+  voices: {}
+  settings:
+    model_id: eleven_turbo_v2_5
+    silence_padding: 3
+  # credential: elevenlabs        # name of an api_key credential above
+  # default_voice: default        # name of a voice in the voices map below
+  # voices:
+  #   default:
+  #     voice_id: your-voice-id-here
+  #   scary:
+  #     voice_id: another-voice-id
