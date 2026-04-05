@@ -112,6 +112,7 @@ Claude AI agents use a file-based memory system located at `.claude/memory/` to 
 - **Remove** a memory when its system is deleted or replaced. Delete the file and remove it from the index. Stale memories are worse than no memories.
 - After learning something non-obvious about a third-party integration — capture it.
 - At the end of any significant work session, review whether affected memories need updating.
+- **Before every commit**, review all memories touched by the changes being committed. Update stale memories, delete obsolete ones, and create new ones for anything significant that was added. Do not commit code that makes existing memories inaccurate.
 
 ### Memory File Format
 
