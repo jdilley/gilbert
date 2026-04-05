@@ -401,7 +401,10 @@ class AIService(Service):
         """Persist a conversation to storage with optional user ownership."""
         if self._storage is None:
             return
+        # Load existing data to preserve fields like title
+        existing = await self._storage.get(_COLLECTION, conv_id) or {}
         data: dict[str, Any] = {
+            **existing,
             "messages": [self._serialize_message(m) for m in messages],
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }

@@ -180,7 +180,11 @@
                     '<span class="conversation-actions">' +
                         '<button class="conv-rename-btn" title="Rename">&#9998;</button>' +
                     '</span>';
-                el.querySelector('.conversation-preview').addEventListener('click', () => loadConversation(c.conversation_id));
+                el.addEventListener('click', (e) => {
+                    // Don't load conversation if clicking the rename button
+                    if (e.target.closest('.conv-rename-btn')) return;
+                    loadConversation(c.conversation_id);
+                });
                 el.querySelector('.conv-rename-btn').addEventListener('click', (e) => {
                     e.stopPropagation();
                     renameConversation(c.conversation_id, c.title);
