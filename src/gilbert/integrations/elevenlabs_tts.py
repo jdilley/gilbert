@@ -105,6 +105,9 @@ class ElevenLabsTTS(TTSBackend):
             self._client = None
 
     async def synthesize(self, request: SynthesisRequest) -> SynthesisResult:
+        if not request.voice_id:
+            raise ValueError("voice_id is required for ElevenLabs TTS synthesis")
+
         client = self._require_client()
 
         output_format = _FORMAT_MAP.get(request.output_format, "mp3_44100_128")

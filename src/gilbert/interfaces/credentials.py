@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 class CredentialType(StrEnum):
     API_KEY = "api_key"
+    API_KEY_PAIR = "api_key_pair"
     USERNAME_PASSWORD = "username_password"
     GOOGLE_SERVICE_ACCOUNT = "google_service_account"
 
@@ -17,6 +18,14 @@ class ApiKeyCredential(BaseModel):
 
     type: Literal[CredentialType.API_KEY] = CredentialType.API_KEY
     api_key: str
+
+
+class ApiKeyPairCredential(BaseModel):
+    """A client ID + client secret credential (e.g., OAuth2 client credentials)."""
+
+    type: Literal[CredentialType.API_KEY_PAIR] = CredentialType.API_KEY_PAIR
+    client_id: str
+    client_secret: str
 
 
 class UsernamePasswordCredential(BaseModel):
@@ -38,6 +47,6 @@ class GoogleServiceAccountCredential(BaseModel):
 
 
 AnyCredential = Annotated[
-    Union[ApiKeyCredential, UsernamePasswordCredential, GoogleServiceAccountCredential],
+    Union[ApiKeyCredential, ApiKeyPairCredential, UsernamePasswordCredential, GoogleServiceAccountCredential],
     Field(discriminator="type"),
 ]

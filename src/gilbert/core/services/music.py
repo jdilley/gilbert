@@ -1,0 +1,416 @@
+"""Music service — wraps a MusicBackend as a discoverable service with speaker integration."""
+
+import json
+import logging
+from dataclasses import asdict
+from typing import Any
+
+from gilbert.interfaces.configuration import ConfigParam
+from gilbert.interfaces.music import (
+    AlbumInfo,
+    ArtistInfo,
+    MusicBackend,
+    PlaylistDetail,
+    PlaylistInfo,
+    SearchResults,
+    TrackInfo,
+)
+from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
+from gilbert.interfaces.speaker import PlayRequest
+from gilbert.interfaces.tools import (
+    ToolDefinition,
+    ToolParameter,
+    ToolParameterType,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _track_to_dict(t: TrackInfo) -> dict[str, Any]:
+    """Serialize a TrackInfo to a JSON-friendly dict."""
+    d: dict[str, Any] = {
+        "track_id": t.track_id,
+        "name": t.name,
+        "artists": [{"artist_id": a.artist_id, "name": a.name, "url": a.external_url} for a in t.artists],
+        "duration_seconds": t.duration_seconds,
+        "track_number": t.track_number,
+        "uri": t.uri,
+        "external_url": t.external_url,
+        "explicit": t.explicit,
+    }
+    if t.album:
+        d["album"] = {
+            "album_id": t.album.album_id,
+            "name": t.album.name,
+            "album_art_url": t.album.album_art_url,
+            "release_date": t.album.release_date,
+            "total_tracks": t.album.total_tracks,
+            "external_url": t.album.external_url,
+        }
+    if t.preview_url:
+        d["preview_url"] = t.preview_url
+    return d
+
+
+def _album_to_dict(a: AlbumInfo) -> dict[str, Any]:
+    """Serialize an AlbumInfo to a JSON-friendly dict."""
+    return {
+        "album_id": a.album_id,
+        "name": a.name,
+        "artists": [{"artist_id": ar.artist_id, "name": ar.name, "url": ar.external_url} for ar in a.artists],
+        "album_art_url": a.album_art_url,
+        "release_date": a.release_date,
+        "total_tracks": a.total_tracks,
+        "external_url": a.external_url,
+    }
+
+
+def _playlist_to_dict(p: PlaylistInfo) -> dict[str, Any]:
+    """Serialize a PlaylistInfo to a JSON-friendly dict."""
+    return {
+        "playlist_id": p.playlist_id,
+        "name": p.name,
+        "description": p.description,
+        "owner": p.owner,
+        "track_count": p.track_count,
+        "external_url": p.external_url,
+        "image_url": p.image_url,
+    }
+
+
+class MusicService(Service):
+    """Exposes a MusicBackend as a service with search, metadata, and speaker playback."""
+
+    def __init__(self, backend: MusicBackend, credential_name: str) -> None:
+        self._backend = backend
+        self._credential_name = credential_name
+        self._config: dict[str, object] = {}
+        self._speaker_svc: Any | None = None
+
+    def service_info(self) -> ServiceInfo:
+        return ServiceInfo(
+            name="music",
+            capabilities=frozenset({"music", "ai_tools"}),
+            requires=frozenset({"credentials"}),
+            optional=frozenset({"configuration", "speaker_control"}),
+        )
+
+    @property
+    def backend(self) -> MusicBackend:
+        return self._backend
+
+    async def start(self, resolver: ServiceResolver) -> None:
+        from gilbert.core.services.credentials import CredentialService
+        from gilbert.interfaces.credentials import ApiKeyPairCredential
+
+        # Speaker integration (optional)
+        self._speaker_svc = resolver.get_capability("speaker_control")
+
+        # Load config
+        config_svc = resolver.get_capability("configuration")
+        if config_svc is not None:
+            from gilbert.core.services.configuration import ConfigurationService
+
+            if isinstance(config_svc, ConfigurationService):
+                section = config_svc.get_section("music")
+                self._apply_config(section)
+
+        # Resolve credentials
+        cred_svc = resolver.require_capability("credentials")
+        if not isinstance(cred_svc, CredentialService):
+            raise TypeError("Expected CredentialService for 'credentials' capability")
+
+        cred = cred_svc.require(self._credential_name)
+        if not isinstance(cred, ApiKeyPairCredential):
+            raise TypeError(
+                f"Credential '{self._credential_name}' must be an api_key_pair credential"
+            )
+
+        init_config: dict[str, object] = {
+            **self._config,
+            "client_id": cred.client_id,
+            "client_secret": cred.client_secret,
+        }
+        await self._backend.initialize(init_config)
+        logger.info("Music service started (credential=%s)", self._credential_name)
+
+    def _apply_config(self, section: dict[str, Any]) -> None:
+        self._config = section.get("settings", self._config)
+
+    # --- Configurable protocol ---
+
+    @property
+    def config_namespace(self) -> str:
+        return "music"
+
+    def config_params(self) -> list[ConfigParam]:
+        return [
+            ConfigParam(
+                key="backend", type=ToolParameterType.STRING,
+                description="Music backend type.",
+                default="spotify", restart_required=True,
+            ),
+            ConfigParam(
+                key="enabled", type=ToolParameterType.BOOLEAN,
+                description="Whether the music service is enabled.",
+                default=False, restart_required=True,
+            ),
+            ConfigParam(
+                key="credential", type=ToolParameterType.STRING,
+                description="Name of the credential to use.",
+                restart_required=True,
+            ),
+            ConfigParam(
+                key="settings", type=ToolParameterType.OBJECT,
+                description="Backend-specific settings.",
+                default={},
+            ),
+        ]
+
+    async def on_config_changed(self, config: dict[str, Any]) -> None:
+        self._apply_config(config)
+
+    async def stop(self) -> None:
+        await self._backend.close()
+
+    # --- Core operations ---
+
+    async def search(self, query: str, *, limit: int = 10) -> SearchResults:
+        """Search for music."""
+        return await self._backend.search(query, limit=limit)
+
+    async def get_track(self, track_id: str) -> TrackInfo | None:
+        """Get track metadata."""
+        return await self._backend.get_track(track_id)
+
+    async def get_album(self, album_id: str) -> AlbumInfo | None:
+        """Get album metadata."""
+        return await self._backend.get_album(album_id)
+
+    async def get_album_tracks(self, album_id: str) -> list[TrackInfo]:
+        """Get all tracks in an album."""
+        return await self._backend.get_album_tracks(album_id)
+
+    async def get_playlist(self, playlist_id: str) -> PlaylistDetail | None:
+        """Get a playlist with its tracks."""
+        return await self._backend.get_playlist(playlist_id)
+
+    async def play_track(
+        self,
+        track_id: str,
+        speaker_names: list[str] | None = None,
+        volume: int | None = None,
+        position_seconds: float | None = None,
+    ) -> TrackInfo:
+        """Play a track on speakers via the speaker service.
+
+        Returns the track metadata for display purposes.
+        """
+        if self._speaker_svc is None:
+            raise RuntimeError("Speaker service is not available — cannot play music")
+
+        from gilbert.core.services.speaker import SpeakerService
+
+        if not isinstance(self._speaker_svc, SpeakerService):
+            raise TypeError("Expected SpeakerService for speaker_control capability")
+
+        track = await self._backend.get_track(track_id)
+        if track is None:
+            raise KeyError(f"Track not found: {track_id}")
+
+        uri = await self._backend.get_playable_uri(track_id)
+
+        # Resolve speaker names to IDs
+        speaker_ids: list[str] = []
+        if speaker_names:
+            speaker_ids = await self._speaker_svc.resolve_speaker_names(speaker_names)
+
+        target_ids = self._speaker_svc._resolve_target_speakers(speaker_ids or None)
+
+        await self._speaker_svc.backend.play_uri(PlayRequest(
+            uri=uri,
+            speaker_ids=target_ids,
+            volume=volume,
+            title=f"{track.name} — {', '.join(a.name for a in track.artists)}",
+            position_seconds=position_seconds,
+        ))
+
+        return track
+
+    # --- ToolProvider protocol ---
+
+    @property
+    def tool_provider_name(self) -> str:
+        return "music"
+
+    def get_tools(self) -> list[ToolDefinition]:
+        tools = [
+            ToolDefinition(
+                name="search_music",
+                description="Search for tracks, albums, and playlists.",
+                parameters=[
+                    ToolParameter(
+                        name="query",
+                        type=ToolParameterType.STRING,
+                        description="Search query (song name, artist, etc.).",
+                    ),
+                    ToolParameter(
+                        name="limit",
+                        type=ToolParameterType.INTEGER,
+                        description="Maximum results per type (default 10).",
+                        required=False,
+                    ),
+                ],
+            ),
+            ToolDefinition(
+                name="get_track_info",
+                description="Get full metadata for a track (name, artist, album, art, duration, links).",
+                parameters=[
+                    ToolParameter(
+                        name="track_id",
+                        type=ToolParameterType.STRING,
+                        description="The track ID.",
+                    ),
+                ],
+            ),
+            ToolDefinition(
+                name="get_album_info",
+                description="Get album metadata and track listing.",
+                parameters=[
+                    ToolParameter(
+                        name="album_id",
+                        type=ToolParameterType.STRING,
+                        description="The album ID.",
+                    ),
+                    ToolParameter(
+                        name="include_tracks",
+                        type=ToolParameterType.BOOLEAN,
+                        description="Include full track listing (default true).",
+                        required=False,
+                    ),
+                ],
+            ),
+            ToolDefinition(
+                name="get_playlist",
+                description="Get a playlist with its tracks.",
+                parameters=[
+                    ToolParameter(
+                        name="playlist_id",
+                        type=ToolParameterType.STRING,
+                        description="The playlist ID.",
+                    ),
+                ],
+            ),
+            ToolDefinition(
+                name="play_track",
+                description=(
+                    "Play a music track on speakers. Optionally start at a specific "
+                    "position in the song. If no speakers specified, uses last-used or all."
+                ),
+                parameters=[
+                    ToolParameter(
+                        name="track_id",
+                        type=ToolParameterType.STRING,
+                        description="The track ID to play.",
+                    ),
+                    ToolParameter(
+                        name="speakers",
+                        type=ToolParameterType.ARRAY,
+                        description="Speaker names or aliases. If omitted, uses last-used or all.",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="volume",
+                        type=ToolParameterType.INTEGER,
+                        description="Volume level (0-100).",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="position_seconds",
+                        type=ToolParameterType.NUMBER,
+                        description="Start playback at this position in seconds (e.g., 12.5 to start at the 12.5s mark).",
+                        required=False,
+                    ),
+                ],
+            ),
+        ]
+        return tools
+
+    async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        match name:
+            case "search_music":
+                return await self._tool_search(arguments)
+            case "get_track_info":
+                return await self._tool_get_track(arguments)
+            case "get_album_info":
+                return await self._tool_get_album(arguments)
+            case "get_playlist":
+                return await self._tool_get_playlist(arguments)
+            case "play_track":
+                return await self._tool_play_track(arguments)
+            case _:
+                raise KeyError(f"Unknown tool: {name}")
+
+    async def _tool_search(self, arguments: dict[str, Any]) -> str:
+        query = arguments["query"]
+        limit = arguments.get("limit", 10)
+        results = await self.search(query, limit=limit)
+        return json.dumps({
+            "tracks": [_track_to_dict(t) for t in results.tracks],
+            "albums": [_album_to_dict(a) for a in results.albums],
+            "playlists": [_playlist_to_dict(p) for p in results.playlists],
+        })
+
+    async def _tool_get_track(self, arguments: dict[str, Any]) -> str:
+        track = await self.get_track(arguments["track_id"])
+        if track is None:
+            return json.dumps({"error": "Track not found"})
+        return json.dumps(_track_to_dict(track))
+
+    async def _tool_get_album(self, arguments: dict[str, Any]) -> str:
+        album_id = arguments["album_id"]
+        include_tracks = arguments.get("include_tracks", True)
+
+        album = await self.get_album(album_id)
+        if album is None:
+            return json.dumps({"error": "Album not found"})
+
+        result = _album_to_dict(album)
+        if include_tracks:
+            tracks = await self.get_album_tracks(album_id)
+            result["tracks"] = [_track_to_dict(t) for t in tracks]
+
+        return json.dumps(result)
+
+    async def _tool_get_playlist(self, arguments: dict[str, Any]) -> str:
+        detail = await self.get_playlist(arguments["playlist_id"])
+        if detail is None:
+            return json.dumps({"error": "Playlist not found"})
+
+        result = _playlist_to_dict(detail.playlist)
+        result["tracks"] = [_track_to_dict(t) for t in detail.tracks]
+        return json.dumps(result)
+
+    async def _tool_play_track(self, arguments: dict[str, Any]) -> str:
+        track_id = arguments["track_id"]
+        speaker_names: list[str] = arguments.get("speakers", [])
+        volume: int | None = arguments.get("volume")
+        position: float | None = arguments.get("position_seconds")
+
+        try:
+            track = await self.play_track(
+                track_id=track_id,
+                speaker_names=speaker_names or None,
+                volume=volume,
+                position_seconds=position,
+            )
+        except RuntimeError as e:
+            return json.dumps({"error": str(e)})
+        except KeyError as e:
+            return json.dumps({"error": str(e)})
+
+        result = _track_to_dict(track)
+        result["status"] = "playing"
+        if position:
+            result["started_at_seconds"] = position
+        return json.dumps(result)

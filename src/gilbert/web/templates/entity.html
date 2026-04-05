@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Gilbert — {{ collection }}/{{ entity_id }}{% endblock %}
+{% block content %}
+<div class="breadcrumb">
+    <a href="/entities">Collections</a> &rsaquo;
+    <a href="/entities/{{ collection }}">{{ collection }}</a> &rsaquo;
+    <strong>{{ entity_id }}</strong>
+</div>
+
+<h1>{{ entity_id }}</h1>
+<p class="subtitle">Collection: {{ collection }}</p>
+
+{% if entity %}
+<div class="entity-data">
+    <pre><code>{{ formatted }}</code></pre>
+</div>
+{% else %}
+<p class="muted">Entity not found.</p>
+{% endif %}
+{% endblock %}

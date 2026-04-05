@@ -186,6 +186,11 @@ class TTSService(Service):
             default_id = self._voices.get(self._default_voice)
             if default_id is not None:
                 return replace(request, voice_id=default_id.voice_id)
+        if not request.voice_id:
+            raise ValueError(
+                "No voice_id provided and no default voice configured. "
+                "Set a default_voice in the TTS config or pass a voice_id/voice_name."
+            )
         return request
 
     # --- ToolProvider protocol ---
@@ -195,10 +200,18 @@ class TTSService(Service):
         return "tts"
 
     def get_tools(self) -> list[ToolDefinition]:
+        # Build voice name hint for the tool description
+        voice_names = list(self._voices.keys())
+        voice_hint = f" Available: {', '.join(voice_names)}." if voice_names else ""
+
         return [
             ToolDefinition(
-                name="speak",
-                description="Synthesize speech from text and save as an MP3 file.",
+                name="synthesize",
+                description=(
+                    "Synthesize speech from text and save as an MP3 file. "
+                    "This only generates an audio file — it does NOT play it on speakers. "
+                    "To speak text out loud on speakers, use the 'announce' tool instead."
+                ),
                 parameters=[
                     ToolParameter(
                         name="text",
@@ -208,7 +221,16 @@ class TTSService(Service):
                     ToolParameter(
                         name="voice_name",
                         type=ToolParameterType.STRING,
-                        description="Named voice to use (from config). Uses default if omitted.",
+                        description=(
+                            "Configured voice name to use. Uses default if omitted."
+                            + voice_hint
+                        ),
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="voice_id",
+                        type=ToolParameterType.STRING,
+                        description="Raw voice ID from the TTS provider. Use voice_name instead when possible.",
                         required=False,
                     ),
                 ],
@@ -221,18 +243,19 @@ class TTSService(Service):
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
         match name:
-            case "speak":
-                return await self._tool_speak(arguments)
+            case "synthesize":
+                return await self._tool_synthesize(arguments)
             case "list_voices":
                 return await self._tool_list_voices()
             case _:
                 raise KeyError(f"Unknown tool: {name}")
 
-    async def _tool_speak(self, arguments: dict[str, Any]) -> str:
+    async def _tool_synthesize(self, arguments: dict[str, Any]) -> str:
         text = arguments["text"]
         voice_name = arguments.get("voice_name")
+        voice_id = arguments.get("voice_id", "")
 
-        request = SynthesisRequest(text=text, voice_id="", output_format=AudioFormat.MP3)
+        request = SynthesisRequest(text=text, voice_id=voice_id, output_format=AudioFormat.MP3)
         result = await self.synthesize(request, voice_name=voice_name)
 
         # Clean up old files, then write new one

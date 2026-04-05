@@ -11,6 +11,9 @@ from gilbert.core.service_manager import ServiceManager
 from gilbert.core.services import (
     AuthService,
     EventBusService,
+    MusicService,
+    PersonaService,
+    SpeakerService,
     StorageService,
     TTSService,
     UserService,
@@ -20,8 +23,10 @@ from gilbert.core.services.configuration import ConfigurationService
 from gilbert.core.services.credentials import CredentialService
 from gilbert.interfaces.ai import AIBackend
 from gilbert.interfaces.events import EventBus
+from gilbert.interfaces.music import MusicBackend
 from gilbert.interfaces.plugin import Plugin
 from gilbert.interfaces.service import Service
+from gilbert.interfaces.speaker import SpeakerBackend
 from gilbert.interfaces.storage import StorageBackend
 from gilbert.interfaces.tts import TTSBackend
 from gilbert.plugins.loader import PluginLoader
@@ -74,15 +79,76 @@ class Gilbert:
             )
         )
 
-        # 6. Auth service (if enabled)
+        # 6. Persona service (always — AI persona is core)
+        self.service_manager.register(PersonaService())
+
+        # 6. Tunnel service (if enabled — before auth, as Google OAuth uses it)
+        if self.config.tunnel.enabled:
+            from gilbert.core.services.tunnel import TunnelService
+
+            self.service_manager.register(
+                TunnelService(self.config.tunnel, self.config.web.port)
+            )
+
+        # 7. Google API service (if enabled — before auth, as auth may need it)
+        if self.config.google.enabled:
+            from gilbert.core.services.google import GoogleService
+
+            self.service_manager.register(GoogleService(self.config.google))
+
+            # Register Google Directory as a user provider if "directory" account exists.
+            if "directory" in self.config.google.accounts:
+                from gilbert.integrations.google_directory import GoogleDirectoryService
+
+                domain = ""
+                for prov in self.config.auth.providers:
+                    if prov.type == "google" and prov.domain:
+                        domain = prov.domain
+                        break
+                self.service_manager.register(
+                    GoogleDirectoryService(account="directory", domain=domain)
+                )
+
+        # 8. Authentication providers
         if self.config.auth.enabled:
             self.service_manager.register(AuthService(self.config.auth))
 
-        # 7. Register optional services (structural deps via constructor)
+            for prov_cfg in self.config.auth.providers:
+                if not prov_cfg.enabled:
+                    continue
+                if prov_cfg.type == "local":
+                    from gilbert.integrations.local_auth import (
+                        LocalAuthenticationService,
+                    )
+
+                    self.service_manager.register(LocalAuthenticationService())
+                elif prov_cfg.type == "google":
+                    from gilbert.integrations.google_auth import (
+                        GoogleAuthenticationService,
+                    )
+
+                    self.service_manager.register(
+                        GoogleAuthenticationService(
+                            domain=prov_cfg.domain,
+                            use_tunnel=prov_cfg.settings.get("use_tunnel", True),
+                        )
+                    )
+
+        # 9. Register optional services (structural deps via constructor)
         if self.config.tts.enabled:
             tts_backend = self._create_tts_backend(self.config.tts.backend)
             self.service_manager.register(
                 TTSService(tts_backend, self.config.tts.credential)
+            )
+
+        if self.config.speaker.enabled:
+            speaker_backend = self._create_speaker_backend(self.config.speaker.backend)
+            self.service_manager.register(SpeakerService(speaker_backend))
+
+        if self.config.music.enabled:
+            music_backend = self._create_music_backend(self.config.music.backend)
+            self.service_manager.register(
+                MusicService(music_backend, self.config.music.credential)
             )
 
         if self.config.ai.enabled:
@@ -94,6 +160,8 @@ class Gilbert:
         # 8. Register factories for hot-swap support
         config_svc.register_factory("tts", self._factory_tts)
         config_svc.register_factory("ai", self._factory_ai)
+        config_svc.register_factory("speaker", self._factory_speaker)
+        config_svc.register_factory("music", self._factory_music)
 
         # 9. Also register in old registry for backward compat
         self.registry.register(StorageBackend, storage)
@@ -162,6 +230,24 @@ class Gilbert:
         raise ValueError(f"Unknown AI backend: {backend_name}")
 
     @staticmethod
+    def _create_music_backend(backend_name: str) -> MusicBackend:
+        """Create a music backend by name."""
+        if backend_name == "spotify":
+            from gilbert.integrations.spotify_music import SpotifyMusic
+
+            return SpotifyMusic()
+        raise ValueError(f"Unknown music backend: {backend_name}")
+
+    @staticmethod
+    def _create_speaker_backend(backend_name: str) -> SpeakerBackend:
+        """Create a speaker backend by name."""
+        if backend_name == "sonos":
+            from gilbert.integrations.sonos_speaker import SonosSpeaker
+
+            return SonosSpeaker()
+        raise ValueError(f"Unknown speaker backend: {backend_name}")
+
+    @staticmethod
     def _create_tts_backend(backend_name: str) -> TTSBackend:
         """Create a TTS backend by name."""
         if backend_name == "elevenlabs":
@@ -181,6 +267,16 @@ class Gilbert:
         """Create a TTSService from a config section."""
         backend = self._create_tts_backend(config.get("backend", "elevenlabs"))
         return TTSService(backend=backend, credential_name=config.get("credential", ""))
+
+    def _factory_speaker(self, config: dict[str, Any]) -> Service:
+        """Create a SpeakerService from a config section."""
+        backend = self._create_speaker_backend(config.get("backend", "sonos"))
+        return SpeakerService(backend=backend)
+
+    def _factory_music(self, config: dict[str, Any]) -> Service:
+        """Create a MusicService from a config section."""
+        backend = self._create_music_backend(config.get("backend", "spotify"))
+        return MusicService(backend=backend, credential_name=config.get("credential", ""))
 
     # --- Storage init ---
 

@@ -1,0 +1,126 @@
+"""Speaker system interface — discover, group, and play audio on speakers."""
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from enum import StrEnum
+
+
+class PlaybackState(StrEnum):
+    """Current playback state of a speaker."""
+
+    PLAYING = "playing"
+    PAUSED = "paused"
+    STOPPED = "stopped"
+    TRANSITIONING = "transitioning"
+
+
+@dataclass(frozen=True)
+class SpeakerInfo:
+    """Information about a discovered speaker."""
+
+    speaker_id: str
+    name: str
+    ip_address: str
+    model: str = ""
+    group_id: str = ""
+    group_name: str = ""
+    is_group_coordinator: bool = False
+    volume: int = 0
+    state: PlaybackState = PlaybackState.STOPPED
+
+
+@dataclass(frozen=True)
+class SpeakerGroup:
+    """A group of speakers playing in sync."""
+
+    group_id: str
+    name: str
+    coordinator_id: str
+    member_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class PlayRequest:
+    """Request to play audio on one or more speakers."""
+
+    uri: str
+    speaker_ids: list[str] = field(default_factory=list)
+    volume: int | None = None
+    title: str = ""
+    position_seconds: float | None = None
+
+
+class SpeakerBackend(ABC):
+    """Abstract speaker system backend. Implementation-agnostic."""
+
+    @abstractmethod
+    async def initialize(self, config: dict[str, object]) -> None:
+        """Initialize the backend with provider-specific configuration."""
+        ...
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Close connections and release resources."""
+        ...
+
+    # --- Discovery ---
+
+    @abstractmethod
+    async def list_speakers(self) -> list[SpeakerInfo]:
+        """List all discovered speakers."""
+        ...
+
+    @abstractmethod
+    async def get_speaker(self, speaker_id: str) -> SpeakerInfo | None:
+        """Get a speaker by ID. Returns None if not found."""
+        ...
+
+    # --- Playback ---
+
+    @abstractmethod
+    async def play_uri(self, request: PlayRequest) -> None:
+        """Play audio from a URI on the specified speakers.
+
+        If speaker_ids is empty, plays on all speakers.
+        """
+        ...
+
+    @abstractmethod
+    async def stop(self, speaker_ids: list[str] | None = None) -> None:
+        """Stop playback on the specified speakers (or all if None)."""
+        ...
+
+    # --- Volume ---
+
+    @abstractmethod
+    async def get_volume(self, speaker_id: str) -> int:
+        """Get volume for a speaker (0-100)."""
+        ...
+
+    @abstractmethod
+    async def set_volume(self, speaker_id: str, volume: int) -> None:
+        """Set volume for a speaker (0-100)."""
+        ...
+
+    # --- Grouping (optional — not all backends support this) ---
+
+    @property
+    def supports_grouping(self) -> bool:
+        """Whether this backend supports speaker grouping."""
+        return False
+
+    async def list_groups(self) -> list[SpeakerGroup]:
+        """List current speaker groups."""
+        raise NotImplementedError("This backend does not support grouping")
+
+    async def group_speakers(self, speaker_ids: list[str]) -> SpeakerGroup:
+        """Group speakers together. Smart implementations should avoid
+        re-grouping if the speakers are already in the desired configuration.
+
+        Returns the resulting group.
+        """
+        raise NotImplementedError("This backend does not support grouping")
+
+    async def ungroup_speakers(self, speaker_ids: list[str]) -> None:
+        """Remove speakers from their groups, returning them to standalone."""
+        raise NotImplementedError("This backend does not support grouping")

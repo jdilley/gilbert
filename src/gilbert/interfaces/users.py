@@ -1,7 +1,61 @@
 """User backend interface — ABC for user CRUD, provider links, and roles."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import Any
+
+
+@dataclass
+class ExternalUser:
+    """A user record from an external provider.
+
+    Used by UserProvider implementations to report users that should
+    have local equivalents in Gilbert.
+    """
+
+    provider_type: str
+    provider_user_id: str
+    email: str
+    display_name: str = ""
+    roles: list[str] = field(default_factory=list)
+    groups: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class UserProviderService(ABC):
+    """Abstract external user source.
+
+    Implementations (e.g., Google Directory, LDAP) are discovered by the
+    UserService and queried to ensure external users have local equivalents.
+    """
+
+    @property
+    @abstractmethod
+    def provider_type(self) -> str:
+        """Unique identifier for this provider (e.g., ``"google"``)."""
+
+    @abstractmethod
+    async def list_external_users(self) -> list[ExternalUser]:
+        """Fetch all users from the external source."""
+
+    @abstractmethod
+    async def get_external_user(
+        self, provider_user_id: str
+    ) -> ExternalUser | None:
+        """Fetch a single user by their external ID."""
+
+    async def get_external_user_by_email(
+        self, email: str
+    ) -> ExternalUser | None:
+        """Fetch a single user by email. Default: linear scan."""
+        for user in await self.list_external_users():
+            if user.email == email:
+                return user
+        return None
+
+    async def list_groups(self) -> list[dict[str, Any]]:
+        """List groups/teams from the external source. Default: empty."""
+        return []
 
 
 class UserBackend(ABC):

@@ -88,3 +88,49 @@ class AuthProvider(ABC):
     async def get_role_mappings(self) -> dict[str, str]:
         """Map external groups/roles to Gilbert roles. Default: empty."""
         return {}
+
+
+@dataclass
+class LoginMethod:
+    """Describes a login option to render on the login page.
+
+    Each AuthenticationService provides one of these so the login page
+    can display all available authentication options.
+    """
+
+    provider_type: str
+    display_name: str
+    # "form" = render an email/password form
+    # "redirect" = render a button that redirects to an external auth URL
+    method: str  # "form" or "redirect"
+    # For "redirect" methods: the URL to redirect to
+    redirect_url: str = ""
+    # For "form" methods: the URL to POST the form to
+    form_action: str = ""
+
+
+class AuthenticationService(ABC):
+    """Abstract authentication service.
+
+    Each implementation handles a specific authentication mechanism and
+    exposes enough metadata for the login page to render UI for it.
+    Implementations should also be ``Service`` subclasses so they
+    participate in the service lifecycle.
+    """
+
+    @property
+    @abstractmethod
+    def provider_type(self) -> str:
+        """Unique identifier (e.g., ``'local'``, ``'google'``)."""
+
+    @abstractmethod
+    def get_login_method(self) -> LoginMethod:
+        """Describe how this service appears on the login page."""
+
+    @abstractmethod
+    async def authenticate(self, credentials: dict[str, Any]) -> AuthInfo | None:
+        """Authenticate. Returns AuthInfo on success, None on failure."""
+
+    async def handle_callback(self, params: dict[str, Any]) -> AuthInfo | None:
+        """Handle an OAuth/external callback. Default: not supported."""
+        return None

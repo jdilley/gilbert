@@ -57,12 +57,13 @@ class AIService(Service):
         self._max_tool_rounds: int = 10
         self._storage: StorageBackend | None = None
         self._resolver: ServiceResolver | None = None
+        self._persona_svc: Any | None = None
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="ai",
             capabilities=frozenset({"ai_chat"}),
-            requires=frozenset({"credentials", "entity_storage"}),
+            requires=frozenset({"credentials", "entity_storage", "persona"}),
             optional=frozenset({"ai_tools", "configuration"}),
         )
 
@@ -103,6 +104,9 @@ class AIService(Service):
         if not isinstance(storage_svc, StorageService):
             raise TypeError("Expected StorageService for 'entity_storage' capability")
         self._storage = storage_svc.backend
+
+        # Resolve persona service
+        self._persona_svc = resolver.require_capability("persona")
 
         # Save resolver for lazy tool discovery
         self._resolver = resolver
@@ -220,7 +224,7 @@ class AIService(Service):
 
             request = AIRequest(
                 messages=truncated,
-                system_prompt=self._system_prompt,
+                system_prompt=self._build_system_prompt(),
                 tools=tool_defs if tool_defs else [],
                 max_tokens=int(self._config.get("max_tokens", 4096)),
                 temperature=float(self._config.get("temperature", 0.7)),
@@ -254,6 +258,28 @@ class AIService(Service):
         # Return final text response
         final_text = response.message.content if response else ""
         return final_text, conversation_id
+
+    # --- System Prompt ---
+
+    def _build_system_prompt(self) -> str:
+        """Build the full system prompt: base identity first, then persona elaboration."""
+        parts: list[str] = []
+        if self._system_prompt:
+            parts.append(self._system_prompt)
+        if self._persona_svc is not None:
+            from gilbert.core.services.persona import PersonaService
+
+            if isinstance(self._persona_svc, PersonaService):
+                parts.append(self._persona_svc.persona)
+                if not self._persona_svc.is_customized:
+                    parts.append(
+                        "IMPORTANT: The persona has not been customized yet. "
+                        "At the start of the FIRST conversation only, briefly let the user know "
+                        "they can customize your personality and behavior by asking you to "
+                        "update the persona. Only mention this once — never bring it up again "
+                        "in subsequent messages or conversations."
+                    )
+        return "\n\n".join(parts) if parts else ""
 
     # --- Tool Discovery ---
 

@@ -17,11 +17,16 @@ async def dashboard(request: Request):  # type: ignore[no-untyped-def]
             "icon": "&#9881;",  # gear
         },
         {
+            "title": "Entity Browser",
+            "description": "Browse collections and entities in storage.",
+            "url": "/entities",
+            "icon": "&#128451;",  # file cabinet
+        },
+        {
             "title": "Chat",
-            "description": "Talk to Gilbert (coming soon).",
-            "url": "#",
+            "description": "Talk to Gilbert and get things done.",
+            "url": "/chat",
             "icon": "&#128172;",  # speech bubble
-            "disabled": True,
         },
     ]
     return templates.TemplateResponse(request, "dashboard.html", {"cards": cards})

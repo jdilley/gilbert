@@ -58,6 +58,30 @@ class IndexDefinition:
     unique: bool = False
 
 
+class OnDelete(StrEnum):
+    """Action to take when a referenced entity is deleted."""
+
+    RESTRICT = "restrict"  # prevent deletion if references exist
+    CASCADE = "cascade"  # delete referencing entities
+    SET_NULL = "set_null"  # set the foreign key field to null
+
+
+@dataclass
+class ForeignKeyDefinition:
+    """Defines a foreign key relationship between collections.
+
+    The *field* in *collection* must reference an existing entity ID
+    (or JSON field value) in *ref_collection*.
+    """
+
+    collection: str  # collection containing the FK field
+    field: str  # dot-notation field path holding the reference
+    ref_collection: str  # referenced collection
+    ref_field: str = "_id"  # field in referenced collection ("_id" = entity ID)
+    on_delete: OnDelete = OnDelete.RESTRICT
+    name: str | None = None  # auto-generated if not provided
+
+
 class StorageBackend(ABC):
     """Abstract entity store. Implementation-agnostic."""
 
@@ -128,4 +152,16 @@ class StorageBackend(ABC):
     @abstractmethod
     async def list_indexes(self, collection: str) -> list[IndexDefinition]:
         """List indexes on a collection."""
+        ...
+
+    # --- Foreign Keys ---
+
+    @abstractmethod
+    async def ensure_foreign_key(self, fk: ForeignKeyDefinition) -> None:
+        """Declare a foreign key constraint. Enforced on write and delete."""
+        ...
+
+    @abstractmethod
+    async def list_foreign_keys(self, collection: str) -> list[ForeignKeyDefinition]:
+        """List foreign key constraints involving a collection."""
         ...

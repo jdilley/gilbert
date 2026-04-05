@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Gilbert — {{ collection }}{% endblock %}
+{% block content %}
+<div class="breadcrumb">
+    <a href="/entities">Collections</a> &rsaquo; <strong>{{ collection }}</strong>
+</div>
+
+<h1>{{ collection }}</h1>
+<p class="subtitle">{{ total }} entit{{ "y" if total == 1 else "ies" }}</p>
+
+{% if entities %}
+<table class="config-table entity-table">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Fields</th>
+            <th>Preview</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for e in entities %}
+        <tr>
+            <td><a href="/entities/{{ collection }}/{{ e._id }}" class="entity-link"><code>{{ e._id }}</code></a></td>
+            <td><span class="muted">{{ e.keys() | list | reject("eq", "_id") | list | length }}</span></td>
+            <td class="preview-cell">
+                {% set preview_keys = e.keys() | list | reject("eq", "_id") | list %}
+                {% for key in preview_keys[:4] %}
+                <span class="badge badge-muted">{{ key }}: {{ e[key] | string | truncate(30) }}</span>
+                {% endfor %}
+                {% if preview_keys | length > 4 %}
+                <span class="muted">+{{ preview_keys | length - 4 }} more</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="/entities/{{ collection }}?page={{ page - 1 }}" class="page-link">&laquo; Prev</a>
+    {% endif %}
+    <span class="muted">Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="/entities/{{ collection }}?page={{ page + 1 }}" class="page-link">Next &raquo;</a>
+    {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<p class="muted">This collection is empty.</p>
+{% endif %}
+{% endblock %}

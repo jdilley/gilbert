@@ -116,6 +116,10 @@ gotchas, etc.
 - Do not dump entire source files into memories. Capture the *knowledge* — what it is, why it exists, how it fits together.
 - Always keep the index in sync when creating, renaming, or deleting memory files.
 
+## Privacy
+
+**Never put private or personal information in tracked files.** API keys, credentials, voice IDs, email addresses, and any other personal data must only go in gitignored locations (`.gilbert/config.yaml`, `.gilbert/credentials/`, etc.). This includes `.claude/memory/` files — those are committed to the repo. If you need to remember something private, use the user-scoped memory system instead of the project-scoped one.
+
 ## Development Guidelines
 
 - **Always write tests.** Unit tests use mocks for external dependencies. Database tests hit a real test SQLite database — no mocking the DB.

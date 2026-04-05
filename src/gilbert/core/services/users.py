@@ -1,7 +1,8 @@
-"""User service — manages local user accounts, roles, and provider links."""
+"""User service — manages local user accounts with external provider sync."""
 
 import json
 import logging
+import uuid
 from typing import Any
 
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
@@ -11,7 +12,7 @@ from gilbert.interfaces.tools import (
     ToolParameter,
     ToolParameterType,
 )
-from gilbert.interfaces.users import UserBackend
+from gilbert.interfaces.users import ExternalUser, UserBackend, UserProviderService
 from gilbert.storage.user_storage import StorageUserBackend
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,8 @@ class UserService(Service):
     """Wraps a UserBackend as a discoverable service.
 
     Always registered (users are foundational). On startup ensures the
-    root user exists and creates storage indexes.
+    root user exists. Discovers UserProviderService instances to sync
+    external users on demand.
     """
 
     def __init__(
@@ -33,12 +35,14 @@ class UserService(Service):
         self._root_password_hash = root_password_hash
         self._default_roles = default_roles or ["user"]
         self._backend: UserBackend | None = None
+        self._resolver: ServiceResolver | None = None
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="users",
             capabilities=frozenset({"users", "ai_tools"}),
             requires=frozenset({"entity_storage"}),
+            optional=frozenset({"user_provider"}),
         )
 
     @property
@@ -54,6 +58,7 @@ class UserService(Service):
         backend = StorageUserBackend(storage)
         await backend.ensure_indexes()
         self._backend = backend
+        self._resolver = resolver
 
         await self._ensure_root_user()
 
@@ -84,6 +89,121 @@ class UserService(Service):
                     _ROOT_USER_ID, {"password_hash": self._root_password_hash}
                 )
 
+    # ---- Provider discovery ----
+
+    def _get_providers(self) -> list[UserProviderService]:
+        """Discover all running UserProviderService instances."""
+        if self._resolver is None:
+            return []
+        providers: list[UserProviderService] = []
+        for svc in self._resolver.get_all("user_provider"):
+            if isinstance(svc, UserProviderService):
+                providers.append(svc)
+        return providers
+
+    # ---- Sync from providers ----
+
+    async def _ensure_local_user(self, ext: ExternalUser) -> dict[str, Any]:
+        """Ensure an external user has a local equivalent. Returns local user."""
+        backend = self.backend
+
+        # 1. Try provider link lookup.
+        user = await backend.get_user_by_provider_link(
+            ext.provider_type, ext.provider_user_id
+        )
+        if user is not None:
+            # Update display name and metadata if changed.
+            updates: dict[str, Any] = {}
+            if ext.display_name and user.get("display_name") != ext.display_name:
+                updates["display_name"] = ext.display_name
+            if ext.metadata:
+                existing_meta = user.get("metadata", {})
+                merged_meta = {**existing_meta, **ext.metadata}
+                if merged_meta != existing_meta:
+                    updates["metadata"] = merged_meta
+            if ext.groups:
+                updates.setdefault("metadata", user.get("metadata", {}))
+                updates["metadata"]["groups"] = ext.groups
+            if updates:
+                await backend.update_user(user["_id"], updates)
+                user.update(updates)
+            return user
+
+        # 2. Try email lookup (link if found).
+        user = await backend.get_user_by_email(ext.email)
+        if user is not None:
+            if not user.get("is_root", False):
+                await backend.add_provider_link(
+                    user["_id"], ext.provider_type, ext.provider_user_id
+                )
+                # Cache in provider_users table.
+                await backend.put_provider_user(
+                    ext.provider_type,
+                    ext.provider_user_id,
+                    {
+                        "local_user_id": user["_id"],
+                        "email": ext.email,
+                        "display_name": ext.display_name,
+                    },
+                )
+            return user
+
+        # 3. Create new local user.
+        user_id = f"usr_{uuid.uuid4().hex[:12]}"
+        roles = set(ext.roles) | set(self._default_roles)
+        data: dict[str, Any] = {
+            "email": ext.email,
+            "display_name": ext.display_name,
+            "roles": sorted(roles),
+            "provider_links": [
+                {
+                    "provider_type": ext.provider_type,
+                    "provider_user_id": ext.provider_user_id,
+                }
+            ],
+            "metadata": {**ext.metadata, "groups": ext.groups} if ext.groups else ext.metadata,
+        }
+        user = await backend.create_user(user_id, data)
+
+        # Cache in provider_users table.
+        await backend.put_provider_user(
+            ext.provider_type,
+            ext.provider_user_id,
+            {
+                "local_user_id": user_id,
+                "email": ext.email,
+                "display_name": ext.display_name,
+            },
+        )
+
+        logger.info(
+            "Created local user %s from %s provider (%s)",
+            user_id,
+            ext.provider_type,
+            ext.email,
+        )
+        return user
+
+    async def sync_providers(self) -> int:
+        """Sync all external providers. Returns total users synced."""
+        count = 0
+        for provider in self._get_providers():
+            try:
+                external_users = await provider.list_external_users()
+                for ext in external_users:
+                    await self._ensure_local_user(ext)
+                    count += 1
+                logger.info(
+                    "Synced %d users from %s provider",
+                    len(external_users),
+                    provider.provider_type,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to sync from %s provider", provider.provider_type
+                )
+        return count
+
     # ---- Public API (delegates to backend with root-user guards) ----
 
     async def create_user(self, user_id: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -97,7 +217,31 @@ class UserService(Service):
         return await self.backend.get_user(user_id)
 
     async def get_user_by_email(self, email: str) -> dict[str, Any] | None:
-        return await self.backend.get_user_by_email(email)
+        """Get user by email. Checks providers if not found locally."""
+        user = await self.backend.get_user_by_email(email)
+        if user is not None:
+            return user
+
+        # Not found locally — check providers.
+        for provider in self._get_providers():
+            try:
+                ext = await provider.get_external_user_by_email(email)
+                if ext is not None:
+                    return await self._ensure_local_user(ext)
+            except Exception:
+                logger.debug(
+                    "Provider %s failed email lookup for %s",
+                    provider.provider_type,
+                    email,
+                )
+        return None
+
+    async def list_users(
+        self, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        """List users, syncing from providers first."""
+        await self.sync_providers()
+        return await self.backend.list_users(limit=limit, offset=offset)
 
     async def delete_user(self, user_id: str) -> None:
         if user_id == _ROOT_USER_ID:
@@ -121,7 +265,7 @@ class UserService(Service):
         return [
             ToolDefinition(
                 name="list_users",
-                description="List all local user accounts.",
+                description="List all users (syncs from external providers first).",
                 parameters=[
                     ToolParameter(
                         name="limit",
@@ -133,12 +277,12 @@ class UserService(Service):
             ),
             ToolDefinition(
                 name="get_user",
-                description="Get a user by ID.",
+                description="Get a user by ID or email address.",
                 parameters=[
                     ToolParameter(
                         name="user_id",
                         type=ToolParameterType.STRING,
-                        description="The user ID to look up.",
+                        description="The user ID or email to look up.",
                     ),
                 ],
             ),
@@ -158,6 +302,11 @@ class UserService(Service):
                     ),
                 ],
             ),
+            ToolDefinition(
+                name="sync_users",
+                description="Sync users from all external providers (e.g., Google Workspace).",
+                parameters=[],
+            ),
         ]
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
@@ -168,27 +317,30 @@ class UserService(Service):
                 return await self._tool_get_user(arguments)
             case "create_user":
                 return await self._tool_create_user(arguments)
+            case "sync_users":
+                return await self._tool_sync_users()
             case _:
                 raise KeyError(f"Unknown tool: {name}")
 
     async def _tool_list_users(self, arguments: dict[str, Any]) -> str:
         limit = arguments.get("limit")
-        users = await self.backend.list_users(limit=limit)
-        # Strip password hashes from output.
+        users = await self.list_users(limit=limit)
         for u in users:
             u.pop("password_hash", None)
         return json.dumps(users)
 
     async def _tool_get_user(self, arguments: dict[str, Any]) -> str:
-        user = await self.backend.get_user(arguments["user_id"])
+        identifier = arguments["user_id"]
+        # Try by ID first, then by email.
+        user = await self.backend.get_user(identifier)
         if user is None:
-            return json.dumps({"error": f"User not found: {arguments['user_id']}"})
+            user = await self.get_user_by_email(identifier)
+        if user is None:
+            return json.dumps({"error": f"User not found: {identifier}"})
         user.pop("password_hash", None)
         return json.dumps(user)
 
     async def _tool_create_user(self, arguments: dict[str, Any]) -> str:
-        import uuid
-
         user_id = f"usr_{uuid.uuid4().hex[:12]}"
         user = await self.create_user(
             user_id,
@@ -199,3 +351,7 @@ class UserService(Service):
         )
         user.pop("password_hash", None)
         return json.dumps({"status": "ok", "user": user})
+
+    async def _tool_sync_users(self) -> str:
+        count = await self.sync_providers()
+        return json.dumps({"status": "ok", "synced": count})

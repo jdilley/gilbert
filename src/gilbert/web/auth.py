@@ -4,10 +4,15 @@ from typing import Any
 
 from fastapi import Depends, HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.responses import Response
+from starlette.responses import RedirectResponse, Response
 
 from gilbert.core.context import set_current_user
 from gilbert.interfaces.auth import UserContext
+
+# Paths that bypass authentication.
+# Exact matches checked first, then prefixes.
+_PUBLIC_EXACT = ("/auth/login", "/auth/session")
+_PUBLIC_PREFIXES = ("/auth/login/", "/static/", "/output/")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -16,17 +21,23 @@ class AuthMiddleware(BaseHTTPMiddleware):
     Checks for a ``gilbert_session`` cookie or ``Authorization: Bearer``
     header.  If the auth service is not running (auth disabled), all
     requests proceed as ``UserContext.SYSTEM``.
+
+    Unauthenticated requests to non-public paths are redirected to the
+    login page.
     """
 
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
+        path = request.url.path
         user = UserContext.SYSTEM
 
         gilbert = getattr(request.app.state, "gilbert", None)
+        auth_enabled = False
         if gilbert is not None:
             auth_svc = gilbert.service_manager.get_by_capability("authentication")
             if auth_svc is not None:
+                auth_enabled = True
                 session_id = _extract_session(request)
                 if session_id:
                     ctx = await auth_svc.validate_session(session_id)
@@ -35,6 +46,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         request.state.user = user
         set_current_user(user)
+
+        # Redirect unauthenticated users to login (skip public paths).
+        is_public = path in _PUBLIC_EXACT or any(
+            path.startswith(p) for p in _PUBLIC_PREFIXES
+        )
+        if auth_enabled and not is_public and user.user_id == "system":
+            return RedirectResponse(url="/auth/login", status_code=302)
 
         return await call_next(request)
 

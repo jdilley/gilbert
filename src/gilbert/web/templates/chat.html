@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}Gilbert — Chat{% endblock %}
+{% block content %}
+<div class="chat-layout">
+    <!-- Sidebar: conversation history -->
+    <aside class="chat-sidebar">
+        <button id="new-chat" class="btn-primary btn-full">New Chat</button>
+        <div id="conversation-list" class="conversation-list">
+            {% for conv in conversations %}
+            <div class="conversation-item" data-id="{{ conv._id }}">
+                <span class="conversation-preview">
+                    {% set first_user = [] %}
+                    {% for m in conv.messages %}
+                        {% if m.role == "user" and not first_user %}
+                            {{ m.content[:60] }}
+                            {% if first_user.append(1) %}{% endif %}
+                        {% endif %}
+                    {% endfor %}
+                    {% if not first_user %}New conversation{% endif %}
+                </span>
+                <span class="conversation-meta muted">{{ conv.messages | length }} msgs</span>
+            </div>
+            {% endfor %}
+        </div>
+    </aside>
+
+    <!-- Main chat area -->
+    <div class="chat-main">
+        {% if not ai_available %}
+        <div class="chat-unavailable">
+            <p>AI service is not running. Enable it in configuration to use chat.</p>
+        </div>
+        {% endif %}
+
+        <div id="chat-messages" class="chat-messages">
+            <div class="chat-welcome">
+                <h2>Chat with Gilbert</h2>
+                <p class="muted">Ask anything or request an action.</p>
+            </div>
+        </div>
+
+        <div id="chat-form" class="chat-input-area">
+            <textarea id="chat-input" placeholder="Type a message..." rows="1" {% if not ai_available %}disabled{% endif %}></textarea>
+            <button id="chat-submit" {% if not ai_available %}disabled{% endif %}>Send</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const messagesEl = document.getElementById('chat-messages');
+    const form = document.getElementById('chat-form');
+    const input = document.getElementById('chat-input');
+    const submitBtn = document.getElementById('chat-submit');
+    const newChatBtn = document.getElementById('new-chat');
+    let conversationId = null;
+    let sending = false;
+
+    function scrollToBottom() {
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function appendMessage(role, content) {
+        // Remove welcome message on first message.
+        const welcome = messagesEl.querySelector('.chat-welcome');
+        if (welcome) welcome.remove();
+
+        const div = document.createElement('div');
+        div.className = 'chat-msg chat-msg-' + role;
+
+        const label = document.createElement('div');
+        label.className = 'chat-msg-role';
+        label.textContent = role === 'user' ? 'You' : 'Gilbert';
+
+        const body = document.createElement('div');
+        body.className = 'chat-msg-body';
+        body.textContent = content;
+
+        div.appendChild(label);
+        div.appendChild(body);
+        messagesEl.appendChild(div);
+        scrollToBottom();
+    }
+
+    function setLoading(on) {
+        sending = on;
+        submitBtn.disabled = on;
+        input.disabled = on;
+        if (on) {
+            const div = document.createElement('div');
+            div.className = 'chat-msg chat-msg-assistant chat-loading';
+            div.innerHTML = '<div class="chat-msg-role">Gilbert</div><div class="chat-msg-body typing">Thinking...</div>';
+            messagesEl.appendChild(div);
+            scrollToBottom();
+        } else {
+            const loader = messagesEl.querySelector('.chat-loading');
+            if (loader) loader.remove();
+        }
+    }
+
+    async function sendMessage(text) {
+        if (!text.trim() || sending) return;
+        appendMessage('user', text);
+        setLoading(true);
+
+        try {
+            const resp = await fetch('/chat/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: text,
+                    conversation_id: conversationId,
+                }),
+            });
+
+            setLoading(false);
+
+            if (resp.ok) {
+                const data = await resp.json();
+                conversationId = data.conversation_id;
+                appendMessage('assistant', data.response);
+            } else if (resp.status === 401) {
+                window.location.href = '/auth/login';
+            } else {
+                const err = await resp.json().catch(() => ({}));
+                appendMessage('assistant', 'Error: ' + (err.detail || 'Something went wrong'));
+            }
+        } catch (e) {
+            setLoading(false);
+            appendMessage('assistant', 'Error: Connection failed');
+        }
+    }
+
+    function doSend() {
+        const text = input.value;
+        input.value = '';
+        input.style.height = 'auto';
+        sendMessage(text);
+    }
+
+    submitBtn.addEventListener('click', doSend);
+
+    // Auto-resize textarea.
+    input.addEventListener('input', () => {
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 150) + 'px';
+    });
+
+    // Enter to send (Shift+Enter for newline).
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            doSend();
+        }
+    });
+
+    // New chat.
+    newChatBtn.addEventListener('click', () => {
+        conversationId = null;
+        messagesEl.innerHTML = '<div class="chat-welcome"><h2>Chat with Gilbert</h2><p class="muted">Ask anything or request an action.</p></div>';
+        document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
+    });
+
+    // Load conversation from sidebar.
+    document.querySelectorAll('.conversation-item').forEach(el => {
+        el.addEventListener('click', async () => {
+            const id = el.dataset.id;
+            document.querySelectorAll('.conversation-item').forEach(e => e.classList.remove('active'));
+            el.classList.add('active');
+
+            try {
+                const resp = await fetch('/chat/conversations/' + id);
+                if (!resp.ok) return;
+                const data = await resp.json();
+                conversationId = data.conversation_id;
+                messagesEl.innerHTML = '';
+                data.messages.forEach(m => appendMessage(m.role, m.content));
+            } catch (e) {
+                // ignore
+            }
+        });
+    });
+})();
+</script>
+{% endblock %}

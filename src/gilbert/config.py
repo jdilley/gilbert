@@ -64,6 +64,14 @@ class WebConfig(BaseModel):
     port: int = 8765
 
 
+class TunnelConfig(BaseModel):
+    """Public tunnel configuration (ngrok, etc.)."""
+
+    enabled: bool = False
+    credential: str = ""  # name of an api_key credential for ngrok auth token
+    domain: str = ""  # custom ngrok domain (e.g., "myapp.ngrok.io")
+
+
 class TTSVoiceConfig(BaseModel):
     """A named TTS voice mapping."""
 
@@ -121,6 +129,44 @@ class AuthConfig(BaseModel):
     root_password: str = ""
 
 
+class GoogleConfig(BaseModel):
+    """Google API configuration.
+
+    Supports multiple named credential profiles. Each consumer (directory
+    sync, email, etc.) references a profile by name.
+    """
+
+    enabled: bool = False
+    oauth_credential: str = ""
+    accounts: dict[str, "GoogleAccountConfig"] = {}
+
+
+class GoogleAccountConfig(BaseModel):
+    """A named Google service account profile."""
+
+    credential: str  # references a key in top-level credentials
+    delegated_user: str = ""
+    scopes: list[str] = []
+
+
+class MusicConfig(BaseModel):
+    """Music service configuration."""
+
+    enabled: bool = False
+    backend: str = "spotify"
+    credential: str = ""
+    settings: dict[str, Any] = {}
+
+
+class SpeakerConfig(BaseModel):
+    """Speaker system configuration."""
+
+    enabled: bool = False
+    backend: str = "sonos"
+    default_announce_volume: int | None = None
+    settings: dict[str, Any] = {}
+
+
 class GilbertConfig(BaseModel):
     """Top-level Gilbert configuration."""
 
@@ -133,6 +179,10 @@ class GilbertConfig(BaseModel):
     tts: TTSConfig = TTSConfig()
     ai: AIConfig = AIConfig()
     auth: AuthConfig = AuthConfig()
+    google: GoogleConfig = GoogleConfig()
+    tunnel: TunnelConfig = TunnelConfig()
+    speaker: SpeakerConfig = SpeakerConfig()
+    music: MusicConfig = MusicConfig()
 
 
 def load_config(path: str | Path | None = None) -> GilbertConfig:

@@ -140,9 +140,21 @@ def storage_service(storage_backend: StorageBackend) -> StorageService:
 
 
 @pytest.fixture
+def persona_service() -> Any:
+    from unittest.mock import MagicMock
+
+    from gilbert.core.services.persona import PersonaService
+
+    svc = MagicMock(spec=PersonaService)
+    svc.persona = "You are Gilbert, a test assistant."
+    return svc
+
+
+@pytest.fixture
 def resolver(
     cred_service: CredentialService,
     storage_service: StorageService,
+    persona_service: Any,
 ) -> ServiceResolver:
     mock = AsyncMock(spec=ServiceResolver)
 
@@ -151,6 +163,8 @@ def resolver(
             return cred_service
         if cap == "entity_storage":
             return storage_service
+        if cap == "persona":
+            return persona_service
         raise LookupError(f"No service provides: {cap}")
 
     def get_cap(cap: str) -> Any:
@@ -236,7 +250,8 @@ async def test_chat_simple_response(
     assert len(stub_backend.requests) == 1
 
     req = stub_backend.requests[0]
-    assert req.system_prompt == "You are a test assistant."
+    assert "You are a test assistant." in req.system_prompt
+    assert "You are Gilbert, a test assistant." in req.system_prompt
     assert req.max_tokens == 1024
     assert req.temperature == 0.5
     assert len(req.messages) == 1
@@ -306,6 +321,13 @@ async def test_chat_with_tool_calls(
         results={"get_weather": '{"temp": 72, "condition": "sunny"}'},
     )
 
+    from unittest.mock import MagicMock as MM
+
+    from gilbert.core.services.persona import PersonaService
+
+    _persona = MM(spec=PersonaService)
+    _persona.persona = "Test persona."
+
     resolver = AsyncMock(spec=ServiceResolver)
 
     def require_cap(cap: str) -> Any:
@@ -313,6 +335,8 @@ async def test_chat_with_tool_calls(
             return cred_service
         if cap == "entity_storage":
             return storage_service
+        if cap == "persona":
+            return _persona
         raise LookupError(cap)
 
     resolver.require_capability = require_cap
@@ -430,6 +454,13 @@ async def test_tool_execution_error_returns_error_result(
     cred_service: CredentialService,
     storage_service: StorageService,
 ) -> None:
+    from unittest.mock import MagicMock as MM
+
+    from gilbert.core.services.persona import PersonaService
+
+    _persona = MM(spec=PersonaService)
+    _persona.persona = "Test persona."
+
     error_provider = ErrorToolProviderService()
     resolver = AsyncMock(spec=ServiceResolver)
 
@@ -438,6 +469,8 @@ async def test_tool_execution_error_returns_error_result(
             return cred_service
         if cap == "entity_storage":
             return storage_service
+        if cap == "persona":
+            return _persona
         raise LookupError(cap)
 
     resolver.require_capability = require_cap

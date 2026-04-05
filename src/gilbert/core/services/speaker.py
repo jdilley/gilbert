@@ -1,0 +1,671 @@
+"""Speaker service — wraps a SpeakerBackend as a discoverable service with announce support."""
+
+import json
+import logging
+import uuid
+from typing import Any
+
+from gilbert.core.output import cleanup_old_files, get_output_dir
+from gilbert.interfaces.configuration import ConfigParam
+from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
+from gilbert.interfaces.speaker import (
+    PlayRequest,
+    SpeakerBackend,
+)
+from gilbert.interfaces.tools import (
+    ToolDefinition,
+    ToolParameter,
+    ToolParameterType,
+)
+
+logger = logging.getLogger(__name__)
+
+# Entity collection for speaker aliases
+_ALIAS_COLLECTION = "speaker_aliases"
+
+
+class SpeakerService(Service):
+    """Exposes a SpeakerBackend as a service with speaker control and announce capabilities."""
+
+    def __init__(self, backend: SpeakerBackend) -> None:
+        self._backend = backend
+        self._config: dict[str, object] = {}
+        self._output_ttl_seconds: int = 3600
+        self._default_announce_volume: int | None = None
+        self._web_host: str = "0.0.0.0"
+        self._web_port: int = 8765
+        # Track last-used speaker set for "use last" default
+        self._last_speaker_ids: list[str] = []
+
+    def service_info(self) -> ServiceInfo:
+        return ServiceInfo(
+            name="speaker",
+            capabilities=frozenset({"speaker_control", "ai_tools"}),
+            requires=frozenset({"entity_storage"}),
+            optional=frozenset({"configuration", "text_to_speech"}),
+        )
+
+    @property
+    def backend(self) -> SpeakerBackend:
+        return self._backend
+
+    async def start(self, resolver: ServiceResolver) -> None:
+        # Store resolver references for runtime use
+        self._storage_svc = resolver.require_capability("entity_storage")
+        self._tts_svc = resolver.get_capability("text_to_speech")
+
+        # Load config
+        config_svc = resolver.get_capability("configuration")
+        if config_svc is not None:
+            from gilbert.core.services.configuration import ConfigurationService
+
+            if isinstance(config_svc, ConfigurationService):
+                section = config_svc.get_section("speaker")
+                self._apply_config(section)
+                global_ttl = config_svc.get("output_ttl_seconds")
+                if global_ttl is not None:
+                    self._output_ttl_seconds = int(global_ttl)
+                # Read web config for building audio URLs
+                web_section = config_svc.get_section("web")
+                self._web_host = web_section.get("host", "0.0.0.0")
+                self._web_port = int(web_section.get("port", 8765))
+
+        init_config: dict[str, object] = dict(self._config)
+        await self._backend.initialize(init_config)
+
+        # Ensure alias index
+        from gilbert.interfaces.storage import IndexDefinition
+
+        storage = self._get_storage_backend()
+        await storage.ensure_index(IndexDefinition(
+            collection=_ALIAS_COLLECTION,
+            fields=["alias"],
+            unique=True,
+        ))
+
+        logger.info("Speaker service started")
+
+    def _get_storage_backend(self) -> Any:
+        """Get the storage backend from the storage service."""
+        from gilbert.core.services.storage import StorageService
+
+        if isinstance(self._storage_svc, StorageService):
+            return self._storage_svc.backend
+        raise TypeError("Expected StorageService for entity_storage")
+
+    def _apply_config(self, section: dict[str, Any]) -> None:
+        """Apply tunable config values."""
+        self._config = section.get("settings", self._config)
+        vol = section.get("default_announce_volume")
+        if vol is not None:
+            self._default_announce_volume = int(vol)
+
+    # --- Configurable protocol ---
+
+    @property
+    def config_namespace(self) -> str:
+        return "speaker"
+
+    def config_params(self) -> list[ConfigParam]:
+        return [
+            ConfigParam(
+                key="backend", type=ToolParameterType.STRING,
+                description="Speaker backend type.",
+                default="sonos", restart_required=True,
+            ),
+            ConfigParam(
+                key="enabled", type=ToolParameterType.BOOLEAN,
+                description="Whether the speaker service is enabled.",
+                default=False, restart_required=True,
+            ),
+            ConfigParam(
+                key="default_announce_volume", type=ToolParameterType.INTEGER,
+                description="Default volume level for announcements (0-100). Unset means use current volume.",
+            ),
+            ConfigParam(
+                key="settings", type=ToolParameterType.OBJECT,
+                description="Backend-specific settings.",
+                default={},
+            ),
+        ]
+
+    async def on_config_changed(self, config: dict[str, Any]) -> None:
+        self._apply_config(config)
+
+    async def stop(self) -> None:
+        await self._backend.close()
+
+    # --- Alias management ---
+
+    async def set_alias(self, speaker_id: str, alias: str) -> None:
+        """Assign an alias name to a speaker. Raises ValueError on collision."""
+        # Check the alias doesn't collide with an existing speaker name
+        speakers = await self._backend.list_speakers()
+        for s in speakers:
+            if s.name.lower() == alias.lower():
+                raise ValueError(
+                    f"Alias '{alias}' collides with existing speaker name '{s.name}'"
+                )
+
+        # Check alias doesn't collide with another alias
+        storage = self._get_storage_backend()
+        from gilbert.interfaces.storage import Filter, FilterOp, Query
+
+        existing = await storage.query(Query(
+            collection=_ALIAS_COLLECTION,
+            filters=[Filter(field="alias", op=FilterOp.EQ, value=alias.lower())],
+        ))
+        if existing:
+            existing_id = existing[0].get("speaker_id", "")
+            if existing_id != speaker_id:
+                raise ValueError(
+                    f"Alias '{alias}' is already assigned to speaker '{existing_id}'"
+                )
+
+        await storage.put(_ALIAS_COLLECTION, f"{speaker_id}:{alias.lower()}", {
+            "speaker_id": speaker_id,
+            "alias": alias.lower(),
+            "display_alias": alias,
+        })
+        logger.info("Alias '%s' assigned to speaker %s", alias, speaker_id)
+
+    async def remove_alias(self, alias: str) -> None:
+        """Remove an alias."""
+        storage = self._get_storage_backend()
+        from gilbert.interfaces.storage import Filter, FilterOp, Query
+
+        results = await storage.query(Query(
+            collection=_ALIAS_COLLECTION,
+            filters=[Filter(field="alias", op=FilterOp.EQ, value=alias.lower())],
+        ))
+        for r in results:
+            await storage.delete(_ALIAS_COLLECTION, r["_id"])
+        logger.info("Alias '%s' removed", alias)
+
+    async def resolve_speaker_name(self, name: str) -> str | None:
+        """Resolve a speaker name or alias to a speaker_id. Returns None if not found."""
+        # Try direct match by speaker name
+        speakers = await self._backend.list_speakers()
+        for s in speakers:
+            if s.name.lower() == name.lower():
+                return s.speaker_id
+
+        # Try alias lookup
+        storage = self._get_storage_backend()
+        from gilbert.interfaces.storage import Filter, FilterOp, Query
+
+        results = await storage.query(Query(
+            collection=_ALIAS_COLLECTION,
+            filters=[Filter(field="alias", op=FilterOp.EQ, value=name.lower())],
+        ))
+        if results:
+            return results[0].get("speaker_id")
+
+        return None
+
+    async def resolve_speaker_names(self, names: list[str]) -> list[str]:
+        """Resolve a list of speaker names/aliases to speaker_ids."""
+        ids = []
+        for name in names:
+            sid = await self.resolve_speaker_name(name)
+            if sid is None:
+                raise KeyError(f"Unknown speaker or alias: {name!r}")
+            ids.append(sid)
+        return ids
+
+    def _audio_url(self, file_path: str) -> str:
+        """Build an HTTP URL for an output file so speakers can fetch it.
+
+        Speakers need to access audio over HTTP — they can't read local files.
+        We discover the LAN IP by connecting a UDP socket to an external address
+        (no actual traffic is sent) which reveals the local interface IP.
+        """
+        import socket
+        from pathlib import Path
+
+        from gilbert.core.output import OUTPUT_DIR
+
+        # Resolve relative path under output dir
+        rel = Path(file_path).relative_to(OUTPUT_DIR.resolve())
+        host = self._web_host
+        if host in ("0.0.0.0", "127.0.0.1", "localhost"):
+            host = self._get_lan_ip()
+        return f"http://{host}:{self._web_port}/output/{rel}"
+
+    @staticmethod
+    def _get_lan_ip() -> str:
+        """Get the machine's LAN IP address."""
+        import socket
+
+        try:
+            # Connect a UDP socket to a public address to discover the local interface.
+            # No data is actually sent.
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+        except OSError:
+            return "127.0.0.1"
+
+    def _resolve_target_speakers(self, speaker_ids: list[str] | None) -> list[str]:
+        """Resolve target speakers: explicit list > last used > all."""
+        if speaker_ids:
+            self._last_speaker_ids = list(speaker_ids)
+            return speaker_ids
+        if self._last_speaker_ids:
+            return self._last_speaker_ids
+        # Fall back to all speakers
+        return []
+
+    # --- Announce ---
+
+    async def announce(
+        self,
+        text: str,
+        speaker_names: list[str] | None = None,
+        volume: int | None = None,
+        voice_name: str | None = None,
+    ) -> str:
+        """Announce text over speakers using TTS.
+
+        1. Generate audio via TTS
+        2. Group speakers if needed
+        3. Play the audio
+        """
+        if self._tts_svc is None:
+            raise RuntimeError("TTS service is not available — cannot announce")
+
+        from gilbert.core.services.tts import TTSService
+        from gilbert.interfaces.tts import AudioFormat, SynthesisRequest
+
+        if not isinstance(self._tts_svc, TTSService):
+            raise TypeError("Expected TTSService for text_to_speech capability")
+
+        # Resolve speaker names to IDs
+        speaker_ids: list[str] = []
+        if speaker_names:
+            speaker_ids = await self.resolve_speaker_names(speaker_names)
+
+        target_ids = self._resolve_target_speakers(speaker_ids or None)
+
+        # Generate TTS audio
+        request = SynthesisRequest(text=text, voice_id="", output_format=AudioFormat.MP3)
+        result = await self._tts_svc.synthesize(request, voice_name=voice_name)
+
+        # Save to a file so the speaker can access it via URI
+        output_dir = get_output_dir("speaker")
+        cleanup_old_files(output_dir, self._output_ttl_seconds)
+        file_path = output_dir / f"announce-{uuid.uuid4()}.mp3"
+        file_path.write_bytes(result.audio)
+
+        # Determine volume
+        effective_volume = volume or self._default_announce_volume
+
+        # Play on speakers via HTTP URL (speakers can't access local files)
+        audio_url = self._audio_url(str(file_path.resolve()))
+        play_request = PlayRequest(
+            uri=audio_url,
+            speaker_ids=target_ids,
+            volume=effective_volume,
+            title=f"Announcement: {text[:50]}",
+        )
+        await self._backend.play_uri(play_request)
+
+        return str(file_path)
+
+    # --- ToolProvider protocol ---
+
+    @property
+    def tool_provider_name(self) -> str:
+        return "speaker"
+
+    def get_tools(self) -> list[ToolDefinition]:
+        tools = [
+            ToolDefinition(
+                name="list_speakers",
+                description="List all discovered speakers with their current state, volume, and group info.",
+            ),
+            ToolDefinition(
+                name="play_audio",
+                description="Play audio from a URI on one or more speakers.",
+                parameters=[
+                    ToolParameter(
+                        name="uri",
+                        type=ToolParameterType.STRING,
+                        description="URI of the audio to play.",
+                    ),
+                    ToolParameter(
+                        name="speakers",
+                        type=ToolParameterType.ARRAY,
+                        description="Speaker names or aliases. If omitted, uses last-used speakers or all.",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="volume",
+                        type=ToolParameterType.INTEGER,
+                        description="Volume level (0-100). If omitted, uses current volume.",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="position_seconds",
+                        type=ToolParameterType.NUMBER,
+                        description="Start playback at this position in seconds.",
+                        required=False,
+                    ),
+                ],
+            ),
+            ToolDefinition(
+                name="stop_audio",
+                description="Stop playback on speakers.",
+                parameters=[
+                    ToolParameter(
+                        name="speakers",
+                        type=ToolParameterType.ARRAY,
+                        description="Speaker names or aliases. If omitted, stops all.",
+                        required=False,
+                    ),
+                ],
+            ),
+            ToolDefinition(
+                name="set_volume",
+                description="Set volume on a speaker.",
+                parameters=[
+                    ToolParameter(
+                        name="speaker",
+                        type=ToolParameterType.STRING,
+                        description="Speaker name or alias.",
+                    ),
+                    ToolParameter(
+                        name="volume",
+                        type=ToolParameterType.INTEGER,
+                        description="Volume level (0-100).",
+                    ),
+                ],
+            ),
+            ToolDefinition(
+                name="get_volume",
+                description="Get the current volume of a speaker.",
+                parameters=[
+                    ToolParameter(
+                        name="speaker",
+                        type=ToolParameterType.STRING,
+                        description="Speaker name or alias.",
+                    ),
+                ],
+            ),
+            ToolDefinition(
+                name="set_speaker_alias",
+                description="Assign an alias name to a speaker (e.g., 'Living Room Speaker' for 'Speaker 2').",
+                parameters=[
+                    ToolParameter(
+                        name="speaker",
+                        type=ToolParameterType.STRING,
+                        description="Current speaker name or ID.",
+                    ),
+                    ToolParameter(
+                        name="alias",
+                        type=ToolParameterType.STRING,
+                        description="The alias name to assign.",
+                    ),
+                ],
+            ),
+            ToolDefinition(
+                name="remove_speaker_alias",
+                description="Remove an alias from a speaker.",
+                parameters=[
+                    ToolParameter(
+                        name="alias",
+                        type=ToolParameterType.STRING,
+                        description="The alias to remove.",
+                    ),
+                ],
+            ),
+            ToolDefinition(
+                name="announce",
+                description=(
+                    "Announce a message over speakers using text-to-speech. "
+                    "This is the primary tool for speaking text out loud — it handles everything: "
+                    "generates audio via TTS, groups speakers if needed, sets volume, and plays. "
+                    "If no speakers specified, uses last-used speakers or all. "
+                    "Use this instead of 'speak' when you want audio played on speakers."
+                ),
+                parameters=[
+                    ToolParameter(
+                        name="text",
+                        type=ToolParameterType.STRING,
+                        description="The text to announce.",
+                    ),
+                    ToolParameter(
+                        name="speakers",
+                        type=ToolParameterType.ARRAY,
+                        description="Speaker names or aliases. If omitted, uses last-used speakers or all.",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="volume",
+                        type=ToolParameterType.INTEGER,
+                        description="Volume level (0-100) for the announcement.",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="voice_name",
+                        type=ToolParameterType.STRING,
+                        description="TTS voice name to use (e.g., 'default', 'scary'). Uses default if omitted.",
+                        required=False,
+                    ),
+                ],
+            ),
+        ]
+
+        # Add grouping tools if the backend supports it
+        if self._backend.supports_grouping:
+            tools.extend([
+                ToolDefinition(
+                    name="list_speaker_groups",
+                    description="List current speaker groups.",
+                ),
+                ToolDefinition(
+                    name="group_speakers",
+                    description="Group speakers together for synchronized playback.",
+                    parameters=[
+                        ToolParameter(
+                            name="speakers",
+                            type=ToolParameterType.ARRAY,
+                            description="Speaker names or aliases to group together (at least 2).",
+                        ),
+                    ],
+                ),
+                ToolDefinition(
+                    name="ungroup_speakers",
+                    description="Remove speakers from their groups.",
+                    parameters=[
+                        ToolParameter(
+                            name="speakers",
+                            type=ToolParameterType.ARRAY,
+                            description="Speaker names or aliases to ungroup.",
+                        ),
+                    ],
+                ),
+            ])
+
+        return tools
+
+    async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        match name:
+            case "list_speakers":
+                return await self._tool_list_speakers()
+            case "play_audio":
+                return await self._tool_play_audio(arguments)
+            case "stop_audio":
+                return await self._tool_stop_audio(arguments)
+            case "set_volume":
+                return await self._tool_set_volume(arguments)
+            case "get_volume":
+                return await self._tool_get_volume(arguments)
+            case "set_speaker_alias":
+                return await self._tool_set_alias(arguments)
+            case "remove_speaker_alias":
+                return await self._tool_remove_alias(arguments)
+            case "announce":
+                return await self._tool_announce(arguments)
+            case "list_speaker_groups":
+                return await self._tool_list_groups()
+            case "group_speakers":
+                return await self._tool_group_speakers(arguments)
+            case "ungroup_speakers":
+                return await self._tool_ungroup_speakers(arguments)
+            case _:
+                raise KeyError(f"Unknown tool: {name}")
+
+    async def _tool_list_speakers(self) -> str:
+        speakers = await self._backend.list_speakers()
+
+        # Enrich with aliases
+        storage = self._get_storage_backend()
+        from gilbert.interfaces.storage import Query
+
+        all_aliases = await storage.query(Query(collection=_ALIAS_COLLECTION))
+        alias_map: dict[str, list[str]] = {}
+        for a in all_aliases:
+            sid = a.get("speaker_id", "")
+            alias_map.setdefault(sid, []).append(a.get("display_alias", ""))
+
+        result = []
+        for s in speakers:
+            entry: dict[str, Any] = {
+                "speaker_id": s.speaker_id,
+                "name": s.name,
+                "ip_address": s.ip_address,
+                "model": s.model,
+                "volume": s.volume,
+                "state": s.state.value,
+                "group_name": s.group_name,
+                "is_group_coordinator": s.is_group_coordinator,
+            }
+            aliases = alias_map.get(s.speaker_id)
+            if aliases:
+                entry["aliases"] = aliases
+            result.append(entry)
+
+        return json.dumps(result)
+
+    async def _tool_play_audio(self, arguments: dict[str, Any]) -> str:
+        uri = arguments["uri"]
+        speaker_names: list[str] = arguments.get("speakers", [])
+        volume: int | None = arguments.get("volume")
+        position: float | None = arguments.get("position_seconds")
+
+        speaker_ids: list[str] = []
+        if speaker_names:
+            speaker_ids = await self.resolve_speaker_names(speaker_names)
+
+        target_ids = self._resolve_target_speakers(speaker_ids or None)
+
+        await self._backend.play_uri(PlayRequest(
+            uri=uri,
+            speaker_ids=target_ids,
+            volume=volume,
+            position_seconds=position,
+        ))
+        return json.dumps({"status": "playing", "uri": uri})
+
+    async def _tool_stop_audio(self, arguments: dict[str, Any]) -> str:
+        speaker_names: list[str] = arguments.get("speakers", [])
+        speaker_ids: list[str] | None = None
+        if speaker_names:
+            speaker_ids = await self.resolve_speaker_names(speaker_names)
+
+        await self._backend.stop(speaker_ids)
+        return json.dumps({"status": "stopped"})
+
+    async def _tool_set_volume(self, arguments: dict[str, Any]) -> str:
+        name = arguments["speaker"]
+        volume = arguments["volume"]
+        sid = await self.resolve_speaker_name(name)
+        if sid is None:
+            return json.dumps({"error": f"Speaker not found: {name}"})
+        await self._backend.set_volume(sid, volume)
+        return json.dumps({"status": "ok", "speaker": name, "volume": volume})
+
+    async def _tool_get_volume(self, arguments: dict[str, Any]) -> str:
+        name = arguments["speaker"]
+        sid = await self.resolve_speaker_name(name)
+        if sid is None:
+            return json.dumps({"error": f"Speaker not found: {name}"})
+        volume = await self._backend.get_volume(sid)
+        return json.dumps({"speaker": name, "volume": volume})
+
+    async def _tool_set_alias(self, arguments: dict[str, Any]) -> str:
+        speaker_name = arguments["speaker"]
+        alias = arguments["alias"]
+
+        sid = await self.resolve_speaker_name(speaker_name)
+        if sid is None:
+            return json.dumps({"error": f"Speaker not found: {speaker_name}"})
+
+        try:
+            await self.set_alias(sid, alias)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+        return json.dumps({"status": "ok", "speaker": speaker_name, "alias": alias})
+
+    async def _tool_remove_alias(self, arguments: dict[str, Any]) -> str:
+        alias = arguments["alias"]
+        await self.remove_alias(alias)
+        return json.dumps({"status": "ok", "alias": alias})
+
+    async def _tool_announce(self, arguments: dict[str, Any]) -> str:
+        text = arguments["text"]
+        speaker_names: list[str] = arguments.get("speakers", [])
+        volume: int | None = arguments.get("volume")
+        voice_name: str | None = arguments.get("voice_name")
+
+        try:
+            file_path = await self.announce(
+                text=text,
+                speaker_names=speaker_names or None,
+                volume=volume,
+                voice_name=voice_name,
+            )
+        except RuntimeError as e:
+            return json.dumps({"error": str(e)})
+
+        return json.dumps({
+            "status": "announced",
+            "text": text,
+            "audio_file": file_path,
+        })
+
+    async def _tool_list_groups(self) -> str:
+        groups = await self._backend.list_groups()
+        return json.dumps([
+            {
+                "group_id": g.group_id,
+                "name": g.name,
+                "coordinator_id": g.coordinator_id,
+                "member_ids": g.member_ids,
+            }
+            for g in groups
+        ])
+
+    async def _tool_group_speakers(self, arguments: dict[str, Any]) -> str:
+        speaker_names: list[str] = arguments["speakers"]
+        speaker_ids = await self.resolve_speaker_names(speaker_names)
+
+        try:
+            group = await self._backend.group_speakers(speaker_ids)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+        return json.dumps({
+            "status": "grouped",
+            "group_id": group.group_id,
+            "name": group.name,
+            "member_ids": group.member_ids,
+        })
+
+    async def _tool_ungroup_speakers(self, arguments: dict[str, Any]) -> str:
+        speaker_names: list[str] = arguments["speakers"]
+        speaker_ids = await self.resolve_speaker_names(speaker_names)
+        await self._backend.ungroup_speakers(speaker_ids)
+        return json.dumps({"status": "ungrouped"})

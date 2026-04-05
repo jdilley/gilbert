@@ -34,6 +34,16 @@ credentials: {}
   #   service_account_file: .gilbert/credentials/calendar-sa.json
   #   scopes:
   #     - https://www.googleapis.com/auth/calendar.readonly
+  #
+  # spotify:
+  #   type: api_key_pair
+  #   client_id: your-client-id
+  #   client_secret: your-client-secret
+  #
+  # google-oauth:
+  #   type: api_key_pair
+  #   client_id: your-google-oauth-client-id.apps.googleusercontent.com
+  #   client_secret: your-google-oauth-client-secret
 
 plugins: []
 
@@ -50,7 +60,7 @@ auth:
       enabled: true
   default_roles: ["user"]
   session_ttl_seconds: 86400
-  root_password: ""
+  root_password: "password"
   # providers:
   #   - type: google
   #     enabled: true
@@ -59,6 +69,16 @@ auth:
   #     role_mappings:
   #       - group: admins
   #         role: admin
+
+# google:
+#   enabled: true
+#   oauth_credential: google-oauth  # name of an api_key_pair credential above
+#   accounts:
+#     directory:
+#       credential: google-sa
+#       delegated_user: admin@example.com
+#       scopes:
+#         - https://www.googleapis.com/auth/admin.directory.user.readonly
 
 ai:
   enabled: false
@@ -71,6 +91,19 @@ ai:
     model: claude-sonnet-4-20250514
     max_tokens: 4096
     temperature: 0.7
+
+speaker:
+  enabled: false
+  backend: sonos
+  # default_announce_volume: 40  # volume for announcements (0-100), unset = current volume
+  settings: {}
+
+music:
+  enabled: false
+  backend: spotify
+  credential: ""
+  settings: {}
+  # credential: spotify  # name of an api_key_pair credential with client_id/client_secret
 
 tts:
   enabled: false

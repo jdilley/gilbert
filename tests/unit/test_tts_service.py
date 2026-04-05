@@ -321,11 +321,11 @@ def test_tool_provider_name(service: TTSService) -> None:
 def test_get_tools(service: TTSService) -> None:
     tools = service.get_tools()
     names = [t.name for t in tools]
-    assert "speak" in names
+    assert "synthesize" in names
     assert "list_voices" in names
 
 
-async def test_tool_speak(
+async def test_tool_synthesize(
     service: TTSService, resolver: ServiceResolver, tmp_path: Path, monkeypatch: object
 ) -> None:
     import gilbert.core.output as output_mod
@@ -333,7 +333,7 @@ async def test_tool_speak(
     monkeypatch.setattr(output_mod, "OUTPUT_DIR", tmp_path / "output")  # type: ignore[attr-defined]
     await service.start(resolver)
 
-    result = await service.execute_tool("speak", {"text": "Hello world"})
+    result = await service.execute_tool("synthesize", {"text": "Hello world"})
     parsed = json.loads(result)
 
     assert parsed["format"] == "mp3"
@@ -342,7 +342,7 @@ async def test_tool_speak(
     assert Path(parsed["file_path"]).exists()
 
 
-async def test_tool_speak_with_voice(
+async def test_tool_synthesize_with_voice(
     service: TTSService,
     stub_backend: StubTTSBackend,
     resolver: ServiceResolver,
@@ -354,7 +354,7 @@ async def test_tool_speak_with_voice(
     monkeypatch.setattr(output_mod, "OUTPUT_DIR", tmp_path / "output")  # type: ignore[attr-defined]
     await service.start(resolver)
 
-    await service.execute_tool("speak", {"text": "Boo!", "voice_name": "scary"})
+    await service.execute_tool("synthesize", {"text": "Boo!", "voice_name": "scary"})
     assert stub_backend.last_request is not None
     assert stub_backend.last_request.voice_id == "v2"
 

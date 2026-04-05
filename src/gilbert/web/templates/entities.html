@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Gilbert — Entity Browser{% endblock %}
+{% block content %}
+<h1>Entity Browser</h1>
+<p class="subtitle">{{ collections | length }} collections in storage</p>
+
+{% if collections %}
+<div class="card-grid">
+    {% for col in collections %}
+    <a href="/entities/{{ col.name }}" class="card">
+        <span class="card-icon">&#128451;</span>
+        <h2>{{ col.name }}</h2>
+        <p>{{ col.count }} entit{{ "y" if col.count == 1 else "ies" }}</p>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<p class="muted">No collections found. Storage may not be running.</p>
+{% endif %}
+{% endblock %}

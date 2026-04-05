@@ -273,8 +273,10 @@ class ConfigurationService(Service):
             merged = _deep_merge(existing, self._raw)
 
             override_path.parent.mkdir(parents=True, exist_ok=True)
+            # Use safe_dump to avoid !!python tags for enum/custom types.
+            safe = json.loads(json.dumps(merged, default=str))
             with open(override_path, "w") as f:
-                yaml.dump(merged, f, default_flow_style=False, sort_keys=False)
+                yaml.safe_dump(safe, f, default_flow_style=False, sort_keys=False)
 
             logger.debug("Config persisted to %s", override_path)
         except Exception:

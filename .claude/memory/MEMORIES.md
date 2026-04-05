@@ -11,3 +11,6 @@
 - [Service Registry](memory-service-registry.md) — legacy DI container, coexists with ServiceManager
 - [Multi-backend Aggregator Pattern](memory-multi-backend-pattern.md) — services with multiple backends use aggregator pattern
 - [User & Auth System](memory-user-auth-system.md) — multi-user support with local accounts, external providers, roles, sessions
+- [Speaker System](memory-speaker-system.md) — speaker control with Sonos/SoCo, aliases, grouping, TTS announcements
+- [Music Service](memory-music-service.md) — music search/metadata/playback with Spotify, seek support, speaker integration
+- [Persona Service](memory-persona-service.md) — AI personality/behavior stored in entity system, editable via chat

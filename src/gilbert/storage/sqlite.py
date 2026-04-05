@@ -8,7 +8,9 @@ import aiosqlite
 from gilbert.interfaces.storage import (
     Filter,
     FilterOp,
+    ForeignKeyDefinition,
     IndexDefinition,
+    OnDelete,
     Query,
     StorageBackend,
 )
@@ -46,6 +48,16 @@ class SQLiteStorage(StorageBackend):
                 collection TEXT NOT NULL,
                 fields TEXT NOT NULL,
                 is_unique INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS _foreign_keys (
+                name TEXT PRIMARY KEY,
+                collection TEXT NOT NULL,
+                field TEXT NOT NULL,
+                ref_collection TEXT NOT NULL,
+                ref_field TEXT NOT NULL,
+                on_delete TEXT NOT NULL DEFAULT 'restrict'
             )
         """)
         await self._db.commit()
@@ -221,6 +233,139 @@ class SQLiteStorage(StorageBackend):
                     fields=json.loads(row[2]),
                     name=row[0],
                     unique=bool(row[3]),
+                )
+                for row in rows
+            ]
+
+    # --- Foreign Keys ---
+
+    async def ensure_foreign_key(self, fk: ForeignKeyDefinition) -> None:
+        await self._ensure_collection_table(fk.collection)
+        await self._ensure_collection_table(fk.ref_collection)
+        db = await self._conn()
+
+        name = fk.name or (
+            f"fk_{fk.collection}_{fk.field.replace('.', '_')}"
+            f"__{fk.ref_collection}_{fk.ref_field.replace('.', '_')}"
+        )
+
+        # Check if already exists.
+        async with db.execute(
+            "SELECT 1 FROM _foreign_keys WHERE name = ?", (name,)
+        ) as cursor:
+            if await cursor.fetchone() is not None:
+                return
+
+        child_table = self._table_name(fk.collection)
+        parent_table = self._table_name(fk.ref_collection)
+
+        # Build the reference expression for the parent side.
+        if fk.ref_field == "_id":
+            parent_lookup = f'SELECT 1 FROM "{parent_table}" WHERE id = NEW_val'
+        else:
+            parent_lookup = (
+                f"SELECT 1 FROM \"{parent_table}\" "
+                f"WHERE json_extract(data, '$.{fk.ref_field}') = NEW_val"
+            )
+
+        # Child field expression.
+        child_json_path = f"json_extract(NEW.data, '$.{fk.field}')"
+
+        # --- INSERT trigger: validate FK on child insert ---
+        await db.execute(f"""
+            CREATE TRIGGER IF NOT EXISTS "{name}__insert"
+            BEFORE INSERT ON "{child_table}"
+            FOR EACH ROW
+            WHEN {child_json_path} IS NOT NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'Foreign key violation: {name}')
+                WHERE NOT EXISTS (
+                    {parent_lookup.replace('NEW_val', child_json_path)}
+                );
+            END
+        """)
+
+        # --- UPDATE trigger: validate FK on child update ---
+        await db.execute(f"""
+            CREATE TRIGGER IF NOT EXISTS "{name}__update"
+            BEFORE UPDATE ON "{child_table}"
+            FOR EACH ROW
+            WHEN {child_json_path} IS NOT NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'Foreign key violation: {name}')
+                WHERE NOT EXISTS (
+                    {parent_lookup.replace('NEW_val', child_json_path)}
+                );
+            END
+        """)
+
+        # --- DELETE trigger on parent: enforce on_delete policy ---
+        # Build expression to find children referencing the deleted parent.
+        if fk.ref_field == "_id":
+            parent_val = "OLD.id"
+        else:
+            parent_val = f"json_extract(OLD.data, '$.{fk.ref_field}')"
+
+        child_match = f"json_extract(data, '$.{fk.field}') = {parent_val}"
+
+        if fk.on_delete == OnDelete.RESTRICT:
+            await db.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS "{name}__delete"
+                BEFORE DELETE ON "{parent_table}"
+                FOR EACH ROW
+                BEGIN
+                    SELECT RAISE(ABORT, 'Foreign key violation on delete: {name}')
+                    WHERE EXISTS (
+                        SELECT 1 FROM "{child_table}" WHERE {child_match}
+                    );
+                END
+            """)
+        elif fk.on_delete == OnDelete.CASCADE:
+            await db.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS "{name}__delete"
+                BEFORE DELETE ON "{parent_table}"
+                FOR EACH ROW
+                BEGIN
+                    DELETE FROM "{child_table}" WHERE {child_match};
+                END
+            """)
+        elif fk.on_delete == OnDelete.SET_NULL:
+            # Set the FK field to null in the JSON data.
+            await db.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS "{name}__delete"
+                BEFORE DELETE ON "{parent_table}"
+                FOR EACH ROW
+                BEGIN
+                    UPDATE "{child_table}"
+                    SET data = json_set(data, '$.{fk.field}', NULL)
+                    WHERE {child_match};
+                END
+            """)
+
+        # Store metadata.
+        await db.execute(
+            "INSERT INTO _foreign_keys (name, collection, field, ref_collection, ref_field, on_delete) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (name, fk.collection, fk.field, fk.ref_collection, fk.ref_field, fk.on_delete.value),
+        )
+        await db.commit()
+
+    async def list_foreign_keys(self, collection: str) -> list[ForeignKeyDefinition]:
+        db = await self._conn()
+        async with db.execute(
+            "SELECT name, collection, field, ref_collection, ref_field, on_delete "
+            "FROM _foreign_keys WHERE collection = ? OR ref_collection = ?",
+            (collection, collection),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                ForeignKeyDefinition(
+                    name=row[0],
+                    collection=row[1],
+                    field=row[2],
+                    ref_collection=row[3],
+                    ref_field=row[4],
+                    on_delete=OnDelete(row[5]),
                 )
                 for row in rows
             ]
