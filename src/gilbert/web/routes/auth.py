@@ -249,15 +249,15 @@ async def session_handoff(request: Request) -> Any:
 @router.post("/logout")
 async def logout(
     request: Request,
-    response: Response,
     user: UserContext = Depends(get_user_context),  # noqa: B008
-) -> dict:
-    """Invalidate the current session."""
+) -> Any:
+    """Invalidate the current session and redirect to home."""
     if user.session_id:
         auth_svc = _get_auth_service(request)
         await auth_svc.invalidate_session(user.session_id)
+    response = RedirectResponse(url="/", status_code=303)
     response.delete_cookie("gilbert_session")
-    return {"status": "ok"}
+    return response
 
 
 # ---- Current user ----

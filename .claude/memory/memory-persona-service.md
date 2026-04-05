@@ -18,6 +18,7 @@ Manages the AI assistant's personality, tone, and behavioral instructions. Store
 - Casual, friendly, professional, slightly sarcastic
 - Instructions for announcements (natural intros, varied each time)
 - Instructions for tool use (don't leak config details)
+- Only describe capabilities matching available tools — if a tool isn't available for the user's role, don't claim the capability exists; suggest asking an admin or logging in with higher privileges
 
 ### AI Integration
 - AI service declares `persona` as a required capability

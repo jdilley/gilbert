@@ -11,8 +11,14 @@ from gilbert.interfaces.auth import UserContext
 
 # Paths that bypass authentication.
 # Exact matches checked first, then prefixes.
-_PUBLIC_EXACT = ("/auth/login", "/auth/session")
+# Paths that bypass authentication on local access.
+_PUBLIC_EXACT = ("/", "/auth/login", "/auth/logout", "/auth/session")
 _PUBLIC_PREFIXES = ("/auth/login/", "/static/", "/output/")
+
+# On tunnel access, only auth-related paths are public — everything else
+# requires an authenticated user with at least "user" role.
+_TUNNEL_PUBLIC_EXACT = ("/auth/login", "/auth/logout", "/auth/session")
+_TUNNEL_PUBLIC_PREFIXES = ("/auth/login/", "/static/")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -22,8 +28,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
     header.  If the auth service is not running (auth disabled), all
     requests proceed as ``UserContext.SYSTEM``.
 
-    Unauthenticated requests to non-public paths are redirected to the
-    login page.
+    Local requests: unauthenticated users can access public paths (dashboard, etc).
+    Tunnel requests: unauthenticated users are redirected to login for everything
+    except the auth flow itself.
     """
 
     async def dispatch(
@@ -34,7 +41,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         gilbert = getattr(request.app.state, "gilbert", None)
         auth_enabled = False
+        is_tunnel = False
+
         if gilbert is not None:
+            is_tunnel = self._is_tunnel_request(request, gilbert)
             auth_svc = gilbert.service_manager.get_by_capability("authentication")
             if auth_svc is not None:
                 auth_enabled = True
@@ -44,17 +54,40 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     if ctx is not None:
                         user = ctx
 
+        # For unauthenticated visitors:
+        # - Local: treat as GUEST (has "everyone" role, can use chat etc.)
+        # - Tunnel: redirect to login (except auth flow and static files)
+        if auth_enabled and user.user_id == "system":
+            if is_tunnel:
+                is_public = path in _TUNNEL_PUBLIC_EXACT or any(
+                    path.startswith(p) for p in _TUNNEL_PUBLIC_PREFIXES
+                )
+                if not is_public:
+                    return RedirectResponse(url="/auth/login", status_code=302)
+            else:
+                # Local visitors get guest access
+                user = UserContext.GUEST
+
         request.state.user = user
+        request.state.is_tunnel = is_tunnel
         set_current_user(user)
 
-        # Redirect unauthenticated users to login (skip public paths).
-        is_public = path in _PUBLIC_EXACT or any(
-            path.startswith(p) for p in _PUBLIC_PREFIXES
-        )
-        if auth_enabled and not is_public and user.user_id == "system":
-            return RedirectResponse(url="/auth/login", status_code=302)
-
         return await call_next(request)
+
+    @staticmethod
+    def _is_tunnel_request(request: Request, gilbert: Any) -> bool:
+        """Check if the request came through the public tunnel (ngrok)."""
+        tunnel_svc = gilbert.service_manager.get_by_capability("tunnel")
+        if tunnel_svc is None:
+            return False
+        public_url = getattr(tunnel_svc, "public_url", "")
+        if not public_url:
+            return False
+        from urllib.parse import urlparse
+
+        tunnel_host = urlparse(public_url).hostname or ""
+        request_host = request.headers.get("host", "").split(":")[0]
+        return bool(tunnel_host) and request_host == tunnel_host
 
 
 def _extract_session(request: Request) -> str | None:
@@ -81,10 +114,11 @@ async def get_user_context(request: Request) -> UserContext:
 
 
 async def require_authenticated(request: Request) -> UserContext:
-    """Dependency that requires a logged-in user (raises 401)."""
+    """Dependency that requires any user with roles (logged-in or local guest)."""
     user: UserContext = getattr(request.state, "user", UserContext.SYSTEM)
     if user.user_id == "system":
         raise HTTPException(status_code=401, detail="Authentication required")
+    # GUEST and authenticated users both pass — they have roles
     return user
 
 

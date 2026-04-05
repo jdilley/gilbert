@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Gilbert — Collection Access Control{% endblock %}
+{% block content %}
+<div class="breadcrumb">
+    <a href="/roles">Roles</a> &rsaquo; <strong>Collection Access</strong>
+</div>
+<h1>Collection Access Control</h1>
+<p class="subtitle">{{ collections | length }} collections — default: read=user, write=admin</p>
+
+<table class="config-table">
+    <thead>
+        <tr>
+            <th>Collection</th>
+            <th>Read Role</th>
+            <th>Write Role</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for col in collections %}
+        <tr>
+            <td>
+                <code>{{ col.collection }}</code>
+                {% if col.has_custom %}<span class="badge badge-warn">custom</span>{% endif %}
+            </td>
+            <td>
+                <form method="POST" action="/roles/collections/{{ col.collection }}/set" style="display:inline" id="form-{{ loop.index }}">
+                    <select name="read_role" class="inline-input">
+                        {% for role in role_names %}
+                        <option value="{{ role }}" {% if role == col.read_role %}selected{% endif %}>{{ role }}</option>
+                        {% endfor %}
+                    </select>
+            </td>
+            <td>
+                    <select name="write_role" class="inline-input">
+                        {% for role in role_names %}
+                        <option value="{{ role }}" {% if role == col.write_role %}selected{% endif %}>{{ role }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn-sm">Save</button>
+                </form>
+            </td>
+            <td>
+                {% if col.has_custom %}
+                <form method="POST" action="/roles/collections/{{ col.collection }}/clear" style="display:inline">
+                    <button type="submit" class="btn-sm btn-muted">Reset</button>
+                </form>
+                {% else %}
+                <span class="muted">default</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

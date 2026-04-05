@@ -6,7 +6,7 @@ Multi-user support with local accounts, external provider syncing, role-based ac
 ## Details
 
 ### Interfaces
-- `UserContext` (frozen dataclass) — immutable identity flowing through the system. Fields: user_id, email, display_name, roles (frozenset), provider, session_id, metadata. Class-level `SYSTEM` sentinel for unauthenticated ops.
+- `UserContext` (frozen dataclass) — immutable identity flowing through the system. Fields: user_id, email, display_name, roles (frozenset), provider, session_id, metadata. Class-level sentinels: `SYSTEM` (background jobs, bypasses RBAC), `GUEST` (unauthenticated local visitors, has "everyone" role).
 - `AuthInfo` (frozen dataclass) — returned by auth providers after successful authentication.
 - `AuthenticationService` (ABC) — pluggable auth backend. Each is a Service with `authentication_provider` capability. Methods: `get_login_method()`, `authenticate()`, `handle_callback()`.
 - `LoginMethod` (dataclass) — describes how an auth method appears on the login page (form vs redirect button).

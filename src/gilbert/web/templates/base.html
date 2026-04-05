@@ -10,14 +10,29 @@
     <header>
         <nav>
             <a href="/" class="logo">Gilbert</a>
+            {% set nav_user = request.state.user if request and request.state and request.state.user else none %}
+            {% set nav_roles = nav_user.roles if nav_user else [] %}
+            {% set is_guest = nav_user and nav_user.user_id == 'guest' %}
+            {% set is_logged_in = nav_user and nav_user.user_id not in ('system', 'guest') %}
+            {% set has_roles = nav_roles | length > 0 %}
+            {% set is_admin = 'admin' in nav_roles %}
+            {% if has_roles %}
             <a href="/chat">Chat</a>
+            {% endif %}
+            {% if is_admin %}
             <a href="/roles">Roles</a>
             <a href="/entities">Entities</a>
             <a href="/system">System</a>
+            {% endif %}
             <span class="nav-spacer"></span>
+            {% if is_logged_in %}
+            <span class="nav-user">{{ nav_user.display_name or nav_user.email or nav_user.user_id }}</span>
             <form method="POST" action="/auth/logout" class="nav-logout">
                 <button type="submit" class="nav-logout-btn">Logout</button>
             </form>
+            {% else %}
+            <a href="/auth/login" class="nav-logout-btn">Login</a>
+            {% endif %}
         </nav>
     </header>
     <main>

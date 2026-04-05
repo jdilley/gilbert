@@ -115,9 +115,11 @@ async def tool_permissions(
     acl = _get_acl(gilbert)
 
     # Gather all tools from all providers
+    sm = gilbert.service_manager
     tools: list[dict[str, Any]] = []
-    for svc in gilbert.service_manager.started_services:
-        if isinstance(svc, ToolProvider):
+    for name in sm.started_services:
+        svc = sm._registered.get(name)
+        if svc is not None and isinstance(svc, ToolProvider):
             for tool_def in svc.get_tools():
                 override = acl._tool_overrides.get(tool_def.name)
                 tools.append({
@@ -224,3 +226,72 @@ async def set_user_roles(
 
     await user_svc.backend.update_user(user_id, {"roles": sorted(selected_roles)})
     return RedirectResponse(url="/roles/users", status_code=303)
+
+
+# --- Collection ACLs page ---
+
+
+@router.get("/collections")
+async def collection_acls(
+    request: Request,
+    user: UserContext = Depends(require_role("admin")),
+) -> Any:
+    gilbert: Gilbert = request.app.state.gilbert
+    acl = _get_acl(gilbert)
+
+    # Get all collections from storage
+    storage_svc = gilbert.service_manager.get_by_capability("entity_storage")
+    collections: list[str] = []
+    if storage_svc is not None:
+        collections = await storage_svc.backend.list_collections()
+
+    # Build ACL info for each collection
+    acl_entries: list[dict[str, Any]] = []
+    for col in sorted(collections):
+        entry = acl._collection_acl.get(col)
+        acl_entries.append({
+            "collection": col,
+            "read_role": entry["read_role"] if entry else "user",
+            "write_role": entry["write_role"] if entry else "admin",
+            "has_custom": entry is not None,
+        })
+
+    roles = await acl.list_roles()
+    role_names = [r["name"] for r in roles]
+
+    return templates.TemplateResponse(request, "collection_acls.html", {
+        "collections": acl_entries,
+        "role_names": role_names,
+        "user": user,
+    })
+
+
+@router.post("/collections/{collection}/set")
+async def set_collection_acl(
+    request: Request,
+    collection: str,
+    read_role: str = Form(...),
+    write_role: str = Form(...),
+    user: UserContext = Depends(require_role("admin")),
+) -> Any:
+    gilbert: Gilbert = request.app.state.gilbert
+    acl = _get_acl(gilbert)
+
+    try:
+        await acl.set_collection_acl(collection, read_role=read_role, write_role=write_role)
+    except ValueError:
+        pass
+    return RedirectResponse(url="/roles/collections", status_code=303)
+
+
+@router.post("/collections/{collection}/clear")
+async def clear_collection_acl(
+    request: Request,
+    collection: str,
+    user: UserContext = Depends(require_role("admin")),
+) -> Any:
+    gilbert: Gilbert = request.app.state.gilbert
+    acl = _get_acl(gilbert)
+
+    await acl.clear_collection_acl(collection)
+    return RedirectResponse(url="/roles/collections", status_code=303)

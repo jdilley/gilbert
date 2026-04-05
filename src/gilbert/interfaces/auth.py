@@ -25,6 +25,7 @@ class UserContext:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     SYSTEM: ClassVar[UserContext]
+    GUEST: ClassVar[UserContext]
 
 
 # Sentinel for unauthenticated / system-level operations.
@@ -34,6 +35,15 @@ UserContext.SYSTEM = UserContext(
     display_name="System",
     roles=frozenset(),
     provider="system",
+)
+
+# Sentinel for unauthenticated local visitors — has "everyone" role.
+UserContext.GUEST = UserContext(
+    user_id="guest",
+    email="",
+    display_name="Guest",
+    roles=frozenset({"everyone"}),
+    provider="local",
 )
 
 
