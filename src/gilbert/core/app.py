@@ -1,9 +1,17 @@
 """Application bootstrap — wires everything together and manages lifecycle."""
 
 import logging
+from pathlib import Path
 from typing import Any
 
-from gilbert.config import GilbertConfig
+from gilbert.config import (
+    DATA_DIR,
+    DEFAULT_CONFIG_PATH,
+    OVERRIDE_CONFIG_PATH,
+    GilbertConfig,
+    _deep_merge,
+    _load_yaml,
+)
 from gilbert.core.events import InMemoryEventBus
 from gilbert.core.logging import setup_logging
 from gilbert.core.registry import ServiceRegistry
@@ -24,16 +32,19 @@ from gilbert.core.services.credentials import CredentialService
 from gilbert.interfaces.ai import AIBackend
 from gilbert.interfaces.events import EventBus
 from gilbert.interfaces.music import MusicBackend
+from gilbert.interfaces.plugin import Plugin, PluginContext
 from gilbert.interfaces.presence import PresenceBackend
-from gilbert.interfaces.plugin import Plugin
 from gilbert.interfaces.service import Service
 from gilbert.interfaces.speaker import SpeakerBackend
 from gilbert.interfaces.storage import StorageBackend
 from gilbert.interfaces.tts import TTSBackend
-from gilbert.plugins.loader import PluginLoader
+from gilbert.plugins.loader import PluginLoader, PluginManifest
 from gilbert.storage.sqlite import SQLiteStorage
 
 logger = logging.getLogger(__name__)
+
+# Plugin data lives under .gilbert/plugin-data/<plugin-name>/
+PLUGIN_DATA_DIR = DATA_DIR / "plugin-data"
 
 
 class Gilbert:
@@ -44,6 +55,54 @@ class Gilbert:
         self.registry = ServiceRegistry()
         self.service_manager = ServiceManager()
         self._plugins: list[Plugin] = []
+
+    @classmethod
+    def create(cls, config_path: str | Path | None = None) -> "Gilbert":
+        """Create a Gilbert instance with full config layering including plugin defaults.
+
+        This is the preferred entry point.  It scans plugin directories declared
+        in the base config (before user overrides) so that plugin default
+        configs participate in the merge chain:
+
+            gilbert.yaml -> plugin defaults -> .gilbert/config.yaml
+        """
+        from gilbert.config import load_config
+
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+        if config_path is not None:
+            config = load_config(path=config_path)
+            return cls(config)
+
+        # Load base config (without user overrides) to discover plugin directories
+        base: dict[str, Any] = {}
+        if DEFAULT_CONFIG_PATH.exists():
+            base = _load_yaml(DEFAULT_CONFIG_PATH)
+
+        # Also peek at user overrides for additional plugin directories
+        overrides: dict[str, Any] = {}
+        if OVERRIDE_CONFIG_PATH.exists():
+            overrides = _load_yaml(OVERRIDE_CONFIG_PATH)
+
+        # Merge to get the full plugin directory list
+        merged_for_dirs = _deep_merge(base, overrides)
+        plugins_raw = merged_for_dirs.get("plugins", {})
+        if isinstance(plugins_raw, dict):
+            directories = plugins_raw.get("directories", [])
+        else:
+            directories = []
+
+        # Scan plugin directories for manifests
+        loader = PluginLoader()
+        manifests = loader.scan_directories(directories)
+        plugin_defaults = loader.collect_default_configs(manifests)
+
+        # Load config with plugin defaults in the merge chain
+        config = load_config(plugin_defaults=plugin_defaults)
+
+        instance = cls(config)
+        instance._discovered_manifests = manifests
+        return instance
 
     async def start(self) -> None:
         """Initialize all subsystems and start the application."""
@@ -223,16 +282,8 @@ class Gilbert:
         self.registry.register(EventBus, event_bus)
         self.registry.register(ServiceManager, self.service_manager)
 
-        # 10. Load plugins (they can register more services)
-        loader = PluginLoader()
-        for source in self.config.plugins:
-            if source.enabled:
-                try:
-                    plugin = await loader.load(source.source)
-                    await plugin.setup(self.service_manager)
-                    self._plugins.append(plugin)
-                except Exception:
-                    logger.exception("Failed to load plugin: %s", source.source)
+        # 10. Load plugins
+        await self._load_plugins()
 
         # 11. Start all services (dependency resolution happens here)
         await self.service_manager.start_all()
@@ -245,6 +296,49 @@ class Gilbert:
             failed,
             len(self._plugins),
         )
+
+    async def _load_plugins(self) -> None:
+        """Load plugins from discovered manifests and explicit sources."""
+        loader = PluginLoader()
+        plugin_config = self.config.plugins.config
+
+        # Phase 1: Load plugins from scanned directories (already discovered)
+        manifests: list[PluginManifest] = getattr(self, "_discovered_manifests", [])
+        sorted_manifests = loader.topological_sort(manifests)
+
+        for manifest in sorted_manifests:
+            try:
+                plugin = loader.load_from_manifest(manifest)
+                data_dir = PLUGIN_DATA_DIR / manifest.name
+                data_dir.mkdir(parents=True, exist_ok=True)
+                context = PluginContext(
+                    services=self.service_manager,
+                    config=plugin_config.get(manifest.name, {}),
+                    data_dir=data_dir,
+                )
+                await plugin.setup(context)
+                self._plugins.append(plugin)
+            except Exception:
+                logger.exception("Failed to load plugin: %s", manifest.name)
+
+        # Phase 2: Load explicit sources (legacy path/URL plugins)
+        for source in self.config.plugins.sources:
+            if not source.enabled:
+                continue
+            try:
+                plugin = await loader.load(source.source)
+                meta = plugin.metadata()
+                data_dir = PLUGIN_DATA_DIR / meta.name
+                data_dir.mkdir(parents=True, exist_ok=True)
+                context = PluginContext(
+                    services=self.service_manager,
+                    config=plugin_config.get(meta.name, {}),
+                    data_dir=data_dir,
+                )
+                await plugin.setup(context)
+                self._plugins.append(plugin)
+            except Exception:
+                logger.exception("Failed to load plugin: %s", source.source)
 
     async def stop(self) -> None:
         """Shut down all subsystems."""

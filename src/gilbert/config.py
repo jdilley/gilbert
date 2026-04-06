@@ -48,6 +48,14 @@ class PluginSource(BaseModel):
     enabled: bool = True
 
 
+class PluginsConfig(BaseModel):
+    """Plugin system configuration."""
+
+    directories: list[str] = []
+    sources: list[PluginSource] = []
+    config: dict[str, dict[str, Any]] = {}
+
+
 class LoggingConfig(BaseModel):
     """Logging configuration."""
 
@@ -251,7 +259,7 @@ class GilbertConfig(BaseModel):
     logging: LoggingConfig = LoggingConfig()
     web: WebConfig = WebConfig()
     credentials: dict[str, AnyCredential] = {}
-    plugins: list[PluginSource] = []
+    plugins: PluginsConfig = PluginsConfig()
     output_ttl_seconds: int = 3600
     tts: TTSConfig = TTSConfig()
     ai: AIConfig = AIConfig()
@@ -267,12 +275,16 @@ class GilbertConfig(BaseModel):
     music: MusicConfig = MusicConfig()
 
 
-def load_config(path: str | Path | None = None) -> GilbertConfig:
+def load_config(
+    path: str | Path | None = None,
+    plugin_defaults: dict[str, dict[str, Any]] | None = None,
+) -> GilbertConfig:
     """Load configuration with layered overrides.
 
     1. Start with gilbert.yaml (committed defaults)
-    2. Deep-merge .gilbert/config.yaml on top (per-installation overrides)
-    3. If an explicit path is given, use only that file instead.
+    2. Deep-merge plugin default configs (from plugin.yaml files)
+    3. Deep-merge .gilbert/config.yaml on top (per-installation overrides)
+    4. If an explicit path is given, use only that file instead.
 
     The .gilbert/ directory is created if it doesn't exist.
     """
@@ -292,7 +304,20 @@ def load_config(path: str | Path | None = None) -> GilbertConfig:
         logger.info("Loading default config: %s", DEFAULT_CONFIG_PATH)
         base = _load_yaml(DEFAULT_CONFIG_PATH)
 
-    # Layer 2: per-installation overrides
+    # Layer 2: plugin default configs (namespaced under plugins.config.<name>)
+    if plugin_defaults:
+        plugin_config_section = base.get("plugins", {})
+        if isinstance(plugin_config_section, list):
+            # Migrate legacy list format
+            plugin_config_section = {"sources": plugin_config_section}
+        existing_plugin_config = plugin_config_section.get("config", {})
+        # Plugin defaults go first, user overrides win later
+        merged_plugin_config = dict(plugin_defaults)
+        merged_plugin_config = _deep_merge(merged_plugin_config, existing_plugin_config)
+        plugin_config_section["config"] = merged_plugin_config
+        base["plugins"] = plugin_config_section
+
+    # Layer 3: per-installation overrides
     if OVERRIDE_CONFIG_PATH.exists():
         logger.info("Loading override config: %s", OVERRIDE_CONFIG_PATH)
         overrides = _load_yaml(OVERRIDE_CONFIG_PATH)
@@ -301,6 +326,16 @@ def load_config(path: str | Path | None = None) -> GilbertConfig:
     if not base:
         logger.info("No config files found, using defaults")
         return GilbertConfig()
+
+    # Handle legacy plugins list format
+    plugins_raw = base.get("plugins")
+    if isinstance(plugins_raw, list):
+        base["plugins"] = {
+            "sources": [
+                s if isinstance(s, dict) else {"source": s}
+                for s in plugins_raw
+            ]
+        }
 
     return GilbertConfig.model_validate(base)
 

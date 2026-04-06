@@ -45,13 +45,18 @@ credentials: {}
   #   client_id: your-google-oauth-client-id.apps.googleusercontent.com
   #   client_secret: your-google-oauth-client-secret
 
-plugins: []
+plugins:
+  directories: []    # list of directories to scan for plugins
+  sources: []        # explicit plugin sources (local paths or GitHub URLs)
+  # directories:
+  #   - /path/to/my/plugins
+  # sources:
+  #   - source: ./plugins/example-plugin
+  #     enabled: true
+  #   - source: https://github.com/user/gilbert-plugin-sonos
+  #     enabled: true
 
 output_ttl_seconds: 3600  # seconds before service-generated files are cleaned up
-  # - source: ./plugins/example-plugin
-  #   enabled: true
-  # - source: https://github.com/user/gilbert-plugin-sonos
-  #   enabled: true
 
 users:
   sync_ttl_seconds: 3600  # how often to refresh users from external providers (seconds)

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gilbert.core.service_manager import ServiceManager
@@ -17,9 +18,18 @@ class PluginMeta:
     name: str
     version: str
     description: str = ""
-    device_types: list[str] = field(default_factory=list)
-    services: list[str] = field(default_factory=list)
-    required_capabilities: list[str] = field(default_factory=list)
+    provides: list[str] = field(default_factory=list)
+    requires: list[str] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)
+
+
+@dataclass
+class PluginContext:
+    """Everything a plugin receives during setup."""
+
+    services: ServiceManager
+    config: dict[str, Any]
+    data_dir: Path
 
 
 class Plugin(ABC):
@@ -29,10 +39,13 @@ class Plugin(ABC):
     def metadata(self) -> PluginMeta: ...
 
     @abstractmethod
-    async def setup(self, services: ServiceManager) -> None:
+    async def setup(self, context: PluginContext) -> None:
         """Called when the plugin is loaded.
 
-        Use `services` to register discoverable services with capabilities.
+        Use ``context.services`` to register discoverable services with
+        capabilities.  ``context.config`` contains the resolved configuration
+        for this plugin and ``context.data_dir`` is a directory where the
+        plugin may persist data.
         """
         ...
 
