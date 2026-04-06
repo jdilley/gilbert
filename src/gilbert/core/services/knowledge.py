@@ -48,8 +48,10 @@ class KnowledgeService(Service):
 
     def service_info(self) -> ServiceInfo:
         # If gdrive sources are configured, require google_api so we start after it
-        required: frozenset[str] = frozenset({"google_api"}) if self._has_gdrive else frozenset()
-        optional = frozenset({"scheduler", "google_api", "configuration", "credentials", "event_bus", "entity_storage", "vision", "ocr"}) - required
+        required: set[str] = {"entity_storage"}
+        if self._has_gdrive:
+            required.add("google_api")
+        optional = frozenset({"scheduler", "google_api", "configuration", "credentials", "event_bus", "vision", "ocr"}) - required
         return ServiceInfo(
             name="knowledge",
             capabilities=frozenset({"knowledge", "ai_tools"}),
@@ -102,13 +104,9 @@ class KnowledgeService(Service):
         self._ocr = resolver.get_capability("ocr")
 
         # Event bus
-        # Entity storage for document tracking metadata
-        storage_svc = resolver.get_capability("entity_storage")
-        if storage_svc is not None:
-            from gilbert.core.services.storage import StorageService
-
-            if isinstance(storage_svc, StorageService):
-                self._storage = storage_svc.backend
+        # Entity storage for document tracking metadata (required for change detection)
+        storage_svc = resolver.require_capability("entity_storage")
+        self._storage = getattr(storage_svc, "backend", storage_svc)
 
         event_bus_svc = resolver.get_capability("event_bus")
         if event_bus_svc is not None:
@@ -360,16 +358,28 @@ class KnowledgeService(Service):
 
             # Check if already indexed and unchanged
             is_new = True
-            if self._storage is not None:
-                try:
-                    tracked = await self._storage.get("knowledge_documents", meta.document_id)
-                    if tracked:
-                        is_new = False
-                        stored_modified = tracked.get("last_modified", "")
-                        if stored_modified == meta.last_modified and tracked.get("indexed_at"):
-                            continue  # unchanged and already indexed
-                except Exception:
-                    pass
+            try:
+                tracked = await self._storage.get("knowledge_documents", meta.document_id)
+                if tracked:
+                    is_new = False
+                    stored_modified = tracked.get("last_modified", "")
+                    stored_checksum = tracked.get("checksum", "")
+                    has_been_indexed = bool(tracked.get("indexed_at"))
+
+                    # Skip if already indexed and content hasn't changed
+                    if has_been_indexed:
+                        # Check checksum first (most reliable), fall back to last_modified
+                        if meta.checksum and stored_checksum:
+                            if meta.checksum == stored_checksum:
+                                continue
+                        elif stored_modified == meta.last_modified:
+                            continue
+                        logger.info(
+                            "Re-indexing changed document: %s (modified: %s -> %s)",
+                            meta.name, stored_modified, meta.last_modified,
+                        )
+            except Exception:
+                logger.warning("Failed to check tracking for %s", meta.document_id, exc_info=True)
 
             if is_new:
                 await self._track_document(meta)
@@ -426,6 +436,7 @@ class KnowledgeService(Service):
             "type": meta.document_type.value,
             "size_bytes": meta.size_bytes,
             "last_modified": meta.last_modified,
+            "checksum": meta.checksum,
             "external_url": meta.external_url,
             "added_at": added_at,
             "indexed_at": now if indexed_chunks > 0 else (existing or {}).get("indexed_at", ""),

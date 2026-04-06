@@ -19,6 +19,7 @@ from gilbert.core.service_manager import ServiceManager
 from gilbert.core.services import (
     AuthService,
     EventBusService,
+    InboxService,
     MusicService,
     PersonaService,
     SpeakerService,
@@ -260,6 +261,23 @@ class Gilbert:
 
             self.service_manager.register(GreetingService())
 
+        if self.config.inbox.enabled:
+            email_backend = self._create_email_backend(
+                self.config.inbox.backend,
+                email_address=self.config.inbox.email_address,
+            )
+            # Determine the Google account name for Gmail.
+            # Convention: credential name doubles as the google.accounts key.
+            google_account = self.config.inbox.credential if self.config.inbox.backend == "gmail" else ""
+            self.service_manager.register(InboxService(
+                backend=email_backend,
+                credential_name=self.config.inbox.credential,
+                email_address=self.config.inbox.email_address,
+                poll_interval=self.config.inbox.poll_interval,
+                max_body_length=self.config.inbox.max_body_length,
+                google_account=google_account,
+            ))
+
         # Memory service (always — uses entity storage)
         from gilbert.core.services.memory import MemoryService
 
@@ -369,6 +387,15 @@ class Gilbert:
         return PasswordHasher().hash(password)
 
     # --- Backend factories ---
+
+    @staticmethod
+    def _create_email_backend(backend_name: str, email_address: str = "") -> "EmailBackend":
+        """Create an email backend by name."""
+        if backend_name == "gmail":
+            from gilbert.integrations.gmail import GmailBackend
+
+            return GmailBackend(email_address=email_address)
+        raise ValueError(f"Unknown email backend: {backend_name}")
 
     @staticmethod
     def _create_ai_backend(backend_name: str) -> AIBackend:

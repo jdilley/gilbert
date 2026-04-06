@@ -244,6 +244,17 @@ class ScreenConfig(BaseModel):
     cleanup_interval_seconds: int = 300
 
 
+class InboxConfig(BaseModel):
+    """Email inbox configuration."""
+
+    enabled: bool = False
+    backend: str = "gmail"
+    credential: str = ""
+    email_address: str = ""
+    poll_interval: int = 60
+    max_body_length: int = 50000
+
+
 class SpeakerConfig(BaseModel):
     """Speaker system configuration."""
 
@@ -272,6 +283,7 @@ class GilbertConfig(BaseModel):
     doorbell: DoorbellConfig = DoorbellConfig()
     greeting: GreetingConfig = GreetingConfig()
     screens: ScreenConfig = ScreenConfig()
+    inbox: InboxConfig = InboxConfig()
     speaker: SpeakerConfig = SpeakerConfig()
     music: MusicConfig = MusicConfig()
 

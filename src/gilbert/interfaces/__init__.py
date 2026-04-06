@@ -18,6 +18,11 @@ from gilbert.interfaces.configuration import (
     ConfigParam,
     Configurable,
 )
+from gilbert.interfaces.email import (
+    EmailAddress,
+    EmailBackend,
+    EmailMessage,
+)
 from gilbert.interfaces.credentials import (
     AnyCredential,
     ApiKeyCredential,
@@ -64,6 +69,9 @@ __all__ = [
     "AnyCredential",
     "ApiKeyCredential",
     "AudioFormat",
+    "EmailAddress",
+    "EmailBackend",
+    "EmailMessage",
     "CredentialType",
     "Event",
     "EventBus",

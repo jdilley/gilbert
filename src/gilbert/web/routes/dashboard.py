@@ -45,6 +45,13 @@ _ALL_CARDS = [
         "required_role": "admin",
     },
     {
+        "title": "Inbox",
+        "description": "Browse and manage email messages.",
+        "url": "/inbox",
+        "icon": "&#9993;",  # envelope
+        "required_role": "admin",
+    },
+    {
         "title": "Entity Browser",
         "description": "Browse collections and entities in storage.",
         "url": "/entities",

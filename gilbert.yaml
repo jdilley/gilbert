@@ -90,6 +90,14 @@ auth:
 #       scopes:
 #         - https://www.googleapis.com/auth/admin.directory.user.readonly
 
+inbox:
+  enabled: false
+  backend: gmail
+  credential: ""
+  email_address: ""
+  poll_interval: 60
+  max_body_length: 50000
+
 knowledge:
   enabled: false
   sync_interval_seconds: 300
