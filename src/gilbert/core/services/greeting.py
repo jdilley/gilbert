@@ -13,6 +13,11 @@ from typing import Any
 
 from gilbert.interfaces.events import Event, EventBus
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
+from gilbert.interfaces.tools import (
+    ToolDefinition,
+    ToolParameter,
+    ToolParameterType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +49,7 @@ class GreetingService(Service):
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="greeting",
-            capabilities=frozenset({"greeting"}),
+            capabilities=frozenset({"greeting", "ai_tools"}),
             requires=frozenset({"event_bus", "entity_storage"}),
             optional=frozenset({"ai", "speaker_control", "text_to_speech", "presence", "configuration"}),
         )
@@ -211,6 +216,46 @@ class GreetingService(Service):
             logger.warning("AI greeting generation failed", exc_info=True)
 
         return f"Good morning, {name}!"
+
+    # ── ToolProvider Protocol ───────────────────────────────────
+
+    @property
+    def tool_provider_name(self) -> str:
+        return "greeting"
+
+    def get_tools(self) -> list[ToolDefinition]:
+        return [
+            ToolDefinition(
+                name="greet",
+                description=(
+                    "Generate and announce a personalized greeting for someone. "
+                    "Use this when a user asks you to greet someone or welcome them."
+                ),
+                parameters=[
+                    ToolParameter(
+                        name="name",
+                        type=ToolParameterType.STRING,
+                        description="Name of the person to greet.",
+                    ),
+                ],
+                required_role="user",
+            ),
+        ]
+
+    async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        if name != "greet":
+            raise KeyError(f"Unknown tool: {name}")
+
+        person_name = arguments.get("name", "").strip()
+        if not person_name:
+            return "I need a name to greet."
+
+        greeting = await self._generate_greeting(person_name)
+        await self._announce(greeting)
+
+        return f'Greeted {person_name}: "{greeting}"'
+
+    # ── Announce ────────────────────────────────────────────────
 
     async def _announce(self, text: str) -> None:
         """Announce greeting via speakers."""
