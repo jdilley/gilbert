@@ -231,6 +231,7 @@ class GreetingConfig(BaseModel):
     enabled: bool = False
     start_hour: int = 6
     cutoff_hour: int = 14
+    timezone: str = "UTC"
     style: str = ""  # custom style instructions for AI greeting generation
     speakers: list[str] = []  # speaker names to announce on (empty = all)
     voice_name: str = ""  # TTS voice name (empty = default)
