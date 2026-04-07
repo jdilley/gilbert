@@ -121,12 +121,9 @@ class RoastService(Service):
                 if not present:
                     return ""
                 person = random.choice(present)
-                # Use display_name if available, otherwise user_id
-                name = getattr(person, "display_name", "") or person.user_id
-                # Clean up email-style user IDs
-                if "@" in name:
-                    name = name.split("@")[0].replace(".", " ").replace("_", " ").title()
-                return name
+                from gilbert.core.user_utils import resolve_display_name
+
+                return await resolve_display_name(person.user_id, self._resolver)
         except Exception:
             logger.warning("Failed to get present people", exc_info=True)
 

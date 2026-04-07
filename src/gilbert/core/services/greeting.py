@@ -205,22 +205,9 @@ class GreetingService(Service):
 
     async def _get_display_name(self, user_id: str) -> str:
         """Resolve a user_id to a display-friendly first name."""
-        if self._resolver is not None:
-            user_svc = self._resolver.get_capability("users")
-            if user_svc is not None:
-                try:
-                    user = await user_svc.backend.get_user(user_id)
-                    if user:
-                        name = user.get("display_name", "")
-                        if name:
-                            return name.split()[0]  # First name only
-                except Exception:
-                    pass
-        # Fallback: parse from user_id
-        if "@" in user_id:
-            local = user_id.split("@")[0]
-            return local.replace(".", " ").replace("_", " ").title()
-        return user_id.split()[0] if " " in user_id else user_id
+        from gilbert.core.user_utils import resolve_display_name
+
+        return await resolve_display_name(user_id, self._resolver, first_name_only=True)
 
     async def _has_been_greeted_today(self, user_id: str) -> bool:
         """Check if user has been greeted today."""

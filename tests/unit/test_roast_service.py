@@ -179,6 +179,105 @@ class TestDefaultRoasts:
             assert "TestUser" in formatted
 
 
+class TestNameResolution:
+    """Verify roast service resolves user_id to display name, never roasts raw IDs."""
+
+    @pytest.mark.asyncio
+    async def test_resolves_user_id_to_display_name(
+        self, roast_service: RoastService, resolver: FakeResolver,
+    ) -> None:
+        """Should resolve internal user_id to the user's display name."""
+        from gilbert.interfaces.presence import PresenceState, UserPresence
+
+        fake_presence = MagicMock()
+        fake_presence.who_is_here = AsyncMock(return_value=[
+            UserPresence(user_id="usr_abc123", state=PresenceState.PRESENT),
+        ])
+        resolver.caps["presence"] = fake_presence
+
+        # Provide a user service that resolves the ID
+        fake_user_backend = MagicMock()
+        fake_user_backend.get_user = AsyncMock(return_value={
+            "_id": "usr_abc123",
+            "display_name": "Brian Dilley",
+            "email": "brian@test.com",
+        })
+        fake_user_svc = MagicMock()
+        fake_user_svc.backend = fake_user_backend
+        resolver.caps["users"] = fake_user_svc
+
+        await roast_service.start(resolver)
+
+        with patch("gilbert.core.services.roast.isinstance", side_effect=lambda obj, cls: True):
+            name = await roast_service._pick_random_person()
+        assert name == "Brian"  # First name only
+
+    @pytest.mark.asyncio
+    async def test_uuid_user_id_without_user_service(
+        self, roast_service: RoastService, resolver: FakeResolver,
+    ) -> None:
+        """Without a user service, UUID-style IDs are returned as-is (not ideal but safe)."""
+        from gilbert.interfaces.presence import PresenceState, UserPresence
+
+        fake_presence = MagicMock()
+        fake_presence.who_is_here = AsyncMock(return_value=[
+            UserPresence(user_id="usr_569171d4c248", state=PresenceState.PRESENT),
+        ])
+        resolver.caps["presence"] = fake_presence
+        # No users service
+
+        await roast_service.start(resolver)
+
+        with patch("gilbert.core.services.roast.isinstance", side_effect=lambda obj, cls: True):
+            name = await roast_service._pick_random_person()
+        assert name == "usr_569171d4c248"
+
+    @pytest.mark.asyncio
+    async def test_email_user_id_fallback(
+        self, roast_service: RoastService, resolver: FakeResolver,
+    ) -> None:
+        """Email-style user_ids should be parsed into a readable name."""
+        from gilbert.interfaces.presence import PresenceState, UserPresence
+
+        fake_presence = MagicMock()
+        fake_presence.who_is_here = AsyncMock(return_value=[
+            UserPresence(user_id="john.doe@company.com", state=PresenceState.PRESENT),
+        ])
+        resolver.caps["presence"] = fake_presence
+        # No users service — fallback parsing
+
+        await roast_service.start(resolver)
+
+        with patch("gilbert.core.services.roast.isinstance", side_effect=lambda obj, cls: True):
+            name = await roast_service._pick_random_person()
+        assert name == "John Doe"
+
+    @pytest.mark.asyncio
+    async def test_user_not_found_uses_fallback(
+        self, roast_service: RoastService, resolver: FakeResolver,
+    ) -> None:
+        """If user service can't find the user, falls back to ID parsing."""
+        from gilbert.interfaces.presence import PresenceState, UserPresence
+
+        fake_presence = MagicMock()
+        fake_presence.who_is_here = AsyncMock(return_value=[
+            UserPresence(user_id="brian.dilley@test.com", state=PresenceState.PRESENT),
+        ])
+        resolver.caps["presence"] = fake_presence
+
+        fake_user_backend = MagicMock()
+        fake_user_backend.get_user = AsyncMock(return_value=None)
+        fake_user_svc = MagicMock()
+        fake_user_svc.backend = fake_user_backend
+        resolver.caps["users"] = fake_user_svc
+
+        await roast_service.start(resolver)
+
+        with patch("gilbert.core.services.roast.isinstance", side_effect=lambda obj, cls: True):
+            name = await roast_service._pick_random_person()
+        assert name == "Brian Dilley"
+
+
 class TestAnnounce:
     @pytest.mark.asyncio
     async def test_announce_with_speakers(self, roast_service: RoastService, resolver: FakeResolver) -> None:
