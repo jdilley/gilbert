@@ -519,10 +519,13 @@ async def test_conversation_saved_to_storage(
     await ai_service.start(resolver)
     _, conv_id = await ai_service.chat("Save this")
 
-    storage_backend.put.assert_called_once()  # type: ignore[union-attr]
-    call_args = storage_backend.put.call_args[0]  # type: ignore[union-attr]
-    assert call_args[0] == "gilbert.ai_conversations"
-    assert call_args[1] == conv_id
+    # Find the conversation save call among all put calls (profiles are also seeded)
+    conv_calls = [
+        c for c in storage_backend.put.call_args_list  # type: ignore[union-attr]
+        if c[0][0] == "gilbert.ai_conversations"
+    ]
+    assert len(conv_calls) == 1
+    assert conv_calls[0][0][1] == conv_id
 
 
 # --- History Truncation ---

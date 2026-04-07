@@ -48,6 +48,7 @@ class RoastService(Service):
             capabilities=frozenset({"roast"}),
             requires=frozenset({"scheduler"}),
             optional=frozenset({"ai_chat", "presence", "text_to_speech", "speaker_control"}),
+            ai_calls=frozenset({"roast"}),
         )
 
     async def start(self, resolver: ServiceResolver) -> None:
@@ -143,6 +144,7 @@ class RoastService(Service):
                     response, _ = await ai_svc.chat(
                         prompt,
                         user_ctx=UserContext.SYSTEM,
+                        ai_call="roast",
                     )
                     if response and len(response) < 500:
                         return response.strip()

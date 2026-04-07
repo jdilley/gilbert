@@ -22,3 +22,4 @@
 - [Screen Service](memory-screen-service.md) — remote display screens controlled by AI via SSE push
 - [Inbox Service](memory-inbox-service.md) — email polling, persistence, events, and AI tools with Gmail backend
 - [Radio DJ Service](memory-radio-dj-service.md) — context-aware music DJ with presence-based genre selection and user preferences
+- [AI Context Profiles](memory-ai-context-profiles.md) — named profiles controlling tool access per AI interaction, with per-profile role overrides

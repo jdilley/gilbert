@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Gilbert — AI Context Profiles{% endblock %}
+{% block content %}
+<div class="breadcrumb">
+    <a href="/roles">Roles</a> &rsaquo; <strong>AI Context Profiles</strong>
+</div>
+<h1>AI Context Profiles</h1>
+<p class="subtitle">{{ profiles | length }} profiles, {{ declared_calls | length }} AI calls</p>
+
+{# --- Profiles table --- #}
+<h2>Profiles</h2>
+<table class="config-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Mode</th>
+            <th>Tools</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for p in profiles %}
+        <tr>
+            <td><code>{{ p.name }}</code></td>
+            <td><span class="muted">{{ p.description }}</span></td>
+            <td><span class="badge badge-muted">{{ p.tool_mode }}</span></td>
+            <td>
+                {% if p.tools %}
+                    {% for t in p.tools %}
+                    <span class="badge badge-muted">{{ t }}</span>
+                    {% endfor %}
+                {% else %}
+                    <span class="muted">{% if p.tool_mode == 'all' %}(all){% else %}(none){% endif %}</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if p.name != 'default' %}
+                <form method="POST" action="/roles/profiles/{{ p.name }}/delete" style="display:inline">
+                    <button type="submit" class="btn-sm btn-muted">Delete</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{# --- Create/edit profile form --- #}
+<h3>Create / Update Profile</h3>
+<form method="POST" action="/roles/profiles/save" class="form-row" style="max-width:500px">
+    <label>Name</label>
+    <input type="text" name="name" required placeholder="my_profile" style="margin-bottom:0.5rem">
+    <label>Description</label>
+    <input type="text" name="description" placeholder="What this profile is for" style="margin-bottom:0.5rem">
+    <label>Tool Mode</label>
+    <select name="tool_mode" class="inline-input" style="margin-bottom:0.5rem; width:100%; max-width:300px">
+        <option value="all">all — every tool</option>
+        <option value="include">include — only listed tools</option>
+        <option value="exclude">exclude — all except listed tools</option>
+    </select>
+    <label>Tools (comma-separated)</label>
+    <input type="text" name="tools" placeholder="tool_a, tool_b" style="margin-bottom:0.5rem">
+    <button type="submit" class="btn-primary">Save Profile</button>
+</form>
+
+{# --- Call assignments table --- #}
+<h2 style="margin-top:2rem">Call Assignments</h2>
+<p class="muted">Map each AI call to a profile. Unassigned calls use the <code>default</code> profile.</p>
+<table class="config-table">
+    <thead>
+        <tr>
+            <th>Call Name</th>
+            <th>Service</th>
+            <th>Profile</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in declared_calls %}
+        <tr>
+            <td><code>{{ c.call_name }}</code></td>
+            <td><span class="muted">{{ c.service }}</span></td>
+            <td><span class="badge {% if c.profile != 'default' %}badge-warn{% else %}badge-muted{% endif %}">{{ c.profile }}</span></td>
+            <td>
+                <form method="POST" action="/roles/profiles/assign" style="display:inline">
+                    <input type="hidden" name="call_name" value="{{ c.call_name }}">
+                    <select name="profile" class="inline-input">
+                        {% for pn in profile_names %}
+                        <option value="{{ pn }}" {% if pn == c.profile %}selected{% endif %}>{{ pn }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn-sm">Set</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

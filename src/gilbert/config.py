@@ -98,6 +98,15 @@ class TTSConfig(BaseModel):
     settings: dict[str, Any] = {}
 
 
+class AIProfileConfig(BaseModel):
+    """An AI context profile — defines tool access for a named AI interaction."""
+
+    description: str = ""
+    tool_mode: str = "all"  # "all" | "include" | "exclude"
+    tools: list[str] = []
+    tool_roles: dict[str, str] = {}  # per-tool role overrides
+
+
 class AIConfig(BaseModel):
     """AI service configuration."""
 
@@ -108,6 +117,7 @@ class AIConfig(BaseModel):
     max_history_messages: int = 50
     max_tool_rounds: int = 10
     settings: dict[str, Any] = {}
+    profiles: dict[str, AIProfileConfig] = {}
 
 
 class AuthRoleMapping(BaseModel):

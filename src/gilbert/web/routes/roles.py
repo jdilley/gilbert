@@ -122,16 +122,12 @@ async def tool_permissions(
         if svc is not None and isinstance(svc, ToolProvider):
             for tool_def in svc.get_tools():
                 override = acl._tool_overrides.get(tool_def.name)
-                chat_override = acl._chat_overrides.get(tool_def.name)
                 tools.append({
                     "name": tool_def.name,
                     "provider": svc.tool_provider_name,
                     "default_role": tool_def.required_role,
                     "effective_role": override or tool_def.required_role,
                     "has_override": override is not None,
-                    "default_chat_enabled": tool_def.chat_enabled,
-                    "effective_chat_enabled": chat_override if chat_override is not None else tool_def.chat_enabled,
-                    "has_chat_override": chat_override is not None,
                 })
     tools.sort(key=lambda t: (t["provider"], t["name"]))
 
@@ -181,37 +177,124 @@ async def clear_tool_permission(
     return RedirectResponse(url="/roles/tools", status_code=303)
 
 
-# --- Set tool chat visibility override ---
+# --- AI Context Profiles ---
 
 
-@router.post("/tools/{tool_name}/chat")
-async def set_tool_chat(
+def _get_ai_service(gilbert: Gilbert) -> Any:
+    svc = gilbert.service_manager.get_by_capability("ai_chat")
+    if svc is None:
+        raise HTTPException(status_code=503, detail="AI service not available")
+    return svc
+
+
+@router.get("/profiles")
+async def ai_profiles_page(
     request: Request,
-    tool_name: str,
-    chat_enabled: bool = Form(...),
     user: UserContext = Depends(require_role("admin")),
 ) -> Any:
     gilbert: Gilbert = request.app.state.gilbert
-    acl = _get_acl(gilbert)
+    ai_svc = _get_ai_service(gilbert)
 
-    await acl.set_chat_override(tool_name, chat_enabled)
-    return RedirectResponse(url="/roles/tools", status_code=303)
+    profiles = ai_svc.list_profiles()
+    assignments = ai_svc.list_assignments()
+
+    # Gather all declared ai_calls from services
+    sm = gilbert.service_manager
+    declared_calls: list[dict[str, str]] = []
+    for svc_name in sm.started_services:
+        svc = sm._registered.get(svc_name)
+        if svc is not None:
+            info = svc.service_info()
+            for call_name in sorted(info.ai_calls):
+                declared_calls.append({
+                    "call_name": call_name,
+                    "service": info.name,
+                    "profile": assignments.get(call_name, "default"),
+                })
+    # Add built-in calls not from services
+    for call_name in sorted(assignments):
+        if not any(d["call_name"] == call_name for d in declared_calls):
+            declared_calls.append({
+                "call_name": call_name,
+                "service": "(built-in)",
+                "profile": assignments[call_name],
+            })
+
+    profile_names = [p.name for p in profiles]
+
+    return templates.TemplateResponse(request, "ai_profiles.html", {
+        "profiles": [
+            {
+                "name": p.name,
+                "description": p.description,
+                "tool_mode": p.tool_mode,
+                "tools": p.tools,
+                "tool_roles": p.tool_roles,
+            }
+            for p in profiles
+        ],
+        "declared_calls": declared_calls,
+        "profile_names": profile_names,
+        "user": user,
+    })
 
 
-# --- Clear tool chat visibility override ---
-
-
-@router.post("/tools/{tool_name}/chat/clear")
-async def clear_tool_chat(
+@router.post("/profiles/save")
+async def save_ai_profile(
     request: Request,
-    tool_name: str,
+    name: str = Form(...),
+    description: str = Form(""),
+    tool_mode: str = Form("all"),
+    tools: str = Form(""),
+    user: UserContext = Depends(require_role("admin")),
+) -> Any:
+    from gilbert.core.services.ai import AIContextProfile
+
+    gilbert: Gilbert = request.app.state.gilbert
+    ai_svc = _get_ai_service(gilbert)
+
+    tools_list = [t.strip() for t in tools.split(",") if t.strip()] if tools.strip() else []
+    profile = AIContextProfile(
+        name=name.strip(),
+        description=description.strip(),
+        tool_mode=tool_mode,
+        tools=tools_list,
+    )
+    await ai_svc.set_profile(profile)
+    return RedirectResponse(url="/roles/profiles", status_code=303)
+
+
+@router.post("/profiles/{profile_name}/delete")
+async def delete_ai_profile(
+    request: Request,
+    profile_name: str,
     user: UserContext = Depends(require_role("admin")),
 ) -> Any:
     gilbert: Gilbert = request.app.state.gilbert
-    acl = _get_acl(gilbert)
+    ai_svc = _get_ai_service(gilbert)
 
-    await acl.clear_chat_override(tool_name)
-    return RedirectResponse(url="/roles/tools", status_code=303)
+    try:
+        await ai_svc.delete_profile(profile_name)
+    except (KeyError, ValueError):
+        pass
+    return RedirectResponse(url="/roles/profiles", status_code=303)
+
+
+@router.post("/profiles/assign")
+async def assign_ai_profile(
+    request: Request,
+    call_name: str = Form(...),
+    profile: str = Form(...),
+    user: UserContext = Depends(require_role("admin")),
+) -> Any:
+    gilbert: Gilbert = request.app.state.gilbert
+    ai_svc = _get_ai_service(gilbert)
+
+    try:
+        await ai_svc.set_assignment(call_name, profile)
+    except ValueError:
+        pass
+    return RedirectResponse(url="/roles/profiles", status_code=303)
 
 
 # --- Users & role assignment page ---

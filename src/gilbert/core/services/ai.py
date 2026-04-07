@@ -1,7 +1,9 @@
 """AI service — orchestrates AI conversations, tool execution, and persistence."""
 
+import json as _json
 import logging
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -32,6 +34,54 @@ logger = logging.getLogger(__name__)
 ai_logger = logging.getLogger("gilbert.ai")
 
 _COLLECTION = "ai_conversations"
+_PROFILES_COLLECTION = "ai_profiles"
+_ASSIGNMENTS_COLLECTION = "ai_profile_assignments"
+
+
+@dataclass
+class AIContextProfile:
+    """Named profile that controls which tools are available for an AI interaction."""
+
+    name: str
+    description: str = ""
+    tool_mode: str = "all"  # "all" | "include" | "exclude"
+    tools: list[str] = field(default_factory=list)
+    tool_roles: dict[str, str] = field(default_factory=dict)
+
+
+# Built-in profiles seeded on first start
+_BUILTIN_PROFILES = [
+    AIContextProfile(
+        name="default",
+        description="All tools available — fallback for unassigned calls",
+        tool_mode="all",
+    ),
+    AIContextProfile(
+        name="human_chat",
+        description="Human conversations via web or Slack — excludes internal service tools",
+        tool_mode="exclude",
+        tools=["sales_lead"],
+    ),
+    AIContextProfile(
+        name="text_only",
+        description="Text generation only, no tool access",
+        tool_mode="include",
+        tools=[],
+    ),
+    AIContextProfile(
+        name="sales_agent",
+        description="Sales lead qualification pipeline",
+        tool_mode="include",
+        tools=["sales_lead"],
+    ),
+]
+
+# Built-in call→profile assignments seeded on first start
+_BUILTIN_ASSIGNMENTS: dict[str, str] = {
+    "human_chat": "human_chat",
+    "greeting": "text_only",
+    "roast": "default",
+}
 
 
 class AIService(Service):
@@ -61,6 +111,9 @@ class AIService(Service):
         self._persona_svc: Any | None = None
         self._acl_svc: Any | None = None
         self._current_conversation_id: str | None = None
+        # AI context profiles
+        self._profiles: dict[str, AIContextProfile] = {}
+        self._assignments: dict[str, str] = {}  # call_name -> profile_name
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
@@ -117,7 +170,15 @@ class AIService(Service):
         # Save resolver for lazy tool discovery
         self._resolver = resolver
 
-        logger.info("AI service started (credential=%s)", self._credential_name)
+        # Load profiles and assignments
+        await self._load_profiles()
+
+        logger.info(
+            "AI service started (credential=%s, profiles=%d, assignments=%d)",
+            self._credential_name,
+            len(self._profiles),
+            len(self._assignments),
+        )
 
     def _apply_config(self, section: dict[str, Any]) -> None:
         """Apply tunable config values from a config section."""
@@ -189,6 +250,141 @@ class AIService(Service):
     async def stop(self) -> None:
         await self._backend.close()
 
+    # --- AI Context Profiles ---
+
+    async def _load_profiles(self) -> None:
+        """Load profiles and assignments from storage, seeding built-ins on first run."""
+        if self._storage is None:
+            # No storage — use built-ins in memory only
+            self._profiles = {p.name: p for p in _BUILTIN_PROFILES}
+            self._assignments = dict(_BUILTIN_ASSIGNMENTS)
+            return
+
+        # Seed built-in profiles if they don't exist yet
+        for bp in _BUILTIN_PROFILES:
+            existing = await self._storage.get(_PROFILES_COLLECTION, bp.name)
+            if existing is None:
+                await self._storage.put(_PROFILES_COLLECTION, bp.name, {
+                    "name": bp.name,
+                    "description": bp.description,
+                    "tool_mode": bp.tool_mode,
+                    "tools": bp.tools,
+                    "tool_roles": bp.tool_roles,
+                })
+
+        # Seed built-in assignments
+        for call_name, profile_name in _BUILTIN_ASSIGNMENTS.items():
+            existing = await self._storage.get(_ASSIGNMENTS_COLLECTION, call_name)
+            if existing is None:
+                await self._storage.put(_ASSIGNMENTS_COLLECTION, call_name, {
+                    "call_name": call_name,
+                    "profile": profile_name,
+                })
+
+        # Also seed from config (config overrides built-ins)
+        config_svc = self._resolver.get_capability("configuration") if self._resolver else None
+        if config_svc is not None:
+            get_section = getattr(config_svc, "get_section", None)
+            if get_section:
+                ai_section = get_section("ai")
+                config_profiles = ai_section.get("profiles", {})
+                for name, pdata in config_profiles.items():
+                    if isinstance(pdata, dict):
+                        await self._storage.put(_PROFILES_COLLECTION, name, {
+                            "name": name,
+                            "description": pdata.get("description", ""),
+                            "tool_mode": pdata.get("tool_mode", "all"),
+                            "tools": pdata.get("tools", []),
+                            "tool_roles": pdata.get("tool_roles", {}),
+                        })
+
+        # Load all profiles from storage
+        await self._refresh_profiles()
+
+    async def _refresh_profiles(self) -> None:
+        """Reload profiles and assignments from storage into memory."""
+        if self._storage is None:
+            return
+
+        # Load profiles
+        profile_docs = await self._storage.query(Query(collection=_PROFILES_COLLECTION))
+        self._profiles = {}
+        for doc in profile_docs:
+            name = doc.get("name", "")
+            if name:
+                self._profiles[name] = AIContextProfile(
+                    name=name,
+                    description=doc.get("description", ""),
+                    tool_mode=doc.get("tool_mode", "all"),
+                    tools=doc.get("tools", []),
+                    tool_roles=doc.get("tool_roles", {}),
+                )
+
+        # Load assignments
+        assignment_docs = await self._storage.query(Query(collection=_ASSIGNMENTS_COLLECTION))
+        self._assignments = {}
+        for doc in assignment_docs:
+            call_name = doc.get("call_name", "")
+            profile = doc.get("profile", "")
+            if call_name and profile:
+                self._assignments[call_name] = profile
+
+    def get_profile(self, ai_call: str | None) -> AIContextProfile | None:
+        """Resolve the profile for an AI call. Returns None if no profile applies."""
+        if ai_call is None:
+            return None
+        profile_name = self._assignments.get(ai_call, "default")
+        return self._profiles.get(profile_name)
+
+    def list_profiles(self) -> list[AIContextProfile]:
+        """List all defined profiles."""
+        return sorted(self._profiles.values(), key=lambda p: p.name)
+
+    def list_assignments(self) -> dict[str, str]:
+        """List all call→profile assignments."""
+        return dict(self._assignments)
+
+    async def set_profile(self, profile: AIContextProfile) -> None:
+        """Create or update a profile."""
+        if self._storage is not None:
+            await self._storage.put(_PROFILES_COLLECTION, profile.name, {
+                "name": profile.name,
+                "description": profile.description,
+                "tool_mode": profile.tool_mode,
+                "tools": profile.tools,
+                "tool_roles": profile.tool_roles,
+            })
+        self._profiles[profile.name] = profile
+        logger.info("Profile '%s' saved (mode=%s, tools=%d)", profile.name, profile.tool_mode, len(profile.tools))
+
+    async def delete_profile(self, name: str) -> None:
+        """Delete a profile."""
+        if name == "default":
+            raise ValueError("Cannot delete the 'default' profile")
+        if self._storage is not None:
+            await self._storage.delete(_PROFILES_COLLECTION, name)
+        self._profiles.pop(name, None)
+        logger.info("Profile '%s' deleted", name)
+
+    async def set_assignment(self, call_name: str, profile_name: str) -> None:
+        """Assign a profile to an AI call."""
+        if profile_name not in self._profiles:
+            raise ValueError(f"Unknown profile: {profile_name}")
+        if self._storage is not None:
+            await self._storage.put(_ASSIGNMENTS_COLLECTION, call_name, {
+                "call_name": call_name,
+                "profile": profile_name,
+            })
+        self._assignments[call_name] = profile_name
+        logger.info("Call '%s' assigned to profile '%s'", call_name, profile_name)
+
+    async def clear_assignment(self, call_name: str) -> None:
+        """Remove a call→profile assignment (reverts to default)."""
+        if self._storage is not None:
+            await self._storage.delete(_ASSIGNMENTS_COLLECTION, call_name)
+        self._assignments.pop(call_name, None)
+        logger.info("Call '%s' assignment cleared", call_name)
+
     # --- Chat ---
 
     async def chat(
@@ -197,8 +393,7 @@ class AIService(Service):
         conversation_id: str | None = None,
         user_ctx: UserContext | None = None,
         system_prompt: str | None = None,
-        tool_filter: list[str] | None = None,
-        apply_chat_visibility: bool = False,
+        ai_call: str | None = None,
     ) -> tuple[str, str]:
         """Send a user message and get an AI response (with full agentic loop).
 
@@ -208,8 +403,9 @@ class AIService(Service):
             user_ctx: Optional user context. Falls back to contextvar if None.
             system_prompt: Override the system prompt entirely. When ``None``,
                 uses the default persona + user memories.
-            tool_filter: Restrict available tools to these names only.
-                When ``None``, all discovered tools are available.
+            ai_call: Named AI interaction. Resolved to an AI context profile
+                that controls which tools are available and their role
+                requirements. When ``None``, all tools are available.
 
         Returns:
             (response_text, conversation_id) tuple.
@@ -228,20 +424,11 @@ class AIService(Service):
         # Append user message
         messages.append(Message(role=MessageRole.USER, content=user_message))
 
-        # Discover tools from all ai_tools providers.
-        # chat_enabled filtering only applies to human-facing channels (web, Slack)
-        # that explicitly opt in via apply_chat_visibility=True.
-        tools_by_name = self._discover_tools(
-            user_ctx=user_ctx,
-            apply_chat_visibility=apply_chat_visibility,
-        )
+        # Resolve profile for this AI call
+        profile = self.get_profile(ai_call)
 
-        # Apply tool filter if specified
-        if tool_filter is not None:
-            filter_set = set(tool_filter)
-            tools_by_name = {
-                k: v for k, v in tools_by_name.items() if k in filter_set
-            }
+        # Discover and filter tools based on profile
+        tools_by_name = self._discover_tools(user_ctx=user_ctx, profile=profile)
 
         tool_defs = [defn for _, defn in tools_by_name.values()]
 
@@ -336,17 +523,17 @@ class AIService(Service):
     def _discover_tools(
         self,
         user_ctx: UserContext | None = None,
-        apply_chat_visibility: bool = False,
+        profile: AIContextProfile | None = None,
     ) -> dict[str, tuple[ToolProvider, ToolDefinition]]:
         """Find all started services that implement ToolProvider and collect their tools.
 
-        If user_ctx is provided and AccessControlService is available, filters
-        tools to only those the user has permission to use.
+        If a *profile* is provided, tools are filtered by its tool_mode:
+        - ``all``: all tools (RBAC still applies)
+        - ``include``: only tools named in ``profile.tools``
+        - ``exclude``: all tools except those named in ``profile.tools``
 
-        The ``chat_enabled`` visibility filter is only applied when
-        *apply_chat_visibility* is True. Human-facing channels (web chat,
-        Slack) set this; service-to-service calls leave it off so they
-        get the full tool set.
+        If the profile defines ``tool_roles``, those override each tool's
+        ``required_role`` for RBAC checks within this call.
         """
         tools_by_name: dict[str, tuple[ToolProvider, ToolDefinition]] = {}
         if self._resolver is None:
@@ -366,34 +553,45 @@ class AIService(Service):
                     continue
                 tools_by_name[tool_def.name] = (svc, tool_def)
 
-        # Filter by chat visibility and RBAC permissions
-        if self._acl_svc is not None:
+        # Apply profile tool filtering
+        if profile is not None:
+            if profile.tool_mode == "include":
+                include_set = set(profile.tools)
+                tools_by_name = {
+                    name: v for name, v in tools_by_name.items()
+                    if name in include_set
+                }
+            elif profile.tool_mode == "exclude":
+                exclude_set = set(profile.tools)
+                tools_by_name = {
+                    name: v for name, v in tools_by_name.items()
+                    if name not in exclude_set
+                }
+            # "all" = no filtering
+
+        # Apply RBAC permissions (with optional profile role overrides)
+        if user_ctx is not None and self._acl_svc is not None:
             from gilbert.core.services.access_control import AccessControlService
 
             if isinstance(self._acl_svc, AccessControlService):
-                # Filter out tools disabled for chat (human-facing channels only)
-                if apply_chat_visibility:
-                    tools_by_name = {
-                        name: (prov, tdef)
-                        for name, (prov, tdef) in tools_by_name.items()
-                        if self._acl_svc.is_tool_chat_enabled(tdef)
-                    }
-
-                # Filter by RBAC permissions
-                if user_ctx is not None:
-                    before = len(tools_by_name)
-                    tools_by_name = {
-                        name: (prov, tdef)
-                        for name, (prov, tdef) in tools_by_name.items()
-                        if self._acl_svc.check_tool_access(user_ctx, tdef)
-                    }
-                    removed = before - len(tools_by_name)
-                    if removed:
-                        logger.debug(
-                            "Filtered %d tools for user %s (effective level %d)",
-                            removed, user_ctx.user_id,
-                            self._acl_svc.get_effective_level(user_ctx),
-                        )
+                tool_roles = profile.tool_roles if profile else {}
+                before = len(tools_by_name)
+                filtered: dict[str, tuple[ToolProvider, ToolDefinition]] = {}
+                for name, (prov, tdef) in tools_by_name.items():
+                    # Use profile role override if present, else tool's default
+                    effective_role = tool_roles.get(name, tdef.required_role)
+                    role_level = self._acl_svc.get_role_level(effective_role)
+                    user_level = self._acl_svc.get_effective_level(user_ctx)
+                    if user_level <= role_level:
+                        filtered[name] = (prov, tdef)
+                removed = before - len(filtered)
+                if removed:
+                    logger.debug(
+                        "Filtered %d tools for user %s (effective level %d)",
+                        removed, user_ctx.user_id,
+                        self._acl_svc.get_effective_level(user_ctx),
+                    )
+                tools_by_name = filtered
 
         return tools_by_name
 
@@ -586,29 +784,129 @@ class AIService(Service):
                 ],
                 required_role="everyone",
             ),
+            ToolDefinition(
+                name="list_ai_profiles",
+                description="List all AI context profiles and their call assignments.",
+                required_role="admin",
+            ),
+            ToolDefinition(
+                name="set_ai_profile",
+                description=(
+                    "Create or update an AI context profile. "
+                    "tool_mode: 'all' (every tool), 'include' (only listed), 'exclude' (all except listed). "
+                    "tool_roles: per-tool role overrides within this profile."
+                ),
+                parameters=[
+                    ToolParameter(name="name", type=ToolParameterType.STRING, description="Profile name."),
+                    ToolParameter(name="description", type=ToolParameterType.STRING, description="What this profile is for.", required=False),
+                    ToolParameter(name="tool_mode", type=ToolParameterType.STRING, description="'all', 'include', or 'exclude'.", required=False, enum=["all", "include", "exclude"]),
+                    ToolParameter(name="tools", type=ToolParameterType.ARRAY, description="Tool names for include/exclude mode.", required=False),
+                    ToolParameter(name="tool_roles", type=ToolParameterType.OBJECT, description="Per-tool role overrides: {tool_name: role_name}.", required=False),
+                ],
+                required_role="admin",
+            ),
+            ToolDefinition(
+                name="delete_ai_profile",
+                description="Delete an AI context profile. The 'default' profile cannot be deleted.",
+                parameters=[
+                    ToolParameter(name="name", type=ToolParameterType.STRING, description="Profile name to delete."),
+                ],
+                required_role="admin",
+            ),
+            ToolDefinition(
+                name="assign_ai_profile",
+                description="Assign an AI context profile to a named AI call (e.g., 'human_chat', 'sales_initial_email').",
+                parameters=[
+                    ToolParameter(name="call_name", type=ToolParameterType.STRING, description="The AI call name."),
+                    ToolParameter(name="profile", type=ToolParameterType.STRING, description="Profile name to assign."),
+                ],
+                required_role="admin",
+            ),
+            ToolDefinition(
+                name="clear_ai_assignment",
+                description="Remove a call's profile assignment, reverting it to the 'default' profile.",
+                parameters=[
+                    ToolParameter(name="call_name", type=ToolParameterType.STRING, description="The AI call name."),
+                ],
+                required_role="admin",
+            ),
         ]
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
-        import json
-
         match name:
             case "rename_conversation":
                 return await self._tool_rename_conversation(arguments)
+            case "list_ai_profiles":
+                return self._tool_list_profiles()
+            case "set_ai_profile":
+                return await self._tool_set_profile(arguments)
+            case "delete_ai_profile":
+                return await self._tool_delete_profile(arguments)
+            case "assign_ai_profile":
+                return await self._tool_assign_profile(arguments)
+            case "clear_ai_assignment":
+                return await self._tool_clear_assignment(arguments)
             case _:
                 raise KeyError(f"Unknown tool: {name}")
 
-    async def _tool_rename_conversation(self, arguments: dict[str, Any]) -> str:
-        import json
+    def _tool_list_profiles(self) -> str:
+        profiles = []
+        for p in self.list_profiles():
+            profiles.append({
+                "name": p.name,
+                "description": p.description,
+                "tool_mode": p.tool_mode,
+                "tools": p.tools,
+                "tool_roles": p.tool_roles,
+            })
+        return _json.dumps({
+            "profiles": profiles,
+            "assignments": self.list_assignments(),
+        })
 
+    async def _tool_set_profile(self, arguments: dict[str, Any]) -> str:
+        name = arguments.get("name", "").strip()
+        if not name:
+            return _json.dumps({"error": "Profile name is required"})
+        existing = self._profiles.get(name)
+        profile = AIContextProfile(
+            name=name,
+            description=arguments.get("description", existing.description if existing else ""),
+            tool_mode=arguments.get("tool_mode", existing.tool_mode if existing else "all"),
+            tools=arguments.get("tools", existing.tools if existing else []),
+            tool_roles=arguments.get("tool_roles", existing.tool_roles if existing else {}),
+        )
+        await self.set_profile(profile)
+        return _json.dumps({"status": "saved", "profile": name})
+
+    async def _tool_delete_profile(self, arguments: dict[str, Any]) -> str:
+        try:
+            await self.delete_profile(arguments["name"])
+            return _json.dumps({"status": "deleted"})
+        except (KeyError, ValueError) as e:
+            return _json.dumps({"error": str(e)})
+
+    async def _tool_assign_profile(self, arguments: dict[str, Any]) -> str:
+        try:
+            await self.set_assignment(arguments["call_name"], arguments["profile"])
+            return _json.dumps({"status": "assigned"})
+        except ValueError as e:
+            return _json.dumps({"error": str(e)})
+
+    async def _tool_clear_assignment(self, arguments: dict[str, Any]) -> str:
+        await self.clear_assignment(arguments["call_name"])
+        return _json.dumps({"status": "cleared"})
+
+    async def _tool_rename_conversation(self, arguments: dict[str, Any]) -> str:
         title = arguments.get("title", "").strip()
         if not title:
-            return json.dumps({"error": "Title is required"})
+            return _json.dumps({"error": "Title is required"})
         if not self._current_conversation_id or not self._storage:
-            return json.dumps({"error": "No active conversation"})
+            return _json.dumps({"error": "No active conversation"})
 
         data = await self._storage.get("ai_conversations", self._current_conversation_id)
         if data is None:
-            return json.dumps({"error": "Conversation not found"})
+            return _json.dumps({"error": "Conversation not found"})
 
         data["title"] = title
         await self._storage.put("ai_conversations", self._current_conversation_id, data)
@@ -630,7 +928,7 @@ class AIService(Service):
                         source="ai",
                     ))
 
-        return json.dumps({"status": "renamed", "title": title})
+        return _json.dumps({"status": "renamed", "title": title})
 
     # --- Logging ---
 

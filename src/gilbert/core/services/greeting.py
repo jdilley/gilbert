@@ -52,6 +52,7 @@ class GreetingService(Service):
             capabilities=frozenset({"greeting", "ai_tools"}),
             requires=frozenset({"event_bus", "entity_storage"}),
             optional=frozenset({"ai", "speaker_control", "text_to_speech", "presence", "configuration"}),
+            ai_calls=frozenset({"greeting"}),
         )
 
     async def start(self, resolver: ServiceResolver) -> None:
@@ -284,7 +285,7 @@ class GreetingService(Service):
             response, _ = await ai_svc.chat(
                 prompt,
                 user_ctx=UserContext.SYSTEM,
-                tool_filter=[],
+                ai_call="greeting",
             )
             if response and len(response) < 500:
                 return response.strip()
@@ -324,7 +325,7 @@ class GreetingService(Service):
             response, _ = await ai_svc.chat(
                 prompt,
                 user_ctx=UserContext.SYSTEM,
-                tool_filter=[],
+                ai_call="greeting",
             )
             if response and len(response) < 500:
                 return response.strip()

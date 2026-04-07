@@ -68,6 +68,7 @@ class InboxAIChatService(Service):
             capabilities=frozenset({"email_ai_chat", "ai_tools"}),
             requires=frozenset({"email", "ai_chat", "entity_storage"}),
             optional=frozenset({"event_bus", "users", "knowledge"}),
+            ai_calls=frozenset({"inbox_ai_chat"}),
         )
 
     async def start(self, resolver: ServiceResolver) -> None:
@@ -197,6 +198,7 @@ class InboxAIChatService(Service):
             user_message=context_prefix + body,
             conversation_id=conversation_id,
             user_ctx=user_ctx,
+            ai_call="inbox_ai_chat",
         )
 
         # Collect any attachments the AI queued via the email_attach tool

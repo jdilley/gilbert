@@ -227,7 +227,7 @@ class SlackService(Service):
                 user_message=text,
                 conversation_id=conversation_id,
                 user_ctx=user_ctx,
-                apply_chat_visibility=True,
+                ai_call="human_chat",
             )
         except Exception:
             logger.exception("AI chat failed for Slack message ts=%s", ts)
