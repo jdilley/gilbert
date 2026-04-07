@@ -186,7 +186,7 @@ class TestGreetingService:
         """Startup check greets people already present."""
         await greeting_service.start(resolver)
         greeting_service._start_hour = 0
-        greeting_service._cutoff_hour = 23
+        greeting_service._cutoff_hour = 24
 
         # Mock presence service with people present
         from gilbert.interfaces.presence import UserPresence, PresenceState
