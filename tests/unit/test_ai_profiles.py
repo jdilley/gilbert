@@ -599,6 +599,53 @@ class TestChatWithProfile:
 # =============================================================================
 
 
+# =============================================================================
+# Date/Time Context Injection
+# =============================================================================
+
+
+class TestDateTimeContext:
+    def test_current_datetime_context_format(self) -> None:
+        """Should produce a string like 'Current date and time: Monday, April 07, 2026 at ...'"""
+        result = AIService._current_datetime_context()
+        assert result.startswith("Current date and time:")
+        # Should contain a day of week
+        days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        assert any(d in result for d in days)
+
+    async def test_default_prompt_includes_date(
+        self, ai_svc: AIService,
+    ) -> None:
+        """_build_system_prompt should start with the date context."""
+        prompt = await ai_svc._build_system_prompt()
+        assert prompt.startswith("Current date and time:")
+
+    async def test_custom_prompt_includes_date(
+        self, ai_svc: AIService, stub_backend: StubAIBackend,
+    ) -> None:
+        """When a custom system_prompt is provided, date context is prepended."""
+        stub_backend.queue_response(AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="ok"),
+            model="stub",
+        ))
+
+        await ai_svc.chat(
+            "test",
+            system_prompt="You are a sales agent.",
+            user_ctx=UserContext.SYSTEM,
+        )
+
+        assert len(stub_backend.requests) == 1
+        system_prompt = stub_backend.requests[0].system_prompt
+        assert system_prompt.startswith("Current date and time:")
+        assert "You are a sales agent." in system_prompt
+
+    async def test_date_context_contains_timezone(self) -> None:
+        """Should contain a timezone abbreviation (PDT, PST, or UTC)."""
+        result = AIService._current_datetime_context()
+        assert any(tz in result for tz in ["PDT", "PST", "UTC"])
+
+
 class TestServiceInfoAiCalls:
     def test_default_ai_calls_is_empty(self) -> None:
         info = ServiceInfo(name="test")
