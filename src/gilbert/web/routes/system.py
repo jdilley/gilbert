@@ -34,6 +34,7 @@ def _gather_services(gilbert: Gilbert) -> list[dict[str, Any]]:
             "capabilities": sorted(info.capabilities),
             "requires": sorted(info.requires),
             "optional": sorted(info.optional),
+            "ai_calls": sorted(info.ai_calls),
             "started": started,
             "failed": failed,
             "config_params": [],

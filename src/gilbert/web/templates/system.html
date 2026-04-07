@@ -28,6 +28,28 @@
         </div>
         {% endif %}
 
+        {% if svc.optional %}
+        <div class="detail-section">
+            <h4>Optional</h4>
+            <span class="caps">
+                {% for opt in svc.optional %}
+                <span class="badge badge-muted">{{ opt }}</span>
+                {% endfor %}
+            </span>
+        </div>
+        {% endif %}
+
+        {% if svc.ai_calls %}
+        <div class="detail-section">
+            <h4>AI Calls</h4>
+            <span class="caps">
+                {% for call in svc.ai_calls %}
+                <span class="badge">{{ call }}</span>
+                {% endfor %}
+            </span>
+        </div>
+        {% endif %}
+
         {% if svc.config_params %}
         <div class="detail-section">
             <h4>Configuration{% if svc.config_namespace %} <code>{{ svc.config_namespace }}.*</code>{% endif %}</h4>
