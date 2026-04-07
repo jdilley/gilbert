@@ -1,5 +1,6 @@
 """Speaker service — wraps a SpeakerBackend as a discoverable service with announce support."""
 
+import asyncio
 import json
 import logging
 import uuid
@@ -33,9 +34,12 @@ class SpeakerService(Service):
         self._output_ttl_seconds: int = 3600
         self._default_announce_volume: int | None = None
         self._web_host: str = "0.0.0.0"
-        self._web_port: int = 8765
+        self._web_port: int = 8000
         # Track last-used speaker set for "use last" default
         self._last_speaker_ids: list[str] = []
+        # Announcement queue lock — prevents announcements from stepping
+        # on each other by serializing TTS + playback.
+        self._announce_lock = asyncio.Lock()
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
@@ -267,10 +271,23 @@ class SpeakerService(Service):
     ) -> str:
         """Announce text over speakers using TTS.
 
-        1. Generate audio via TTS
-        2. Group speakers if needed
-        3. Play the audio
+        Announcements are serialized via a lock so they don't step on
+        each other. After starting playback, waits for the estimated
+        audio duration before releasing the lock.
         """
+        async with self._announce_lock:
+            return await self._announce_inner(
+                text, speaker_names, volume, voice_name,
+            )
+
+    async def _announce_inner(
+        self,
+        text: str,
+        speaker_names: list[str] | None = None,
+        volume: int | None = None,
+        voice_name: str | None = None,
+    ) -> str:
+        """Inner announce — must be called under _announce_lock."""
         if self._tts_svc is None:
             raise RuntimeError("TTS service is not available — cannot announce")
 
@@ -309,6 +326,12 @@ class SpeakerService(Service):
             title=f"Announcement: {text[:50]}",
         )
         await self._backend.play_uri(play_request)
+
+        # Wait for estimated audio duration so the next announcement
+        # doesn't interrupt this one. Estimate from audio size:
+        # MP3 at 128kbps ≈ 16KB/s, plus a small buffer.
+        audio_seconds = len(result.audio) / 16000
+        await asyncio.sleep(audio_seconds + 1.0)
 
         return str(file_path)
 

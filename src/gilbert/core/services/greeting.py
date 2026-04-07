@@ -108,7 +108,12 @@ class GreetingService(Service):
             self._unsubscribe()
 
     async def _greet_already_present(self) -> None:
-        """Greet anyone already present at startup who hasn't been greeted today."""
+        """Greet anyone already present at startup who hasn't been greeted today.
+
+        Instead of greeting each person individually (which would cause
+        announcements to step on each other), generates a single combined
+        greeting for everyone present.
+        """
         if not self._in_greeting_window():
             logger.info("Startup greeting skipped — outside greeting window")
             return
@@ -124,13 +129,38 @@ class GreetingService(Service):
             logger.warning("Startup greeting: could not check who is here", exc_info=True)
             return
 
-        logger.info("Startup greeting: %d people present", len(here))
-
+        # Filter to people not yet greeted today
+        to_greet: list[str] = []
         for p in here:
-            try:
-                await self._greet_user(p.user_id)
-            except Exception:
-                logger.warning("Startup greeting failed for %s", p.user_id, exc_info=True)
+            if not await self._has_been_greeted_today(p.user_id):
+                name = await self._get_display_name(p.user_id)
+                to_greet.append(name)
+
+        logger.info(
+            "Startup greeting: %d present, %d to greet",
+            len(here), len(to_greet),
+        )
+
+        if not to_greet:
+            return
+
+        # Generate a single combined greeting
+        greeting = await self._generate_group_greeting(to_greet)
+        logger.info("Startup greeting: %s", greeting)
+
+        await self._announce(greeting)
+
+        # Mark all as greeted
+        for p in here:
+            if not await self._has_been_greeted_today(p.user_id):
+                await self._mark_greeted(p.user_id)
+
+        if self._event_bus:
+            await self._event_bus.publish(Event(
+                event_type="greeting.announced",
+                data={"names": to_greet, "greeting": greeting, "startup": True},
+                source="greeting",
+            ))
 
     async def _on_arrival(self, event: Event) -> None:
         """Handle a presence.arrived event."""
@@ -262,6 +292,46 @@ class GreetingService(Service):
             logger.warning("AI greeting generation failed", exc_info=True)
 
         return f"Good morning, {name}!"
+
+    async def _generate_group_greeting(self, names: list[str]) -> str:
+        """Generate a single greeting for multiple people."""
+        if len(names) == 1:
+            return await self._generate_greeting(names[0])
+
+        if self._resolver is None:
+            return f"Good morning, {', '.join(names)}!"
+
+        ai_svc = self._resolver.get_capability("ai_chat")
+        if ai_svc is None:
+            return f"Good morning, {', '.join(names)}!"
+
+        style_instruction = ""
+        if self._style:
+            style_instruction = f" Style: {self._style}."
+
+        names_str = ", ".join(names[:-1]) + f", and {names[-1]}"
+        prompt = (
+            f"Generate a fun morning greeting for the crew: {names_str}. "
+            f"You're Gilbert, an AI assistant. Greet them as a group with "
+            f"energy and personality. Mention a few names naturally. "
+            f"Keep it to 2-3 sentences. "
+            f"Write ONLY the greeting text.{style_instruction}"
+        )
+
+        try:
+            from gilbert.interfaces.auth import UserContext
+
+            response, _ = await ai_svc.chat(
+                prompt,
+                user_ctx=UserContext.SYSTEM,
+                tool_filter=[],
+            )
+            if response and len(response) < 500:
+                return response.strip()
+        except Exception:
+            logger.warning("AI group greeting failed", exc_info=True)
+
+        return f"Good morning, {names_str}!"
 
     # ── ToolProvider Protocol ───────────────────────────────────
 
