@@ -35,7 +35,11 @@
                 {% endif %}
             </td>
             <td>
-                <button type="button" class="btn-sm" onclick="openEditModal('{{ p.name }}', '{{ p.description | e }}', '{{ p.tool_mode }}', {{ p.tools | tojson }})">Edit</button>
+                <button type="button" class="btn-sm edit-profile-btn"
+                    data-name="{{ p.name }}"
+                    data-description="{{ p.description }}"
+                    data-mode="{{ p.tool_mode }}"
+                    data-tools="{{ p.tools | tojson }}">Edit</button>
                 {% if p.name != 'default' %}
                 <form method="POST" action="/roles/profiles/{{ p.name }}/delete" style="display:inline">
                     <button type="submit" class="btn-sm btn-muted">Delete</button>
@@ -46,10 +50,10 @@
         {% endfor %}
     </tbody>
 </table>
-<button type="button" class="btn-primary" onclick="openNewModal()" style="margin-top:0.5rem">New Profile</button>
+<button type="button" class="btn-primary" id="new-profile-btn" style="margin-top:0.5rem">New Profile</button>
 
 {# --- Modal --- #}
-<div id="profile-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal()">
+<div id="profile-modal" class="modal-overlay modal-hidden">
     <div class="modal-content">
         <h3 id="modal-title">New Profile</h3>
         <form method="POST" action="/roles/profiles/save" id="profile-form">
@@ -81,7 +85,7 @@
                 </div>
             </div>
             <div class="modal-actions">
-                <button type="button" class="btn-sm btn-muted" onclick="closeModal()">Cancel</button>
+                <button type="button" class="btn-sm btn-muted" id="modal-cancel">Cancel</button>
                 <button type="submit" class="btn-primary">Save</button>
             </div>
         </form>
@@ -89,53 +93,76 @@
 </div>
 
 <script>
-var modal = document.getElementById('profile-modal');
-var nameInput = document.getElementById('modal-name');
-var descInput = document.getElementById('modal-desc');
-var modeSelect = document.getElementById('modal-mode');
-var toolsSection = document.getElementById('modal-tools-section');
-var modalTitle = document.getElementById('modal-title');
+(function() {
+    var modal = document.getElementById('profile-modal');
+    var nameInput = document.getElementById('modal-name');
+    var descInput = document.getElementById('modal-desc');
+    var modeSelect = document.getElementById('modal-mode');
+    var toolsSection = document.getElementById('modal-tools-section');
+    var modalTitle = document.getElementById('modal-title');
+    var checkboxes = toolsSection.querySelectorAll('input[type="checkbox"]');
 
-function toggleToolsSection() {
-    toolsSection.style.display = modeSelect.value === 'all' ? 'none' : '';
-}
-modeSelect.addEventListener('change', toggleToolsSection);
+    function toggleToolsSection() {
+        toolsSection.style.display = modeSelect.value === 'all' ? 'none' : '';
+    }
+    modeSelect.addEventListener('change', toggleToolsSection);
 
-function uncheckAll() {
-    toolsSection.querySelectorAll('input[type="checkbox"]').forEach(function(cb) { cb.checked = false; });
-}
+    function uncheckAll() {
+        checkboxes.forEach(function(cb) { cb.checked = false; });
+    }
 
-function openNewModal() {
-    modalTitle.textContent = 'New Profile';
-    nameInput.value = '';
-    nameInput.readOnly = false;
-    nameInput.style.opacity = '';
-    descInput.value = '';
-    modeSelect.value = 'all';
-    uncheckAll();
-    toggleToolsSection();
-    modal.style.display = '';
-}
+    function showModal() {
+        modal.classList.remove('modal-hidden');
+    }
 
-function openEditModal(name, desc, mode, tools) {
-    modalTitle.textContent = 'Edit Profile: ' + name;
-    nameInput.value = name;
-    nameInput.readOnly = true;
-    nameInput.style.opacity = '0.6';
-    descInput.value = desc;
-    modeSelect.value = mode;
-    uncheckAll();
-    (tools || []).forEach(function(t) {
-        var cb = toolsSection.querySelector('input[data-tool="' + t + '"]');
-        if (cb) cb.checked = true;
+    function hideModal() {
+        modal.classList.add('modal-hidden');
+    }
+
+    // New profile
+    document.getElementById('new-profile-btn').addEventListener('click', function() {
+        modalTitle.textContent = 'New Profile';
+        nameInput.value = '';
+        nameInput.readOnly = false;
+        nameInput.style.opacity = '';
+        descInput.value = '';
+        modeSelect.value = 'all';
+        uncheckAll();
+        toggleToolsSection();
+        showModal();
     });
-    toggleToolsSection();
-    modal.style.display = '';
-}
 
-function closeModal() {
-    modal.style.display = 'none';
-}
+    // Edit profile
+    document.querySelectorAll('.edit-profile-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var name = btn.getAttribute('data-name');
+            var desc = btn.getAttribute('data-description');
+            var mode = btn.getAttribute('data-mode');
+            var tools = [];
+            try { tools = JSON.parse(btn.getAttribute('data-tools')); } catch(e) {}
+
+            modalTitle.textContent = 'Edit Profile: ' + name;
+            nameInput.value = name;
+            nameInput.readOnly = true;
+            nameInput.style.opacity = '0.6';
+            descInput.value = desc;
+            modeSelect.value = mode;
+            uncheckAll();
+            tools.forEach(function(t) {
+                var cb = toolsSection.querySelector('input[data-tool="' + t + '"]');
+                if (cb) cb.checked = true;
+            });
+            toggleToolsSection();
+            showModal();
+        });
+    });
+
+    // Cancel / backdrop close
+    document.getElementById('modal-cancel').addEventListener('click', hideModal);
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) hideModal();
+    });
+})();
 </script>
 
 {# --- Call assignments table --- #}

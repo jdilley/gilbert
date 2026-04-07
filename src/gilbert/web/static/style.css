@@ -699,6 +699,9 @@ select.inline-input {
     justify-content: center;
     z-index: 1000;
 }
+.modal-overlay.modal-hidden {
+    display: none;
+}
 .modal-content {
     background: var(--bg);
     border: 1px solid var(--border);
