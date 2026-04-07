@@ -222,6 +222,15 @@ async def ai_profiles_page(
 
     profile_names = [p.name for p in profiles]
 
+    # Gather all tool names for checkbox UI
+    all_tool_names: list[str] = []
+    for svc_name in sm.started_services:
+        svc = sm._registered.get(svc_name)
+        if svc is not None and isinstance(svc, ToolProvider):
+            for tool_def in svc.get_tools():
+                all_tool_names.append(tool_def.name)
+    all_tool_names.sort()
+
     return templates.TemplateResponse(request, "ai_profiles.html", {
         "profiles": [
             {
@@ -235,6 +244,7 @@ async def ai_profiles_page(
         ],
         "declared_calls": declared_calls,
         "profile_names": profile_names,
+        "all_tool_names": all_tool_names,
         "user": user,
     })
 
@@ -242,10 +252,6 @@ async def ai_profiles_page(
 @router.post("/profiles/save")
 async def save_ai_profile(
     request: Request,
-    name: str = Form(...),
-    description: str = Form(""),
-    tool_mode: str = Form("all"),
-    tools: str = Form(""),
     user: UserContext = Depends(require_role("admin")),
 ) -> Any:
     from gilbert.core.services.ai import AIContextProfile
@@ -253,10 +259,15 @@ async def save_ai_profile(
     gilbert: Gilbert = request.app.state.gilbert
     ai_svc = _get_ai_service(gilbert)
 
-    tools_list = [t.strip() for t in tools.split(",") if t.strip()] if tools.strip() else []
+    form = await request.form()
+    name = str(form.get("name", "")).strip()
+    description = str(form.get("description", "")).strip()
+    tool_mode = str(form.get("tool_mode", "all"))
+    tools_list = form.getlist("tools")
+
     profile = AIContextProfile(
-        name=name.strip(),
-        description=description.strip(),
+        name=name,
+        description=description,
         tool_mode=tool_mode,
         tools=tools_list,
     )

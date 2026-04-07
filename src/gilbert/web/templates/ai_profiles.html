@@ -48,21 +48,48 @@
 
 {# --- Create/edit profile form --- #}
 <h3>Create / Update Profile</h3>
-<form method="POST" action="/roles/profiles/save" class="form-row" style="max-width:500px">
-    <label>Name</label>
-    <input type="text" name="name" required placeholder="my_profile" style="margin-bottom:0.5rem">
-    <label>Description</label>
-    <input type="text" name="description" placeholder="What this profile is for" style="margin-bottom:0.5rem">
-    <label>Tool Mode</label>
-    <select name="tool_mode" class="inline-input" style="margin-bottom:0.5rem; width:100%; max-width:300px">
-        <option value="all">all — every tool</option>
-        <option value="include">include — only listed tools</option>
-        <option value="exclude">exclude — all except listed tools</option>
-    </select>
-    <label>Tools (comma-separated)</label>
-    <input type="text" name="tools" placeholder="tool_a, tool_b" style="margin-bottom:0.5rem">
+<form method="POST" action="/roles/profiles/save" style="max-width:600px">
+    <div class="form-row">
+        <label>Name</label>
+        <input type="text" name="name" required placeholder="my_profile">
+    </div>
+    <div class="form-row">
+        <label>Description</label>
+        <input type="text" name="description" placeholder="What this profile is for">
+    </div>
+    <div class="form-row">
+        <label>Tool Mode</label>
+        <select name="tool_mode" class="inline-input" id="tool-mode-select" style="width:100%; max-width:300px">
+            <option value="all">all — every tool</option>
+            <option value="include">include — only checked tools</option>
+            <option value="exclude">exclude — all except checked tools</option>
+        </select>
+    </div>
+    <div class="form-row" id="tool-checkboxes">
+        <label>Tools</label>
+        <div class="checkbox-grid">
+            {% for t in all_tool_names %}
+            <label class="checkbox-label">
+                <input type="checkbox" name="tools" value="{{ t }}">
+                <code>{{ t }}</code>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
     <button type="submit" class="btn-primary">Save Profile</button>
 </form>
+
+<script>
+(function() {
+    var modeSelect = document.getElementById('tool-mode-select');
+    var checkboxDiv = document.getElementById('tool-checkboxes');
+    function toggle() {
+        checkboxDiv.style.display = modeSelect.value === 'all' ? 'none' : '';
+    }
+    modeSelect.addEventListener('change', toggle);
+    toggle();
+})();
+</script>
 
 {# --- Call assignments table --- #}
 <h2 style="margin-top:2rem">Call Assignments</h2>
