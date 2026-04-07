@@ -1,7 +1,6 @@
 """UniFi Protect doorbell backend — detects ring events via the Protect API."""
 
 import logging
-from typing import Any
 
 from gilbert.integrations.unifi.client import UniFiClient
 from gilbert.integrations.unifi.protect import UniFiProtect
@@ -23,9 +22,13 @@ class UniFiProtectDoorbellBackend(DoorbellBackend):
             logger.warning("UniFi doorbell backend: no host configured")
             return
 
-        cred: dict[str, Any] = config.get("_resolved_credential") or {}  # type: ignore[assignment]
-        username = cred.get("username", "")
-        password = cred.get("password", "")
+        cred = config.get("_resolved_credential")
+        if cred is None:
+            logger.warning("UniFi doorbell backend: no credentials resolved")
+            return
+
+        username = getattr(cred, "username", "") or ""
+        password = getattr(cred, "password", "") or ""
         if not username or not password:
             logger.warning("UniFi doorbell backend: no credentials resolved")
             return
