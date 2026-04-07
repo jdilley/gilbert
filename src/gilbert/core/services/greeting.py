@@ -254,6 +254,7 @@ class GreetingService(Service):
             response, _ = await ai_svc.chat(
                 prompt,
                 user_ctx=UserContext.SYSTEM,
+                tool_filter=[],
             )
             if response and len(response) < 500:
                 return response.strip()
