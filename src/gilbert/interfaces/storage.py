@@ -165,3 +165,121 @@ class StorageBackend(ABC):
     async def list_foreign_keys(self, collection: str) -> list[ForeignKeyDefinition]:
         """List foreign key constraints involving a collection."""
         ...
+
+
+class NamespacedStorageBackend(StorageBackend):
+    """Wraps a StorageBackend with a transparent collection name prefix.
+
+    All collection names are automatically prefixed with ``{namespace}.``
+    so that multiple consumers (core services, plugins) can use the same
+    bare collection names without collision.
+
+    ``list_collections()`` returns only the collections belonging to this
+    namespace, with the prefix stripped.
+    """
+
+    def __init__(self, inner: StorageBackend, namespace: str) -> None:
+        self._inner = inner
+        self._namespace = namespace
+        self._prefix = f"{namespace}."
+
+    @property
+    def namespace(self) -> str:
+        """The namespace this backend operates in."""
+        return self._namespace
+
+    @property
+    def inner(self) -> StorageBackend:
+        """The underlying unwrapped backend."""
+        return self._inner
+
+    def _ns(self, collection: str) -> str:
+        """Prefix a collection name."""
+        if collection.startswith(self._prefix):
+            return collection
+        return f"{self._prefix}{collection}"
+
+    def _ns_query(self, query: Query) -> Query:
+        """Return a copy of *query* with the collection name prefixed."""
+        return Query(
+            collection=self._ns(query.collection),
+            filters=query.filters,
+            sort=query.sort,
+            limit=query.limit,
+            offset=query.offset,
+        )
+
+    def _ns_index(self, index: IndexDefinition) -> IndexDefinition:
+        """Return a copy of *index* with the collection name prefixed."""
+        return IndexDefinition(
+            collection=self._ns(index.collection),
+            fields=index.fields,
+            name=index.name,
+            unique=index.unique,
+        )
+
+    def _ns_fk(self, fk: ForeignKeyDefinition) -> ForeignKeyDefinition:
+        """Return a copy of *fk* with both collection names prefixed."""
+        return ForeignKeyDefinition(
+            collection=self._ns(fk.collection),
+            field=fk.field,
+            ref_collection=self._ns(fk.ref_collection),
+            ref_field=fk.ref_field,
+            on_delete=fk.on_delete,
+            name=fk.name,
+        )
+
+    # --- Lifecycle (delegated, no prefixing) ---
+
+    async def initialize(self) -> None:
+        await self._inner.initialize()
+
+    async def close(self) -> None:
+        await self._inner.close()
+
+    # --- Entity operations ---
+
+    async def put(self, collection: str, entity_id: str, data: dict) -> None:
+        await self._inner.put(self._ns(collection), entity_id, data)
+
+    async def get(self, collection: str, entity_id: str) -> dict | None:
+        return await self._inner.get(self._ns(collection), entity_id)
+
+    async def delete(self, collection: str, entity_id: str) -> None:
+        await self._inner.delete(self._ns(collection), entity_id)
+
+    async def exists(self, collection: str, entity_id: str) -> bool:
+        return await self._inner.exists(self._ns(collection), entity_id)
+
+    # --- Query operations ---
+
+    async def query(self, query: Query) -> list[dict]:
+        return await self._inner.query(self._ns_query(query))
+
+    async def count(self, query: Query) -> int:
+        return await self._inner.count(self._ns_query(query))
+
+    # --- Collection management ---
+
+    async def list_collections(self) -> list[str]:
+        all_cols = await self._inner.list_collections()
+        return [c[len(self._prefix):] for c in all_cols if c.startswith(self._prefix)]
+
+    async def drop_collection(self, collection: str) -> None:
+        await self._inner.drop_collection(self._ns(collection))
+
+    # --- Indexing ---
+
+    async def ensure_index(self, index: IndexDefinition) -> None:
+        await self._inner.ensure_index(self._ns_index(index))
+
+    async def list_indexes(self, collection: str) -> list[IndexDefinition]:
+        return await self._inner.list_indexes(self._ns(collection))
+
+    # --- Foreign keys ---
+
+    async def ensure_foreign_key(self, fk: ForeignKeyDefinition) -> None:
+        await self._inner.ensure_foreign_key(self._ns_fk(fk))
+
+    async def list_foreign_keys(self, collection: str) -> list[ForeignKeyDefinition]:
+        return await self._inner.list_foreign_keys(self._ns(collection))

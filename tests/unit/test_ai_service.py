@@ -521,7 +521,7 @@ async def test_conversation_saved_to_storage(
 
     storage_backend.put.assert_called_once()  # type: ignore[union-attr]
     call_args = storage_backend.put.call_args[0]  # type: ignore[union-attr]
-    assert call_args[0] == "ai_conversations"
+    assert call_args[0] == "gilbert.ai_conversations"
     assert call_args[1] == conv_id
 
 

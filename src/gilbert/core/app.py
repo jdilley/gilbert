@@ -119,6 +119,7 @@ class Gilbert:
 
         # 2. Register core infrastructure services
         storage = await self._init_storage()
+
         self.service_manager.register(StorageService(storage))
 
         event_bus = InMemoryEventBus()
@@ -326,6 +327,29 @@ class Gilbert:
         loader = PluginLoader(cache_dir=self.config.plugins.cache_dir)
         plugin_config = self.config.plugins.config
 
+        # Get the raw storage backend for creating namespaced wrappers.
+        # Use _registered directly since services haven't started yet.
+        storage_svc = self.service_manager._registered.get("storage")
+        raw_backend = getattr(storage_svc, "raw_backend", None) if storage_svc else None
+
+        def _make_context(name: str) -> PluginContext:
+            data_dir = PLUGIN_DATA_DIR / name
+            data_dir.mkdir(parents=True, exist_ok=True)
+
+            plugin_storage = None
+            if raw_backend is not None:
+                from gilbert.interfaces.storage import NamespacedStorageBackend
+                plugin_storage = NamespacedStorageBackend(
+                    raw_backend, f"gilbert.plugin.{name}",
+                )
+
+            return PluginContext(
+                services=self.service_manager,
+                config=plugin_config.get(name, {}),
+                data_dir=data_dir,
+                storage=plugin_storage,
+            )
+
         # Phase 1: Load plugins from scanned directories (already discovered)
         manifests: list[PluginManifest] = getattr(self, "_discovered_manifests", [])
         sorted_manifests = loader.topological_sort(manifests)
@@ -333,13 +357,7 @@ class Gilbert:
         for manifest in sorted_manifests:
             try:
                 plugin = loader.load_from_manifest(manifest)
-                data_dir = PLUGIN_DATA_DIR / manifest.name
-                data_dir.mkdir(parents=True, exist_ok=True)
-                context = PluginContext(
-                    services=self.service_manager,
-                    config=plugin_config.get(manifest.name, {}),
-                    data_dir=data_dir,
-                )
+                context = _make_context(manifest.name)
                 await plugin.setup(context)
                 self._plugins.append(plugin)
             except Exception:
@@ -352,13 +370,7 @@ class Gilbert:
             try:
                 plugin = await loader.load(source.source)
                 meta = plugin.metadata()
-                data_dir = PLUGIN_DATA_DIR / meta.name
-                data_dir.mkdir(parents=True, exist_ok=True)
-                context = PluginContext(
-                    services=self.service_manager,
-                    config=plugin_config.get(meta.name, {}),
-                    data_dir=data_dir,
-                )
+                context = _make_context(meta.name)
                 await plugin.setup(context)
                 self._plugins.append(plugin)
             except Exception:

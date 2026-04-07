@@ -47,6 +47,7 @@ class InboxAIChatService(Service):
     def __init__(self, config: InboxAIChatConfig) -> None:
         self._allowed_emails = [e.lower() for e in config.allowed_emails]
         self._allowed_domains = [d.lower().lstrip("@") for d in config.allowed_domains]
+        self._required_subject = config.required_subject.lower().strip() if config.required_subject else ""
 
         self._inbox: Any = None  # InboxService
         self._ai: Any = None  # AIService
@@ -108,11 +109,32 @@ class InboxAIChatService(Service):
             return
 
         sender_email = data.get("sender_email", "")
-        if not self._is_allowed(sender_email):
+
+        # When an email was forwarded through a Google Groups alias
+        # (e.g., vendors@current-la.com), Gmail sets X-Original-Sender
+        # to the true external sender.  Use that for the allowlist check
+        # so forwarded mail from external senders is correctly rejected.
+        original_sender = data.get("original_sender", "")
+        check_email = original_sender if original_sender else sender_email
+
+        if not self._is_allowed(check_email):
             return
+
+        # Subject filter: require a specific subject (or a reply to it)
+        if self._required_subject:
+            subject = data.get("subject", "").lower().strip()
+            # Strip "re:" / "fwd:" prefixes for reply matching
+            bare_subject = re.sub(r"^(re|fwd|fw)\s*:\s*", "", subject).strip()
+            if bare_subject != self._required_subject:
+                return
 
         message_id = data.get("message_id", "")
         thread_id = data.get("thread_id", "")
+
+        # Skip if we already replied to this message
+        if await self._already_replied(message_id):
+            logger.debug("Skipping already-replied message: %s", message_id)
+            return
 
         try:
             await self._process_message(message_id, thread_id, sender_email)
@@ -193,11 +215,34 @@ class InboxAIChatService(Service):
             attachments=attachments or None,
         )
 
+        # Mark this message as replied so we never re-process it
+        await self._mark_replied(message_id, sender_email)
+
         att_msg = f" with {len(attachments)} attachment(s)" if attachments else ""
         logger.info(
             "Email AI chat: replied to %s%s (thread=%s, conv=%s)",
             sender_email, att_msg, thread_id, conv_id,
         )
+
+    # ── Reply dedup ────────────────────────────────────────────
+
+    _REPLIED_COLLECTION = "inbox_ai_chat_replied"
+
+    async def _already_replied(self, message_id: str) -> bool:
+        """Check if we already replied to this message."""
+        if self._storage is None:
+            return False
+        return await self._storage.exists(self._REPLIED_COLLECTION, message_id)
+
+    async def _mark_replied(self, message_id: str, sender_email: str) -> None:
+        """Record that we replied to a message."""
+        if self._storage is None:
+            return
+        await self._storage.put(self._REPLIED_COLLECTION, message_id, {
+            "message_id": message_id,
+            "sender_email": sender_email,
+            "replied_at": datetime.now(timezone.utc).isoformat(),
+        })
 
     # ── Allowlist ──────────────────────────────────────────────
 

@@ -2,18 +2,24 @@
 {% block title %}Gilbert — Entity Browser{% endblock %}
 {% block content %}
 <h1>Entity Browser</h1>
-<p class="subtitle">{{ collections | length }} collections in storage</p>
+<p class="subtitle">{{ total_collections }} collections in storage</p>
 
-{% if collections %}
+{% if groups %}
+{% for group in groups %}
+<h2 style="margin-top: 1.5em; margin-bottom: 0.5em; font-size: 1.1em; color: #666; border-bottom: 1px solid #ddd; padding-bottom: 0.3em;">
+    {{ group.namespace }}
+    <span style="font-weight: normal; font-size: 0.85em; color: #999;">({{ group.collections | length }})</span>
+</h2>
 <div class="card-grid">
-    {% for col in collections %}
+    {% for col in group.collections %}
     <a href="/entities/{{ col.name }}" class="card">
         <span class="card-icon">&#128451;</span>
-        <h2>{{ col.name }}</h2>
+        <h2>{{ col.short_name }}</h2>
         <p>{{ col.count }} entit{{ "y" if col.count == 1 else "ies" }}</p>
     </a>
     {% endfor %}
 </div>
+{% endfor %}
 {% else %}
 <p class="muted">No collections found. Storage may not be running.</p>
 {% endif %}

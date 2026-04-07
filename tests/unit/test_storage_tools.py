@@ -62,7 +62,7 @@ async def test_tool_store_entity(
     assert parsed["collection"] == "notes"
     assert parsed["id"] == "note-1"
     storage_backend.put.assert_called_once_with(  # type: ignore[union-attr]
-        "notes", "note-1", {"title": "Hello", "body": "World"}
+        "gilbert.notes", "note-1", {"title": "Hello", "body": "World"}
     )
 
 
@@ -114,7 +114,7 @@ async def test_tool_query_entities(
 
     # Verify the query was built correctly
     call_args = storage_backend.query.call_args[0][0]  # type: ignore[union-attr]
-    assert call_args.collection == "users"
+    assert call_args.collection == "gilbert.users"
     assert len(call_args.filters) == 1
     assert call_args.filters[0].field == "name"
     assert call_args.filters[0].op.value == "eq"
@@ -151,7 +151,7 @@ async def test_tool_list_collections(
     service: StorageService, storage_backend: StorageBackend
 ) -> None:
     storage_backend.list_collections = AsyncMock(  # type: ignore[union-attr]
-        return_value=["notes", "users", "events"]
+        return_value=["gilbert.notes", "gilbert.users", "gilbert.events"]
     )
     result = await service.execute_tool("list_collections", {})
     parsed = json.loads(result)

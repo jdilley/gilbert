@@ -115,7 +115,7 @@ async def test_start_uses_default_when_no_saved(
 async def test_start_loads_saved_persona(
     service: PersonaService, resolver: ServiceResolver, stub_storage: StubStorageBackend
 ) -> None:
-    await stub_storage.put("persona", "active", {
+    await stub_storage.put("gilbert.persona", "active", {
         "text": "Custom persona text",
         "customized": True,
     })
@@ -135,7 +135,7 @@ async def test_update_persona(
     assert service.persona == "Be a pirate."
     assert service.is_customized is True
 
-    saved = await stub_storage.get("persona", "active")
+    saved = await stub_storage.get("gilbert.persona", "active")
     assert saved is not None
     assert saved["text"] == "Be a pirate."
     assert saved["customized"] is True
@@ -150,7 +150,7 @@ async def test_reset_persona(
     assert service.persona == DEFAULT_PERSONA
     assert service.is_customized is False
 
-    saved = await stub_storage.get("persona", "active")
+    saved = await stub_storage.get("gilbert.persona", "active")
     assert saved is not None
     assert saved["customized"] is False
 

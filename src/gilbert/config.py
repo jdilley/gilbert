@@ -250,6 +250,7 @@ class InboxAIChatConfig(BaseModel):
     enabled: bool = False
     allowed_emails: list[str] = []
     allowed_domains: list[str] = []
+    required_subject: str = ""
 
 
 class InboxConfig(BaseModel):

@@ -4,12 +4,10 @@ import asyncio
 import logging
 import os
 import signal
-import sys
-from pathlib import Path
 
 import uvicorn
 
-from gilbert.config import DATA_DIR, load_config
+from gilbert.config import DATA_DIR
 from gilbert.core.app import Gilbert
 from gilbert.web import create_app
 
@@ -36,8 +34,7 @@ def _remove_pid() -> None:
 async def main() -> None:
     global _signal_count
 
-    config = load_config()
-    gilbert = Gilbert(config)
+    gilbert = Gilbert.create()
 
     await gilbert.start()
     _write_pid()
@@ -46,8 +43,8 @@ async def main() -> None:
 
     uv_config = uvicorn.Config(
         web_app,
-        host=config.web.host,
-        port=config.web.port,
+        host=gilbert.config.web.host,
+        port=gilbert.config.web.port,
         log_level="info",
     )
     server = uvicorn.Server(uv_config)

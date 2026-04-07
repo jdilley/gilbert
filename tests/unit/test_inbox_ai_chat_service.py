@@ -89,6 +89,9 @@ class FakeStorageBackend:
     async def put(self, collection: str, key: str, data: dict[str, Any]) -> None:
         self._data.setdefault(collection, {})[key] = data
 
+    async def exists(self, collection: str, key: str) -> bool:
+        return key in self._data.get(collection, {})
+
 
 class FakeStorageService:
     def __init__(self) -> None:

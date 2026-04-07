@@ -7,7 +7,14 @@ from typing import Any
 from gilbert.core.context import get_current_user
 from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
-from gilbert.interfaces.storage import Filter, FilterOp, Query, SortField, StorageBackend
+from gilbert.interfaces.storage import (
+    Filter,
+    FilterOp,
+    NamespacedStorageBackend,
+    Query,
+    SortField,
+    StorageBackend,
+)
 from gilbert.interfaces.tools import (
     ToolDefinition,
     ToolParameter,
@@ -20,8 +27,11 @@ logger = logging.getLogger(__name__)
 class StorageService(Service):
     """Exposes a StorageBackend as a service with entity_storage capability."""
 
+    _DEFAULT_NAMESPACE = "gilbert"
+
     def __init__(self, backend: StorageBackend) -> None:
-        self._backend = backend
+        self._raw_backend = backend
+        self._backend = NamespacedStorageBackend(backend, self._DEFAULT_NAMESPACE)
         self._resolver: ServiceResolver | None = None
 
     def service_info(self) -> ServiceInfo:
@@ -36,10 +46,23 @@ class StorageService(Service):
 
     @property
     def backend(self) -> StorageBackend:
+        """The default namespaced backend (``gilbert.`` prefix)."""
         return self._backend
 
+    @property
+    def raw_backend(self) -> StorageBackend:
+        """The raw backend with no namespace prefix.
+
+        Used by the entity browser to see all namespaces.
+        """
+        return self._raw_backend
+
+    def create_namespaced(self, namespace: str) -> NamespacedStorageBackend:
+        """Create a backend scoped to a custom namespace."""
+        return NamespacedStorageBackend(self._raw_backend, namespace)
+
     async def stop(self) -> None:
-        await self._backend.close()
+        await self._raw_backend.close()
 
     # --- Configurable protocol ---
 

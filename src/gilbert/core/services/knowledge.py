@@ -211,7 +211,10 @@ class KnowledgeService(Service):
             logger.warning("Failed to download document: %s (get_document returned None)", meta.document_id)
             return 0
 
-        text, stats = extract_text(
+        import asyncio
+
+        text, stats = await asyncio.to_thread(
+            extract_text,
             content,
             vision=self._vision,
             ocr=self._ocr,
@@ -245,27 +248,33 @@ class KnowledgeService(Service):
 
         # Remove old chunks for this document
         try:
-            self._collection.delete(where={"document_id": doc_id})
+            await asyncio.to_thread(
+                self._collection.delete, where={"document_id": doc_id}
+            )
         except Exception:
             pass  # May not exist yet
 
-        # Upsert new chunks
-        self._collection.upsert(
-            ids=[f"{doc_id}#chunk{c.chunk_index}" for c in chunks],
-            documents=[c.text for c in chunks],
-            metadatas=[
-                {
-                    "document_id": doc_id,
-                    "source_id": meta.source_id,
-                    "path": meta.path,
-                    "name": meta.name,
-                    "document_type": meta.document_type.value,
-                    "last_modified": meta.last_modified,
-                    "chunk_index": c.chunk_index,
-                    "page_number": c.page_number or -1,
-                }
-                for c in chunks
-            ],
+        # Upsert new chunks (runs embedding model — can be slow on CPU)
+        chunk_ids = [f"{doc_id}#chunk{c.chunk_index}" for c in chunks]
+        chunk_docs = [c.text for c in chunks]
+        chunk_metas = [
+            {
+                "document_id": doc_id,
+                "source_id": meta.source_id,
+                "path": meta.path,
+                "name": meta.name,
+                "document_type": meta.document_type.value,
+                "last_modified": meta.last_modified,
+                "chunk_index": c.chunk_index,
+                "page_number": c.page_number or -1,
+            }
+            for c in chunks
+        ]
+        await asyncio.to_thread(
+            self._collection.upsert,
+            ids=chunk_ids,
+            documents=chunk_docs,
+            metadatas=chunk_metas,
         )
 
         logger.info("Indexed %s: %d chunks", doc_id, len(chunks))
@@ -350,13 +359,12 @@ class KnowledgeService(Service):
             except Exception:
                 pass
 
-        indexed = 0
+        # Filter to documents that need indexing
+        to_index: list[DocumentMeta] = []
         for meta in docs:
-            # Skip unsupported document types
             if meta.document_type == DocumentType.UNKNOWN:
                 continue
 
-            # Check if already indexed and unchanged
             is_new = True
             try:
                 tracked = await self._storage.get("knowledge_documents", meta.document_id)
@@ -366,9 +374,7 @@ class KnowledgeService(Service):
                     stored_checksum = tracked.get("checksum", "")
                     has_been_indexed = bool(tracked.get("indexed_at"))
 
-                    # Skip if already indexed and content hasn't changed
                     if has_been_indexed:
-                        # Check checksum first (most reliable), fall back to last_modified
                         if meta.checksum and stored_checksum:
                             if meta.checksum == stored_checksum:
                                 continue
@@ -391,15 +397,36 @@ class KnowledgeService(Service):
                     "type": meta.document_type.value,
                 })
 
-            try:
-                logger.info("Indexing: %s (%s, %d bytes)", meta.name, meta.document_type.value, meta.size_bytes)
-                chunks = await self.index_document(backend, meta)
-                if chunks > 0:
-                    indexed += 1
-                else:
+            to_index.append(meta)
+
+        if not to_index:
+            logger.info("Sync complete for %s: 0 documents indexed (all up to date)", backend.source_id)
+            return 0
+
+        # Index documents concurrently (up to 4 at a time)
+        import asyncio
+
+        semaphore = asyncio.Semaphore(4)
+        indexed = 0
+
+        async def _index_one(meta: DocumentMeta) -> bool:
+            nonlocal indexed
+            async with semaphore:
+                try:
+                    logger.info(
+                        "Indexing: %s (%s, %d bytes)",
+                        meta.name, meta.document_type.value, meta.size_bytes,
+                    )
+                    chunks = await self.index_document(backend, meta)
+                    if chunks > 0:
+                        indexed += 1
+                        return True
                     logger.warning("Indexing produced 0 chunks: %s", meta.name)
-            except Exception:
-                logger.warning("Failed to index %s", meta.document_id, exc_info=True)
+                except Exception:
+                    logger.warning("Failed to index %s", meta.document_id, exc_info=True)
+            return False
+
+        await asyncio.gather(*[_index_one(m) for m in to_index])
 
         logger.info("Sync complete for %s: %d documents indexed", backend.source_id, indexed)
         return indexed

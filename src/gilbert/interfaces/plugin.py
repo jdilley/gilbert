@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gilbert.core.service_manager import ServiceManager
+    from gilbert.interfaces.storage import StorageBackend
 
 
 @dataclass
@@ -30,6 +31,7 @@ class PluginContext:
     services: ServiceManager
     config: dict[str, Any]
     data_dir: Path
+    storage: StorageBackend | None = None
 
 
 class Plugin(ABC):

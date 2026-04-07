@@ -135,10 +135,10 @@ class InboxService(Service):
     async def _poll(self) -> None:
         """List recent messages, walk until we hit one we already have."""
         try:
-            # Fetch up to 500 IDs (paginated internally by the backend).
-            # On steady-state only the first few will be new; on a fresh
-            # store this ensures we backfill everything.
-            all_ids = await self._backend.list_message_ids(max_results=500)
+            # Only fetch unread messages to avoid re-processing old mail.
+            all_ids = await self._backend.list_message_ids(
+                query="in:inbox is:unread", max_results=100,
+            )
         except Exception:
             logger.exception("Inbox poll: failed to list messages")
             return
@@ -178,6 +178,13 @@ class InboxService(Service):
             if self._event_bus:
                 from gilbert.interfaces.events import Event
 
+                # Use X-Original-Sender if present (forwarded mail) so
+                # downstream services see the true external sender, not
+                # the forwarding alias.
+                original_sender = (msg.headers or {}).get(
+                    "x-original-sender", "",
+                )
+
                 await self._event_bus.publish(Event(
                     event_type="inbox.message.received",
                     data={
@@ -187,6 +194,7 @@ class InboxService(Service):
                         "sender_email": msg.sender.email,
                         "sender_name": msg.sender.name,
                         "is_inbound": is_inbound,
+                        "original_sender": original_sender,
                     },
                     source="inbox",
                 ))
