@@ -123,6 +123,7 @@ gotchas, etc.
 ## Development Guidelines
 
 - **Always write tests.** Unit tests use mocks for external dependencies. Database tests hit a real test SQLite database — no mocking the DB.
+- **Test-driven bug fixes.** When you find a bug, first write a unit test that exposes the bug, then fix it, then verify the test passes. This builds a robust regression suite over time.
 - **Interface first.** Define the ABC before writing the implementation. Implementations should be swappable without changing callers.
 - **Type hints everywhere.** All function signatures must have type annotations.
 - **No concrete dependencies in core.** Core code depends on interfaces, never on specific implementations. Use dependency injection.

@@ -62,6 +62,10 @@ def create_app(gilbert: Gilbert) -> FastAPI:
     from gilbert.web.routes.system import router as system_router
     from gilbert.web.routes.websocket import router as ws_router
 
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
     app.include_router(auth_router)
     app.include_router(chat_router)
     app.include_router(dashboard_router)

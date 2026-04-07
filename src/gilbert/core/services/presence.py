@@ -51,7 +51,8 @@ class PresenceService(Service):
         return ServiceInfo(
             name="presence",
             capabilities=frozenset({"presence", "ai_tools"}),
-            optional=frozenset({"configuration", "event_bus", "credentials", "entity_storage", "users", "scheduler"}),
+            requires=frozenset({"users", "scheduler"}),
+            optional=frozenset({"configuration", "event_bus", "credentials", "entity_storage"}),
         )
 
     @property

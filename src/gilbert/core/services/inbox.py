@@ -303,6 +303,7 @@ class InboxService(Service):
         message_id: str,
         body_html: str,
         body_text: str = "",
+        cc: list[EmailAddress] | None = None,
         attachments: list[EmailAttachment] | None = None,
     ) -> str:
         """Reply to an existing message. Returns the sent message's ID."""
@@ -320,6 +321,7 @@ class InboxService(Service):
             subject=subject,
             body_html=body_html,
             body_text=body_text,
+            cc=cc,
             in_reply_to=in_reply_to,
             thread_id=thread_id,
             attachments=attachments,
@@ -334,7 +336,7 @@ class InboxService(Service):
             "sender_email": self._email_address,
             "sender_name": "",
             "to": [{"email": a.email, "name": a.name} for a in to],
-            "cc": [],
+            "cc": [{"email": a.email, "name": a.name} for a in (cc or [])],
             "body_text": body_text or body_html,
             "body_html": body_html,
             "date": now.isoformat(),
