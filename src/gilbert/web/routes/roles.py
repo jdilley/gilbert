@@ -158,6 +158,8 @@ async def set_tool_permission(
         await acl.set_tool_override(tool_name, required_role)
     except ValueError:
         pass
+    if _is_ajax(request):
+        return {"status": "ok", "tool_name": tool_name, "required_role": required_role}
     return RedirectResponse(url="/roles/tools", status_code=303)
 
 
@@ -174,6 +176,8 @@ async def clear_tool_permission(
     acl = _get_acl(gilbert)
 
     await acl.clear_tool_override(tool_name)
+    if _is_ajax(request):
+        return {"status": "ok", "tool_name": tool_name}
     return RedirectResponse(url="/roles/tools", status_code=303)
 
 
