@@ -327,13 +327,42 @@ class SpeakerService(Service):
         )
         await self._backend.play_uri(play_request)
 
-        # Wait for estimated audio duration so the next announcement
-        # doesn't interrupt this one. Estimate from audio size:
-        # MP3 at 128kbps ≈ 16KB/s, plus a small buffer.
-        audio_seconds = len(result.audio) / 16000
-        await asyncio.sleep(audio_seconds + 1.0)
+        # Wait for playback to finish by polling transport state.
+        # This prevents the next announcement from interrupting this one.
+        await self._wait_for_playback(target_ids)
 
         return str(file_path)
+
+    async def _wait_for_playback(
+        self,
+        speaker_ids: list[str],
+        timeout: float = 60.0,
+        poll_interval: float = 0.5,
+    ) -> None:
+        """Poll speaker state until playback finishes or times out."""
+        from gilbert.interfaces.speaker import PlaybackState
+
+        if not speaker_ids:
+            return
+
+        # Use the first speaker (coordinator) to check state
+        target_id = speaker_ids[0]
+        elapsed = 0.0
+
+        # Wait briefly for playback to start (TRANSITIONING → PLAYING)
+        await asyncio.sleep(0.5)
+        elapsed += 0.5
+
+        while elapsed < timeout:
+            try:
+                state = await self._backend.get_playback_state(target_id)
+                if state not in (PlaybackState.PLAYING, PlaybackState.TRANSITIONING):
+                    return
+            except Exception:
+                return  # Can't check state — don't block forever
+
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
 
     # --- ToolProvider protocol ---
 

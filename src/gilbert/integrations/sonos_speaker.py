@@ -148,6 +148,12 @@ class SonosSpeaker(SpeakerBackend):
 
     # --- Volume ---
 
+    async def get_playback_state(self, speaker_id: str) -> PlaybackState:
+        device = _find_device(self._devices, speaker_id)
+        transport = await asyncio.to_thread(device.get_current_transport_info)
+        state_str = transport.get("current_transport_state", "STOPPED")
+        return _STATE_MAP.get(state_str, PlaybackState.STOPPED)
+
     async def get_volume(self, speaker_id: str) -> int:
         device = _find_device(self._devices, speaker_id)
         return await asyncio.to_thread(lambda: device.volume)

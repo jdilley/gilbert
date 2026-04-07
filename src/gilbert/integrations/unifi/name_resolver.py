@@ -103,8 +103,8 @@ class NameResolver:
                 if local_part:
                     # "brian.dilley" → "brian dilley" for token matching
                     candidates.append(local_part.replace(".", " ").replace("_", " "))
-            if user_id:
-                candidates.append(user_id)
+            # Don't match against user_id — internal IDs like "usr_569171d4c248"
+            # produce garbage token matches against device names.
 
             # Score against each candidate, keep the best
             for candidate in candidates:
@@ -161,7 +161,9 @@ def _compute_similarity(raw_tokens: list[str], display_name: str) -> float:
                 matched += 1
                 break
             # Prefix match: "bri" matches "brian", "gregg" matches "gregg"
-            if len(rt) >= 3 and (dt.startswith(rt) or rt.startswith(dt)):
+            # Both tokens must be at least 3 chars to avoid garbage matches
+            # like "deering" matching "d" from a hex user_id.
+            if len(rt) >= 3 and len(dt) >= 3 and (dt.startswith(rt) or rt.startswith(dt)):
                 matched += 0.8
                 break
 

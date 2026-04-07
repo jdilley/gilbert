@@ -109,6 +109,14 @@ class SpeakerBackend(ABC):
         """Whether this backend supports speaker grouping."""
         return False
 
+    async def get_playback_state(self, speaker_id: str) -> PlaybackState:
+        """Get the current playback state of a speaker.
+
+        Default returns STOPPED. Override for backends that support
+        transport state queries.
+        """
+        return PlaybackState.STOPPED
+
     async def list_groups(self) -> list[SpeakerGroup]:
         """List current speaker groups."""
         raise NotImplementedError("This backend does not support grouping")
