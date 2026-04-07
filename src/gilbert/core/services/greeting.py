@@ -78,10 +78,7 @@ class GreetingService(Service):
                 self._style = section.get("style", "")
                 self._speakers = section.get("speakers", [])
                 self._voice_name = section.get("voice_name", "")
-
-                # Get timezone from app config
-                app_section = config_svc.get_section("presence")
-                self._timezone = app_section.get("timezone", "UTC")
+                self._timezone = section.get("timezone", "UTC")
 
         # Schedule a one-shot check for people already present at startup.
         # This handles the case where Gilbert restarts while people are
