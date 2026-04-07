@@ -45,6 +45,7 @@ class ConfigurationService(Service):
             name="configuration",
             capabilities=frozenset({"configuration", "ai_tools"}),
             optional=frozenset({"event_bus"}),
+            events=frozenset({"config.changed"}),
         )
 
     @property

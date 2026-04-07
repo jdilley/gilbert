@@ -15,6 +15,7 @@ class ServiceInfo:
     requires: frozenset[str] = field(default_factory=frozenset)
     optional: frozenset[str] = field(default_factory=frozenset)
     ai_calls: frozenset[str] = field(default_factory=frozenset)
+    events: frozenset[str] = field(default_factory=frozenset)
 
 
 class ServiceResolver(ABC):

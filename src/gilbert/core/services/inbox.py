@@ -58,6 +58,7 @@ class InboxService(Service):
             capabilities=frozenset({"email", "ai_tools"}),
             requires=frozenset({"entity_storage", "scheduler"}),
             optional=frozenset({"event_bus", "google_api", "knowledge"}),
+            events=frozenset({"inbox.message.received", "inbox.message.replied", "inbox.message.sent"}),
         )
 
     async def start(self, resolver: ServiceResolver) -> None:

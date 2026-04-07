@@ -48,6 +48,7 @@ class DoorbellService(Service):
             capabilities=frozenset({"doorbell"}),
             requires=frozenset({"scheduler", "event_bus"}),
             optional=frozenset({"configuration", "credentials", "speaker_control", "text_to_speech"}),
+            events=frozenset({"doorbell.ring"}),
         )
 
     async def start(self, resolver: ServiceResolver) -> None:

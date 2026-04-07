@@ -85,6 +85,7 @@ class RadioDJService(Service):
             capabilities=frozenset({"radio_dj", "ai_tools"}),
             requires=frozenset({"music", "speaker_control", "scheduler"}),
             optional=frozenset({"presence", "entity_storage", "event_bus", "configuration"}),
+            events=frozenset({"radio_dj.genre_changed", "radio_dj.started", "radio_dj.stopped", "radio_dj.track_liked", "radio_dj.track_vetoed"}),
         )
 
     async def start(self, resolver: ServiceResolver) -> None:

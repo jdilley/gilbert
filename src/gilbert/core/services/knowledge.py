@@ -57,6 +57,7 @@ class KnowledgeService(Service):
             capabilities=frozenset({"knowledge", "ai_tools"}),
             requires=required,
             optional=optional,
+            events=frozenset({"knowledge.document.indexed", "knowledge.document.removed", "knowledge.document.discovered"}),
         )
 
     @property

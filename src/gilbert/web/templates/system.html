@@ -50,6 +50,17 @@
         </div>
         {% endif %}
 
+        {% if svc.events %}
+        <div class="detail-section">
+            <h4>Events</h4>
+            <span class="caps">
+                {% for event in svc.events %}
+                <span class="badge badge-event">{{ event }}</span>
+                {% endfor %}
+            </span>
+        </div>
+        {% endif %}
+
         {% if svc.config_params %}
         <div class="detail-section">
             <h4>Configuration{% if svc.config_namespace %} <code>{{ svc.config_namespace }}.*</code>{% endif %}</h4>

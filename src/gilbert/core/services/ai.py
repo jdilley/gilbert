@@ -121,6 +121,7 @@ class AIService(Service):
             capabilities=frozenset({"ai_chat", "ai_tools"}),
             requires=frozenset({"credentials", "entity_storage", "persona"}),
             optional=frozenset({"ai_tools", "configuration", "access_control"}),
+            events=frozenset({"chat.conversation.renamed"}),
         )
 
     @property

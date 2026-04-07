@@ -124,6 +124,7 @@ class ScreenService(Service):
             capabilities=frozenset({"screen_display", "ai_tools"}),
             requires=frozenset(),
             optional=frozenset({"knowledge", "scheduler", "event_bus", "configuration"}),
+            events=frozenset({"screen.connected", "screen.disconnected"}),
         )
 
     async def start(self, resolver: ServiceResolver) -> None:

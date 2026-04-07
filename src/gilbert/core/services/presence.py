@@ -54,6 +54,7 @@ class PresenceService(Service):
             capabilities=frozenset({"presence", "ai_tools"}),
             requires=frozenset({"users", "scheduler"}),
             optional=frozenset({"configuration", "event_bus", "credentials", "entity_storage"}),
+            events=frozenset({"presence.changed", "presence.arrived", "presence.departed"}),
         )
 
     @property

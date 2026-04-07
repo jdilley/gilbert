@@ -53,6 +53,7 @@ class GreetingService(Service):
             requires=frozenset({"event_bus", "entity_storage"}),
             optional=frozenset({"ai", "speaker_control", "text_to_speech", "presence", "configuration"}),
             ai_calls=frozenset({"greeting"}),
+            events=frozenset({"greeting.announced"}),
         )
 
     async def start(self, resolver: ServiceResolver) -> None:

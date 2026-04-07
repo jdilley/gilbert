@@ -64,6 +64,7 @@ class SchedulerService(Service):
             name="scheduler",
             capabilities=frozenset({"scheduler", "ai_tools"}),
             optional=frozenset({"entity_storage", "event_bus"}),
+            events=frozenset({"timer.fired", "alarm.fired"}),
         )
 
     async def start(self, resolver: ServiceResolver) -> None:
