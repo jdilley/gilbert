@@ -194,6 +194,9 @@ class UniFiProtect:
         for thumb in thumbnails:
             if not isinstance(thumb, dict):
                 continue
+            # Only consider face thumbnails — skip vehicles/license plates
+            if thumb.get("type") != "face":
+                continue
             group = thumb.get("group", {})
             if not isinstance(group, dict):
                 continue
