@@ -662,7 +662,7 @@ class TestGenreChangeEvents:
         await started_dj.request_genre("jazz")
         genre_events = [
             e for e in event_bus_svc.bus.published
-            if e.event_type == "radio_dj.genre_changed"
+            if e.event_type == "radio_dj.genre.changed"
         ]
         assert len(genre_events) == 1
         assert genre_events[0].data["old_genre"] == "rock"

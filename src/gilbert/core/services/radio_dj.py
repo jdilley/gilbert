@@ -85,7 +85,7 @@ class RadioDJService(Service):
             capabilities=frozenset({"radio_dj", "ai_tools"}),
             requires=frozenset({"music", "speaker_control", "scheduler"}),
             optional=frozenset({"presence", "entity_storage", "event_bus", "configuration"}),
-            events=frozenset({"radio_dj.genre_changed", "radio_dj.started", "radio_dj.stopped", "radio_dj.track_liked", "radio_dj.track_vetoed"}),
+            events=frozenset({"radio_dj.genre.changed", "radio_dj.started", "radio_dj.stopped", "radio_dj.track.liked", "radio_dj.track.vetoed"}),
         )
 
     async def start(self, resolver: ServiceResolver) -> None:
@@ -379,7 +379,7 @@ class RadioDJService(Service):
 
             if self._event_bus and old_genre != genre:
                 await self._event_bus.publish(Event(
-                    event_type="radio_dj.genre_changed",
+                    event_type="radio_dj.genre.changed",
                     data={
                         "old_genre": old_genre,
                         "new_genre": genre,
@@ -468,7 +468,7 @@ class RadioDJService(Service):
         await self._add_like(user_id, self._current_genre)
         if self._event_bus:
             await self._event_bus.publish(Event(
-                event_type="radio_dj.track_liked",
+                event_type="radio_dj.track.liked",
                 data={"user_id": user_id, "genre": self._current_genre},
                 source="radio_dj",
             ))
@@ -482,7 +482,7 @@ class RadioDJService(Service):
         await self._add_veto(user_id, genre)
         if self._event_bus:
             await self._event_bus.publish(Event(
-                event_type="radio_dj.track_vetoed",
+                event_type="radio_dj.track.vetoed",
                 data={"user_id": user_id, "genre": genre},
                 source="radio_dj",
             ))
