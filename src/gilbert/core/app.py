@@ -262,6 +262,16 @@ class Gilbert:
 
             self.service_manager.register(GreetingService())
 
+        if self.config.backup.enabled:
+            from gilbert.core.services.backup import BackupService
+
+            self.service_manager.register(BackupService())
+
+        if self.config.roast.enabled:
+            from gilbert.core.services.roast import RoastService
+
+            self.service_manager.register(RoastService())
+
         if self.config.inbox.enabled:
             email_backend = self._create_email_backend(
                 self.config.inbox.backend,
@@ -283,6 +293,14 @@ class Gilbert:
             from gilbert.core.services.inbox_ai_chat import InboxAIChatService
 
             self.service_manager.register(InboxAIChatService(self.config.inbox_ai_chat))
+
+        if self.config.slack.enabled:
+            from gilbert.integrations.slack import SlackService
+
+            self.service_manager.register(SlackService(
+                bot_credential=self.config.slack.bot_credential,
+                app_credential=self.config.slack.app_credential,
+            ))
 
         # Memory service (always — uses entity storage)
         from gilbert.core.services.memory import MemoryService

@@ -236,6 +236,23 @@ class GreetingConfig(BaseModel):
     voice_name: str = ""  # TTS voice name (empty = default)
 
 
+class BackupConfig(BaseModel):
+    """Backup service configuration."""
+
+    enabled: bool = False
+    retention_days: int = 30
+    backup_hour: int = 3
+    backup_minute: int = 0
+
+
+class RoastConfig(BaseModel):
+    """Random roast service configuration."""
+
+    enabled: bool = False
+    probability: float = 0.10
+    ai_prompt: str = "Generate a playful, friendly roast of {name}. Be funny and teasing but never mean or hurtful. Keep it to 1-2 sentences."
+
+
 class ScreenConfig(BaseModel):
     """Remote display screen configuration."""
 
@@ -262,6 +279,14 @@ class InboxConfig(BaseModel):
     email_address: str = ""
     poll_interval: int = 60
     max_body_length: int = 50000
+
+
+class SlackConfig(BaseModel):
+    """Slack integration configuration."""
+
+    enabled: bool = False
+    bot_credential: str = ""  # Name of api_key credential for bot token
+    app_credential: str = ""  # Name of api_key credential for app token
 
 
 class SpeakerConfig(BaseModel):
@@ -294,8 +319,11 @@ class GilbertConfig(BaseModel):
     screens: ScreenConfig = ScreenConfig()
     inbox: InboxConfig = InboxConfig()
     inbox_ai_chat: InboxAIChatConfig = InboxAIChatConfig()
+    slack: SlackConfig = SlackConfig()
     speaker: SpeakerConfig = SpeakerConfig()
     music: MusicConfig = MusicConfig()
+    backup: BackupConfig = BackupConfig()
+    roast: RoastConfig = RoastConfig()
 
 
 def load_config(
