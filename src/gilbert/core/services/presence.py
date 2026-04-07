@@ -345,31 +345,59 @@ class PresenceService(Service):
     async def _tool_check_presence(self, arguments: dict[str, Any]) -> str:
         user_id = arguments["user_id"]
         p = await self.get_presence(user_id)
-        return json.dumps(await self._presence_to_dict(p))
+        resolved = await self._resolve_presence(p)
+        if resolved is None:
+            return json.dumps({"error": f"User '{user_id}' not found."})
+        return json.dumps(resolved)
 
     async def _tool_who_is_here(self) -> str:
         present = await self.who_is_here()
-        return json.dumps([await self._presence_to_dict(p) for p in present])
+        resolved = await self._resolve_presence_list(present)
+        return json.dumps(resolved)
 
     async def _tool_list_all(self) -> str:
         all_p = await self.get_all_presence()
-        return json.dumps([await self._presence_to_dict(p) for p in all_p])
+        resolved = await self._resolve_presence_list(all_p)
+        return json.dumps(resolved)
 
-    async def _presence_to_dict(self, p: UserPresence) -> dict[str, Any]:
-        """Convert a UserPresence to a dict with resolved display name."""
-        display_name = p.user_id
-        if self._resolver is not None:
-            user_svc = self._resolver.get_capability("users")
-            if user_svc is not None:
-                try:
-                    user = await user_svc.backend.get_user(p.user_id)
-                    if user:
-                        display_name = user.get("display_name", p.user_id)
-                except Exception:
-                    pass
+    async def _resolve_presence_list(
+        self, presences: list[UserPresence],
+    ) -> list[dict[str, Any]]:
+        """Resolve a list of presences, filtering to known users only."""
+        results = []
+        for p in presences:
+            resolved = await self._resolve_presence(p)
+            if resolved is not None:
+                results.append(resolved)
+        return results
+
+    async def _resolve_presence(
+        self, p: UserPresence,
+    ) -> dict[str, Any] | None:
+        """Resolve a UserPresence to a dict with user info.
+
+        Returns None if the user cannot be resolved to a known Gilbert
+        user — unresolvable detections are excluded from tool output.
+        """
+        if self._resolver is None:
+            return None
+
+        user_svc = self._resolver.get_capability("users")
+        if user_svc is None:
+            return None
+
+        try:
+            user = await user_svc.backend.get_user(p.user_id)
+        except Exception:
+            return None
+
+        if user is None:
+            return None
+
         return {
             "user_id": p.user_id,
-            "name": display_name,
+            "name": user.get("display_name", p.user_id),
+            "email": user.get("email", ""),
             "state": p.state.value,
             "since": p.since,
             "source": p.source,
