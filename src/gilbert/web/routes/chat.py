@@ -101,7 +101,7 @@ async def list_conversations(
                 break
         title = c.get("title", "") or preview[:60] or "New conversation"
         results.append({
-            "conversation_id": c["_id"],
+            "conversation_id": c.get("_id", ""),
             "title": title,
             "preview": preview,
             "updated_at": c.get("updated_at", ""),
