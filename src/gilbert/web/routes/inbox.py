@@ -119,16 +119,31 @@ async def inbox_api_pending(
     if storage is None:
         return JSONResponse(content={"pending": []})
 
+    from datetime import datetime, timedelta, timezone
+
     from gilbert.interfaces.storage import Filter, FilterOp
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
 
     pending: list[dict[str, Any]] = []
     for collection in _PENDING_COLLECTIONS:
         try:
-            results = await storage.query(Query(
+            # Pending emails (all)
+            pending_results = await storage.query(Query(
                 collection=collection,
-                filters=[Filter(field="status", op=FilterOp.IN, value=["pending", "failed"])],
+                filters=[Filter(field="status", op=FilterOp.EQ, value="pending")],
                 sort=[SortField(field="send_at", descending=False)],
             ))
+            # Failed emails (last 24h only)
+            failed_results = await storage.query(Query(
+                collection=collection,
+                filters=[
+                    Filter(field="status", op=FilterOp.EQ, value="failed"),
+                    Filter(field="send_at", op=FilterOp.GTE, value=cutoff),
+                ],
+                sort=[SortField(field="send_at", descending=False)],
+            ))
+            results = pending_results + failed_results
             for r in results:
                 pending.append({
                     "id": r.get("_id", ""),
