@@ -432,12 +432,12 @@ class AIService(Service):
 
         tool_defs = [defn for _, defn in tools_by_name.values()]
 
-        # Resolve system prompt
-        effective_prompt = (
-            system_prompt
-            if system_prompt is not None
-            else await self._build_system_prompt(user_ctx=user_ctx)
-        )
+        # Resolve system prompt — always prepend current date/time
+        date_ctx = self._current_datetime_context()
+        if system_prompt is not None:
+            effective_prompt = f"{date_ctx}\n\n{system_prompt}"
+        else:
+            effective_prompt = await self._build_system_prompt(user_ctx=user_ctx)
 
         # Agentic loop
         response: AIResponse | None = None
@@ -484,9 +484,24 @@ class AIService(Service):
 
     # --- System Prompt ---
 
+    @staticmethod
+    def _current_datetime_context() -> str:
+        """Build a date/time context string in Los Angeles timezone."""
+        try:
+            from zoneinfo import ZoneInfo
+
+            now = datetime.now(ZoneInfo("America/Los_Angeles"))
+        except Exception:
+            now = datetime.now(timezone.utc)
+        return f"Current date and time: {now.strftime('%A, %B %d, %Y at %I:%M %p %Z')}"
+
     async def _build_system_prompt(self, user_ctx: UserContext | None = None) -> str:
         """Build the full system prompt: base identity, persona, and user memories."""
         parts: list[str] = []
+
+        # Always inject current date/time first
+        parts.append(self._current_datetime_context())
+
         if self._system_prompt:
             parts.append(self._system_prompt)
         if self._persona_svc is not None:
