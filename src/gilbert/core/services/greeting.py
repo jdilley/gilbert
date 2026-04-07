@@ -113,23 +113,27 @@ class GreetingService(Service):
     async def _greet_already_present(self) -> None:
         """Greet anyone already present at startup who hasn't been greeted today."""
         if not self._in_greeting_window():
+            logger.info("Startup greeting skipped — outside greeting window")
             return
 
         presence_svc = self._resolver.get_capability("presence") if self._resolver else None
         if presence_svc is None:
+            logger.info("Startup greeting skipped — no presence service")
             return
 
         try:
             here = await presence_svc.who_is_here()
         except Exception:
-            logger.debug("Could not check who is here at startup")
+            logger.warning("Startup greeting: could not check who is here", exc_info=True)
             return
+
+        logger.info("Startup greeting: %d people present", len(here))
 
         for p in here:
             try:
                 await self._greet_user(p.user_id)
             except Exception:
-                logger.debug("Startup greeting failed for %s", p.user_id)
+                logger.warning("Startup greeting failed for %s", p.user_id, exc_info=True)
 
     async def _on_arrival(self, event: Event) -> None:
         """Handle a presence.arrived event."""
@@ -232,7 +236,7 @@ class GreetingService(Service):
         if self._resolver is None:
             return f"Good morning, {name}!"
 
-        ai_svc = self._resolver.get_capability("ai")
+        ai_svc = self._resolver.get_capability("ai_chat")
         if ai_svc is None:
             return f"Good morning, {name}!"
 
