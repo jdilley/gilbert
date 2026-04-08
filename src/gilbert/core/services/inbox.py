@@ -712,18 +712,10 @@ class InboxService(Service):
         }
 
     async def _ws_stats_get(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
         stats = await self.get_stats()
         return {"type": "inbox.stats.get.result", "ref": frame.get("id"), **stats}
 
     async def _ws_message_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
         messages = await self.search_messages(
             sender=frame.get("sender", ""), subject=frame.get("subject", ""),
             limit=frame.get("limit", 50), include_body=False,
@@ -743,10 +735,6 @@ class InboxService(Service):
         return {"type": "inbox.message.list.result", "ref": frame.get("id"), "messages": summaries, "total": len(summaries)}
 
     async def _ws_message_get(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
         record = await self.get_message(frame.get("message_id", ""))
         if not record:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Message not found", "code": 404}
@@ -761,10 +749,6 @@ class InboxService(Service):
         }
 
     async def _ws_thread_get(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
         messages = await self.get_thread(frame.get("thread_id", ""))
         result = []
         for m in messages:
@@ -779,10 +763,6 @@ class InboxService(Service):
         return {"type": "inbox.thread.get.result", "ref": frame.get("id"), "messages": result}
 
     async def _ws_pending_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
 
         gilbert = conn.manager._gilbert
         if gilbert is None:
@@ -824,10 +804,6 @@ class InboxService(Service):
         return {"type": "inbox.pending.list.result", "ref": frame.get("id"), "pending": pending}
 
     async def _ws_pending_cancel(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
         reply_id = frame.get("reply_id", "")
         if not reply_id:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "reply_id required", "code": 400}

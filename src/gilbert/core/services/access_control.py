@@ -19,6 +19,7 @@ _ROLES_COLLECTION = "acl_roles"
 _OVERRIDES_COLLECTION = "acl_tool_overrides"
 _COLLECTION_ACL = "acl_collections"
 _EVENT_ACL_COLLECTION = "acl_event_visibility"
+_RPC_ACL_COLLECTION = "acl_rpc_permissions"
 
 # Built-in roles — cannot be removed or have their level changed
 _BUILTIN_ROLES: list[dict[str, Any]] = [
@@ -55,6 +56,8 @@ class AccessControlService(Service):
         self._collection_acl: dict[str, dict[str, str]] = {}
         # Event visibility override cache: event prefix → role name
         self._event_acl: dict[str, str] = {}
+        # RPC handler permission override cache: frame type prefix → role name
+        self._rpc_acl: dict[str, str] = {}
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
@@ -127,6 +130,14 @@ class AccessControlService(Service):
             e["event_prefix"]: e["min_role"]
             for e in event_acls
             if "event_prefix" in e and "min_role" in e
+        }
+
+        # RPC handler permission overrides
+        rpc_acls = await self._storage.query(Query(collection=_RPC_ACL_COLLECTION))
+        self._rpc_acl = {
+            r["frame_prefix"]: r["min_role"]
+            for r in rpc_acls
+            if "frame_prefix" in r and "min_role" in r
         }
 
     # --- Role queries ---
@@ -376,6 +387,43 @@ class AccessControlService(Service):
 
         return sorted(rules.values(), key=lambda r: r["event_prefix"])
 
+    # --- RPC permissions ---
+
+    async def set_rpc_permission(self, frame_prefix: str, min_role: str) -> None:
+        """Set or update an RPC handler permission override."""
+        if self._storage is None:
+            return
+        await self._storage.put(_RPC_ACL_COLLECTION, frame_prefix, {
+            "frame_prefix": frame_prefix,
+            "min_role": min_role,
+        })
+        await self._refresh_caches()
+
+    async def clear_rpc_permission(self, frame_prefix: str) -> None:
+        """Remove an RPC permission override (reverts to default)."""
+        if self._storage is None:
+            return
+        await self._storage.delete(_RPC_ACL_COLLECTION, frame_prefix)
+        await self._refresh_caches()
+
+    async def list_rpc_permissions(self) -> list[dict[str, Any]]:
+        """List all RPC permission rules (defaults + overrides)."""
+        from gilbert.web.ws_protocol import _RPC_PERMISSIONS
+
+        rules: dict[str, dict[str, Any]] = {}
+        for prefix, level in _RPC_PERMISSIONS.items():
+            role = "user"
+            for name, lv in sorted(self._role_levels.items(), key=lambda x: x[1]):
+                if lv == level:
+                    role = name
+                    break
+            rules[prefix] = {"frame_prefix": prefix, "min_role": role, "source": "default"}
+
+        for prefix, role in self._rpc_acl.items():
+            rules[prefix] = {"frame_prefix": prefix, "min_role": role, "source": "override"}
+
+        return sorted(rules.values(), key=lambda r: r["frame_prefix"])
+
     # --- ToolProvider protocol ---
 
     @property
@@ -476,6 +524,28 @@ class AccessControlService(Service):
                 ],
                 required_role="admin",
             ),
+            ToolDefinition(
+                name="list_rpc_permissions",
+                description="List all WebSocket RPC handler permission rules (which roles can call which frame types).",
+                required_role="everyone",
+            ),
+            ToolDefinition(
+                name="set_rpc_permission",
+                description="Set the minimum role required to call a WebSocket RPC frame type.",
+                parameters=[
+                    ToolParameter(name="frame_prefix", type=ToolParameterType.STRING, description="Frame type prefix (e.g., 'inbox.' or 'chat.room.create')."),
+                    ToolParameter(name="min_role", type=ToolParameterType.STRING, description="Minimum role required (e.g., 'admin', 'user', 'everyone')."),
+                ],
+                required_role="admin",
+            ),
+            ToolDefinition(
+                name="clear_rpc_permission",
+                description="Remove an RPC permission override, reverting to the built-in default.",
+                parameters=[
+                    ToolParameter(name="frame_prefix", type=ToolParameterType.STRING, description="Frame type prefix to clear."),
+                ],
+                required_role="admin",
+            ),
         ]
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
@@ -507,6 +577,15 @@ class AccessControlService(Service):
             case "clear_event_visibility":
                 await self.clear_event_visibility(arguments["event_prefix"])
                 return json.dumps({"status": "ok", "event_prefix": arguments["event_prefix"]})
+            case "list_rpc_permissions":
+                rules = await self.list_rpc_permissions()
+                return json.dumps(rules)
+            case "set_rpc_permission":
+                await self.set_rpc_permission(arguments["frame_prefix"], arguments["min_role"])
+                return json.dumps({"status": "ok", "frame_prefix": arguments["frame_prefix"], "min_role": arguments["min_role"]})
+            case "clear_rpc_permission":
+                await self.clear_rpc_permission(arguments["frame_prefix"])
+                return json.dumps({"status": "ok", "frame_prefix": arguments["frame_prefix"]})
             case _:
                 raise KeyError(f"Unknown tool: {name}")
 
@@ -612,34 +691,18 @@ class AccessControlService(Service):
         return {"type": "roles.role.list.result", "ref": frame.get("id"), "roles": roles}
 
     async def _ws_role_create(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
         await self.create_role(frame.get("name", ""), frame.get("level", 100), frame.get("description", ""))
         return {"type": "roles.role.create.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_role_update(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
         await self.update_role(frame.get("name", ""), level=frame.get("level"), description=frame.get("description"))
         return {"type": "roles.role.update.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_role_delete(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
         await self.delete_role(frame.get("name", ""))
         return {"type": "roles.role.delete.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_tool_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
 
         gilbert = conn.manager._gilbert
         if gilbert is None:
@@ -662,26 +725,14 @@ class AccessControlService(Service):
         return {"type": "roles.tool.list.result", "ref": frame.get("id"), "tools": tools, "role_names": role_names}
 
     async def _ws_tool_set(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
         await self.set_tool_override(frame.get("tool_name", ""), frame.get("role", ""))
         return {"type": "roles.tool.set.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_tool_clear(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
         await self.clear_tool_override(frame.get("tool_name", ""))
         return {"type": "roles.tool.clear.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_profile_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
 
         gilbert = conn.manager._gilbert
         if gilbert is None:
@@ -723,10 +774,6 @@ class AccessControlService(Service):
         }
 
     async def _ws_profile_save(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
 
         gilbert = conn.manager._gilbert
         if gilbert is None:
@@ -748,10 +795,6 @@ class AccessControlService(Service):
         return {"type": "roles.profile.save.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_profile_delete(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
 
         gilbert = conn.manager._gilbert
         if gilbert is None:
@@ -765,10 +808,6 @@ class AccessControlService(Service):
         return {"type": "roles.profile.delete.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_profile_assign(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
 
         gilbert = conn.manager._gilbert
         if gilbert is None:
@@ -782,10 +821,6 @@ class AccessControlService(Service):
         return {"type": "roles.profile.assign.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_user_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
 
         gilbert = conn.manager._gilbert
         if gilbert is None:
@@ -808,10 +843,6 @@ class AccessControlService(Service):
         return {"type": "roles.user.list.result", "ref": frame.get("id"), "users": result, "role_names": role_names}
 
     async def _ws_user_set(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
 
         gilbert = conn.manager._gilbert
         if gilbert is None:
@@ -827,10 +858,6 @@ class AccessControlService(Service):
         return {"type": "roles.user.set.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_collection_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
 
         gilbert = conn.manager._gilbert
         if gilbert is None:
@@ -857,17 +884,9 @@ class AccessControlService(Service):
         }
 
     async def _ws_collection_set(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
         await self.set_collection_acl(frame.get("collection", ""), read_role=frame.get("read_role", "user"), write_role=frame.get("write_role", "admin"))
         return {"type": "roles.collection.set.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_collection_clear(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
         await self.clear_collection_acl(frame.get("collection", ""))
         return {"type": "roles.collection.clear.result", "ref": frame.get("id"), "status": "ok"}

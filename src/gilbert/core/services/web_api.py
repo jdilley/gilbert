@@ -74,10 +74,6 @@ class WebApiService(Service):
         return {"type": "dashboard.get.result", "ref": frame.get("id"), "cards": cards}
 
     async def _ws_system_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
 
         gilbert = conn.manager._gilbert
         if gilbert is None:
@@ -142,10 +138,6 @@ class WebApiService(Service):
         return {"type": "system.services.list.result", "ref": frame.get("id"), "services": services}
 
     async def _ws_entities_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
 
         gilbert = conn.manager._gilbert
         if gilbert is None:
@@ -173,10 +165,6 @@ class WebApiService(Service):
         return {"type": "entities.collection.list.result", "ref": frame.get("id"), "groups": result}
 
     async def _ws_entities_query(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
 
         collection = frame.get("collection", "")
         if not collection:
@@ -225,10 +213,6 @@ class WebApiService(Service):
         }
 
     async def _ws_entity_get(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import require_admin
-        err = require_admin(conn, frame)
-        if err:
-            return err
 
         collection = frame.get("collection", "")
         entity_id = frame.get("entity_id", "")

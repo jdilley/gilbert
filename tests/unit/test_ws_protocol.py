@@ -187,13 +187,13 @@ class TestConnectionManager:
 
 
 class TestFrameDispatch:
-    def _conn(self) -> WsConnection:
+    def _conn(self, level: int = 100) -> WsConnection:
         user = UserContext(user_id="test", email="", display_name="Test", roles=frozenset({"user"}))
         manager = MagicMock(spec=WsConnectionManager)
-        # Populate handler registry with core handlers
         from gilbert.web.ws_protocol import _rpc_handlers
         manager._handlers = dict(_rpc_handlers)
-        return WsConnection(user, 100, manager)
+        manager._gilbert = None  # no ACL service → fall through to defaults
+        return WsConnection(user, level, manager)
 
     async def test_subscribe(self) -> None:
         conn = self._conn()

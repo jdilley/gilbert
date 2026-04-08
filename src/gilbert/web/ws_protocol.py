@@ -42,6 +42,44 @@ _EVENT_VISIBILITY: dict[str, int] = {
 }
 _DEFAULT_VISIBILITY_LEVEL = 100  # unlisted events → user role
 
+# ── RPC handler permission defaults ───────────────────────────────────
+# Maps frame type prefix → minimum role level required to call the handler.
+# Same resolution logic as event visibility: longest prefix match wins.
+
+_RPC_PERMISSIONS: dict[str, int] = {
+    # everyone (200)
+    "gilbert.ping": 200,
+    "gilbert.sub.": 200,
+    "chat.conversation.list": 200,
+    "chat.history.load": 200,
+    "chat.message.send": 200,
+    "chat.form.submit": 200,
+    "dashboard.get": 200,
+    "documents.": 200,
+    "screens.list": 200,
+    # user (100)
+    "chat.": 100,
+    # admin (0)
+    "roles.": 0,
+    "inbox.": 0,
+    "system.": 0,
+    "entities.": 0,
+    "gilbert.peer.publish": 0,
+}
+_DEFAULT_RPC_LEVEL = 100  # unlisted frame types → user role
+
+
+def get_rpc_permission_level(frame_type: str) -> int:
+    """Resolve the minimum role level for an RPC frame type (longest prefix match)."""
+    best_match = ""
+    best_level = _DEFAULT_RPC_LEVEL
+    for prefix, level in _RPC_PERMISSIONS.items():
+        if frame_type.startswith(prefix) and len(prefix) > len(best_match):
+            best_match = prefix
+            best_level = level
+    return best_level
+
+
 # Peer role level
 _PEER_LEVEL = 50
 
@@ -316,19 +354,54 @@ async def _handle_peer_publish(conn: WsConnection, frame: dict[str, Any]) -> dic
 async def dispatch_frame(conn: WsConnection, frame: dict[str, Any]) -> dict[str, Any] | None:
     """Route an incoming frame to the appropriate handler.
 
-    Checks the connection manager's combined handler registry (core +
-    service-provided handlers).
+    Checks permissions (hardcoded defaults + entity store overrides),
+    then dispatches to the handler from the combined registry.
     """
     frame_type = frame.get("type", "")
 
-    # Use the manager's combined registry (core + service handlers)
+    # Look up handler
     handler = conn.manager._handlers.get(frame_type)
-    if handler is not None:
-        return await handler(conn, frame)
+    if handler is None:
+        return {
+            "type": "gilbert.error",
+            "ref": frame.get("id"),
+            "error": f"Unknown frame type: {frame_type}",
+            "code": 400,
+        }
 
-    return {
-        "type": "gilbert.error",
-        "ref": frame.get("id"),
-        "error": f"Unknown frame type: {frame_type}",
-        "code": 400,
-    }
+    # Check RPC permissions — system user bypasses
+    if conn.user_level >= 0:
+        # Check overrides first (via AccessControlService)
+        required_level = _resolve_rpc_level(conn, frame_type)
+        if conn.user_level > required_level:
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Access denied",
+                "code": 403,
+            }
+
+    return await handler(conn, frame)
+
+
+def _resolve_rpc_level(conn: WsConnection, frame_type: str) -> int:
+    """Resolve the required level for an RPC frame type.
+
+    Checks AccessControlService overrides first, then hardcoded defaults.
+    """
+    # Check overrides from ACL service (if available)
+    gilbert = conn.manager._gilbert
+    if gilbert is not None:
+        acl_svc = gilbert.service_manager.get_by_capability("access_control")
+        if acl_svc is not None and hasattr(acl_svc, "_rpc_acl"):
+            # Longest prefix match on overrides
+            best = ""
+            for prefix in acl_svc._rpc_acl:
+                if frame_type.startswith(prefix) and len(prefix) > len(best):
+                    best = prefix
+            if best:
+                role_name = acl_svc._rpc_acl[best]
+                return acl_svc.get_role_level(role_name)
+
+    # Fall back to hardcoded defaults
+    return get_rpc_permission_level(frame_type)
