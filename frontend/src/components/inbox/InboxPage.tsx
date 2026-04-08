@@ -156,7 +156,7 @@ export function InboxPage() {
       </Card>
 
       <Dialog open={!!selectedMsg} onOpenChange={() => setSelectedMsg(null)}>
-        <DialogContent className="max-w-[95vw] w-full h-[92vh] flex flex-col">
+        <DialogContent className="flex flex-col" style={{ maxWidth: "95vw", width: "95vw", height: "92vh" }}>
           <DialogHeader>
             <DialogTitle>{selectedMsg?.subject}</DialogTitle>
           </DialogHeader>
