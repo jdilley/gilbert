@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchInboxStats,
@@ -53,19 +53,24 @@ export function InboxPage() {
     if (loadingDetail) return;
     setLoadingDetail(true);
     setThreadMsgs([]);
+    setSelectedMsg(null);
     try {
-      const detail = await fetchMessageDetail(msg.message_id);
-      setSelectedMsg(detail);
-      // Load full thread if this message has one
       if (msg.thread_id) {
+        // Load the full thread
         try {
           const threadDetails = await fetchThread(msg.thread_id);
-          if (threadDetails.length > 1) {
+          if (threadDetails.length > 0) {
+            setSelectedMsg(threadDetails[0]);
             setThreadMsgs(threadDetails);
           }
         } catch {
-          // Thread load failed — just show the single message
+          // Fall back to single message
+          const detail = await fetchMessageDetail(msg.message_id);
+          setSelectedMsg(detail);
         }
+      } else {
+        const detail = await fetchMessageDetail(msg.message_id);
+        setSelectedMsg(detail);
       }
     } finally {
       setLoadingDetail(false);
@@ -179,15 +184,15 @@ export function InboxPage() {
 
       {/* Message detail modal */}
       <Dialog open={!!selectedMsg && !loadingDetail} onOpenChange={() => { setSelectedMsg(null); setThreadMsgs([]); }}>
-        <DialogContent className="flex flex-col" style={{ maxWidth: "95vw", width: "95vw", height: "92vh" }}>
+        <DialogContent className="overflow-y-auto" style={{ maxWidth: "95vw", width: "95vw", maxHeight: "92vh" }}>
           <DialogHeader>
             <DialogTitle>{selectedMsg?.subject}</DialogTitle>
           </DialogHeader>
           {selectedMsg && (
-            <div className="flex flex-col flex-1 min-h-0 text-sm overflow-y-auto">
-              {(threadMsgs.length > 1 ? threadMsgs : [selectedMsg]).map((msg, i) => (
-                <div key={msg.message_id || i} className={i > 0 ? "border-t pt-3 mt-3" : ""}>
-                  <div className="text-muted-foreground shrink-0 pb-3">
+            <div className="text-sm space-y-0">
+              {(threadMsgs.length > 0 ? threadMsgs : [selectedMsg]).map((msg, i) => (
+                <div key={msg.message_id || i} className={i > 0 ? "border-t pt-4 mt-4" : ""}>
+                  <div className="text-muted-foreground pb-3">
                     <div>From: {msg.sender_name || msg.sender_email}</div>
                     {msg.to?.length > 0 && (
                       <div>To: {msg.to.map((a) => a.name || a.email).join(", ")}</div>
@@ -197,19 +202,11 @@ export function InboxPage() {
                     )}
                     <div>Date: {new Date(msg.date).toLocaleString()}</div>
                   </div>
-                  <div className="min-h-[200px]">
-                    {msg.body_html ? (
-                      <iframe
-                        sandbox=""
-                        srcDoc={msg.body_html}
-                        className="w-full border-0 rounded bg-white"
-                        style={{ height: threadMsgs.length > 1 ? "300px" : "100%" }}
-                        title="Email content"
-                      />
-                    ) : (
-                      <pre className="whitespace-pre-wrap">{msg.body_text}</pre>
-                    )}
-                  </div>
+                  {msg.body_html ? (
+                    <EmailFrame html={msg.body_html} />
+                  ) : (
+                    <pre className="whitespace-pre-wrap">{msg.body_text}</pre>
+                  )}
                 </div>
               ))}
             </div>
@@ -217,5 +214,47 @@ export function InboxPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/** Sandboxed iframe that auto-sizes to its HTML content. */
+function EmailFrame({ html }: { html: string }) {
+  const ref = useRef<HTMLIFrameElement>(null);
+
+  const resize = useCallback(() => {
+    const iframe = ref.current;
+    if (!iframe?.contentDocument?.body) return;
+    iframe.style.height = iframe.contentDocument.body.scrollHeight + "px";
+  }, []);
+
+  useEffect(() => {
+    const iframe = ref.current;
+    if (!iframe) return;
+    const handleLoad = () => {
+      resize();
+      // Observe content changes (e.g. images loading)
+      const observer = new MutationObserver(resize);
+      if (iframe.contentDocument?.body) {
+        observer.observe(iframe.contentDocument.body, { childList: true, subtree: true, attributes: true });
+        // Also resize when images finish loading
+        iframe.contentDocument.querySelectorAll("img").forEach((img) => {
+          if (!img.complete) img.addEventListener("load", resize);
+        });
+      }
+      return () => observer.disconnect();
+    };
+    iframe.addEventListener("load", handleLoad);
+    return () => iframe.removeEventListener("load", handleLoad);
+  }, [html, resize]);
+
+  return (
+    <iframe
+      ref={ref}
+      sandbox=""
+      srcDoc={html}
+      className="w-full border-0 rounded bg-white"
+      style={{ minHeight: "100px" }}
+      title="Email content"
+    />
   );
 }
