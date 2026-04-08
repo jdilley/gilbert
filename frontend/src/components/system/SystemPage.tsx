@@ -14,7 +14,7 @@ export function SystemPage() {
 
   return (
     <div className="p-6 space-y-4 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-semibold">System Browser</h1>
+      <h1 className="text-2xl font-semibold text-center">System Browser</h1>
       <div className="space-y-3">
         {data?.services.map((svc) => (
           <ServiceCard key={svc.name} service={svc} />

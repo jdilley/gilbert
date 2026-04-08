@@ -53,7 +53,7 @@ export function InboxPage() {
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
       <div className="flex items-center gap-4">
-        <h1 className="text-2xl font-semibold">Inbox</h1>
+        <h1 className="text-2xl font-semibold text-center">Inbox</h1>
         {stats && (
           <Badge variant="secondary">
             {stats.total} messages

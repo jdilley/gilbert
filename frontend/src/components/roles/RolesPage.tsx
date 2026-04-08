@@ -21,7 +21,7 @@ export function RolesPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-semibold">Roles & Access</h1>
+      <h1 className="text-2xl font-semibold text-center">Roles & Access</h1>
 
       <Tabs value={currentTab}>
         <TabsList>
