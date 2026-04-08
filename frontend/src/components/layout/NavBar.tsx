@@ -2,7 +2,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { fetchDashboard } from "@/api/dashboard";
+import { useWsApi } from "@/hooks/useWsApi";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -29,11 +29,13 @@ const NAV_URLS = new Set(Object.keys(NAV_LABELS));
 export function NavBar() {
   const { user, logout } = useAuth();
   const { connected } = useWebSocket();
+  const api = useWsApi();
   const location = useLocation();
 
   const { data } = useQuery({
     queryKey: ["dashboard"],
-    queryFn: fetchDashboard,
+    queryFn: api.getDashboard,
+    enabled: connected,
   });
 
   const navItems = (data?.cards ?? []).filter((c) => NAV_URLS.has(c.url));
