@@ -24,6 +24,7 @@ export function ChatInput({
     setMessage("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
+      textareaRef.current.focus();
     }
   }, [message, onSend]);
 
