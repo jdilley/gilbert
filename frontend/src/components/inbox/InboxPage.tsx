@@ -184,7 +184,7 @@ export function InboxPage() {
 
       {/* Message detail modal */}
       <Dialog open={!!selectedMsg && !loadingDetail} onOpenChange={() => { setSelectedMsg(null); setThreadMsgs([]); }}>
-        <DialogContent className="overflow-y-auto" style={{ maxWidth: "95vw", width: "95vw", maxHeight: "92vh" }}>
+        <DialogContent className="overflow-y-auto" style={{ maxWidth: "95vw", width: "95vw", height: "95vh", maxHeight: "95vh" }}>
           <DialogHeader>
             <DialogTitle>{selectedMsg?.subject}</DialogTitle>
           </DialogHeader>
