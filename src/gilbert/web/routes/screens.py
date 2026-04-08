@@ -15,7 +15,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from gilbert.interfaces.auth import UserContext
-from gilbert.web import templates
 from gilbert.web.auth import require_role
 
 router = APIRouter(prefix="/screens")
@@ -28,12 +27,6 @@ def _get_screen_service(request: Request) -> Any:
     if svc is None:
         raise HTTPException(status_code=503, detail="Screen service not available")
     return svc
-
-
-@router.get("")
-async def screens_page(request: Request) -> Any:
-    """Render the screen setup/display page."""
-    return templates.TemplateResponse(request, "screens.html", {})
 
 
 @router.get("/stream", response_model=None)

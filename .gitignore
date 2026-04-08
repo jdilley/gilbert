@@ -31,3 +31,8 @@ htmlcov/
 
 # ruff
 .ruff_cache/
+
+# Frontend build
+frontend/node_modules/
+frontend/dist/
+src/gilbert/web/spa/

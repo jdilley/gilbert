@@ -106,10 +106,11 @@ class UIBlock:
     elements: list[UIElement] = field(default_factory=list)
     submit_label: str = "Submit"
     tool_name: str = ""
+    for_user: str = ""  # empty = visible to all members
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for JSON transport and persistence."""
-        return {
+        d: dict[str, Any] = {
             "block_type": self.block_type,
             "block_id": self.block_id or str(uuid.uuid4()),
             "title": self.title,
@@ -117,6 +118,9 @@ class UIBlock:
             "submit_label": self.submit_label,
             "tool_name": self.tool_name,
         }
+        if self.for_user:
+            d["for_user"] = self.for_user
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> UIBlock:
@@ -129,6 +133,7 @@ class UIBlock:
             elements=elements,
             submit_label=data.get("submit_label", "Submit"),
             tool_name=data.get("tool_name", ""),
+            for_user=data.get("for_user", ""),
         )
 
 

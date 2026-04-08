@@ -76,6 +76,10 @@ class UserBackend(ABC):
         """Get a user by ID, or None."""
 
     @abstractmethod
+    async def get_user_by_username(self, username: str) -> dict[str, Any] | None:
+        """Look up a user by username (case-insensitive)."""
+
+    @abstractmethod
     async def get_user_by_email(self, email: str) -> dict[str, Any] | None:
         """Look up a user by email address."""
 

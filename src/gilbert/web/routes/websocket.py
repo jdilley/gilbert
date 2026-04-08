@@ -59,6 +59,22 @@ async def event_stream(websocket: WebSocket) -> None:
 
     bus = event_bus_svc.bus
 
+    # Track which shared conversations this user belongs to.
+    # Seeded on connect, updated by membership events.
+    shared_conv_ids: set[str] = set()
+
+    # Seed membership set on connect
+    ai_svc = gilbert.service_manager.get_by_capability("ai_chat")
+    if ai_svc is not None:
+        try:
+            convos = await ai_svc.list_shared_conversations(user_id=user_id, limit=200)
+            for c in convos:
+                cid = c.get("_id", "")
+                if cid and c.get("_is_member", False):
+                    shared_conv_ids.add(cid)
+        except Exception:
+            logger.debug("Failed to seed shared memberships", exc_info=True)
+
     # Queue for events to send to this client
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)
 
@@ -69,6 +85,35 @@ async def event_stream(websocket: WebSocket) -> None:
         """Push event to the client queue if they have access."""
         if not is_admin and any(event.event_type.startswith(p) for p in _ADMIN_PREFIXES):
             return
+
+        conv_id = event.data.get("conversation_id", "")
+
+        # Update membership tracking FIRST (before filtering)
+        if event.event_type == "chat.member.joined":
+            if event.data.get("user_id") == user_id:
+                shared_conv_ids.add(conv_id)
+        elif event.event_type in ("chat.member.left", "chat.member.kicked"):
+            if event.data.get("user_id") == user_id:
+                shared_conv_ids.discard(conv_id)
+        elif event.event_type in ("chat.conversation.abandoned", "chat.conversation.destroyed"):
+            shared_conv_ids.discard(conv_id)
+        elif event.event_type == "chat.conversation.created":
+            members = event.data.get("members", [])
+            if any(m.get("user_id") == user_id for m in members):
+                shared_conv_ids.add(conv_id)
+
+        # Filter shared conversation events by membership
+        if event.event_type.startswith(("chat.message.", "chat.member.")):
+            if conv_id and conv_id not in shared_conv_ids:
+                # Allow join events targeted at this user (they just got added above)
+                if not (event.event_type == "chat.member.joined"
+                        and event.data.get("user_id") == user_id):
+                    return
+            # Filter by visible_to if present (for private messages)
+            visible_to = event.data.get("visible_to")
+            if visible_to is not None and user_id not in visible_to:
+                return
+
         try:
             queue.put_nowait({
                 "event_type": event.event_type,

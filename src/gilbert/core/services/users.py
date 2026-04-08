@@ -19,7 +19,8 @@ from gilbert.storage.user_storage import StorageUserBackend
 logger = logging.getLogger(__name__)
 
 _ROOT_USER_ID = "root"
-_ROOT_EMAIL = "root@localhost"
+_ROOT_USERNAME = "root"
+_ROOT_EMAIL = ""
 
 
 class UserService(Service):
@@ -91,6 +92,7 @@ class UserService(Service):
             await self._backend.create_user(
                 _ROOT_USER_ID,
                 {
+                    "username": _ROOT_USERNAME,
                     "email": _ROOT_EMAIL,
                     "display_name": "Root",
                     "password_hash": self._root_password_hash,
@@ -347,14 +349,25 @@ class UserService(Service):
                 description="Create a new local user account.",
                 parameters=[
                     ToolParameter(
+                        name="username",
+                        type=ToolParameterType.STRING,
+                        description="Unique username for login.",
+                    ),
+                    ToolParameter(
                         name="email",
                         type=ToolParameterType.STRING,
-                        description="User email address.",
+                        description="User email address (optional).",
+                        required=False,
                     ),
                     ToolParameter(
                         name="display_name",
                         type=ToolParameterType.STRING,
                         description="Display name for the user.",
+                    ),
+                    ToolParameter(
+                        name="password",
+                        type=ToolParameterType.STRING,
+                        description="Password for the account.",
                     ),
                 ],
                 required_role="admin",
@@ -389,8 +402,10 @@ class UserService(Service):
 
     async def _tool_get_user(self, arguments: dict[str, Any]) -> str:
         identifier = arguments["user_id"]
-        # Try by ID first, then by email.
+        # Try by ID first, then username, then email.
         user = await self.backend.get_user(identifier)
+        if user is None:
+            user = await self.backend.get_user_by_username(identifier)
         if user is None:
             user = await self.get_user_by_email(identifier)
         if user is None:
@@ -399,16 +414,33 @@ class UserService(Service):
         return json.dumps(user)
 
     async def _tool_create_user(self, arguments: dict[str, Any]) -> str:
+        username = arguments["username"].strip().lower()
+        password = arguments.get("password", "")
+
+        # Hash password if provided
+        password_hash = ""
+        if password:
+            password_hash = self._hash_password(password)
+
         user_id = f"usr_{uuid.uuid4().hex[:12]}"
         user = await self.create_user(
             user_id,
             {
-                "email": arguments["email"],
+                "username": username,
+                "email": arguments.get("email", ""),
                 "display_name": arguments.get("display_name", ""),
+                "password_hash": password_hash,
             },
         )
         user.pop("password_hash", None)
         return json.dumps({"status": "ok", "user": user})
+
+    @staticmethod
+    def _hash_password(password: str) -> str:
+        """Hash a password with argon2id."""
+        from argon2 import PasswordHasher
+
+        return PasswordHasher().hash(password)
 
     async def _tool_sync_users(self) -> str:
         count = await self.sync_providers()

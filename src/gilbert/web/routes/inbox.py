@@ -9,7 +9,6 @@ from gilbert.core.app import Gilbert
 from gilbert.core.services.inbox import InboxService
 from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.storage import Query, SortField, StorageBackend
-from gilbert.web import templates
 from gilbert.web.auth import require_role
 
 router = APIRouter(prefix="/inbox")
@@ -31,17 +30,6 @@ def _get_inbox(gilbert: Gilbert) -> InboxService:
     if svc is None or not isinstance(svc, InboxService):
         raise HTTPException(status_code=503, detail="Inbox service not available")
     return svc
-
-
-@router.get("")
-async def inbox_page(
-    request: Request,
-    user: UserContext = Depends(require_role("admin")),
-) -> Any:
-    """Render the inbox browser UI."""
-    return templates.TemplateResponse(request, "inbox.html", {
-        "user": user,
-    })
 
 
 @router.get("/api/stats")

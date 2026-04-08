@@ -26,7 +26,10 @@ class StorageUserBackend(UserBackend):
     async def ensure_indexes(self) -> None:
         """Create indexes required for efficient user queries."""
         await self._storage.ensure_index(
-            IndexDefinition(collection=_USERS, fields=["email"], unique=True)
+            IndexDefinition(collection=_USERS, fields=["username"], unique=True)
+        )
+        await self._storage.ensure_index(
+            IndexDefinition(collection=_USERS, fields=["email"])
         )
         await self._storage.ensure_index(
             IndexDefinition(collection=_PROVIDER_USERS, fields=["provider_type"])
@@ -40,7 +43,8 @@ class StorageUserBackend(UserBackend):
     async def create_user(self, user_id: str, data: dict[str, Any]) -> dict[str, Any]:
         now = datetime.now(UTC).isoformat()
         entity: dict[str, Any] = {
-            "email": data["email"],
+            "username": data.get("username", "").lower(),
+            "email": data.get("email", ""),
             "display_name": data.get("display_name", ""),
             "password_hash": data.get("password_hash", ""),
             "is_root": data.get("is_root", False),
@@ -59,6 +63,16 @@ class StorageUserBackend(UserBackend):
         if data is not None:
             data["_id"] = user_id
         return data
+
+    async def get_user_by_username(self, username: str) -> dict[str, Any] | None:
+        results = await self._storage.query(
+            Query(
+                collection=_USERS,
+                filters=[Filter(field="username", op=FilterOp.EQ, value=username.lower())],
+                limit=1,
+            )
+        )
+        return results[0] if results else None
 
     async def get_user_by_email(self, email: str) -> dict[str, Any] | None:
         results = await self._storage.query(

@@ -3,29 +3,14 @@
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
 from gilbert.core.app import Gilbert
 
 _HERE = Path(__file__).parent
-templates = Jinja2Templates(directory=str(_HERE / "templates"))
-
-
-class NoCacheHTMLMiddleware(BaseHTTPMiddleware):
-    """Prevent browsers from caching HTML responses."""
-
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        response = await call_next(request)
-        content_type = response.headers.get("content-type", "")
-        if "text/html" in content_type:
-            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-            response.headers["Pragma"] = "no-cache"
-        return response
+_SPA_DIR = _HERE / "spa"
 
 
 def create_app(gilbert: Gilbert) -> FastAPI:
@@ -39,10 +24,6 @@ def create_app(gilbert: Gilbert) -> FastAPI:
     from gilbert.web.auth import AuthMiddleware
 
     app.add_middleware(AuthMiddleware)
-    app.add_middleware(NoCacheHTMLMiddleware)
-
-    # Static files
-    app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
 
     # Serve generated output files (TTS audio, etc.) so speakers can fetch them
     from gilbert.core.output import OUTPUT_DIR
@@ -53,13 +34,9 @@ def create_app(gilbert: Gilbert) -> FastAPI:
     # Routes
     from gilbert.web.routes.auth import router as auth_router
     from gilbert.web.routes.chat import router as chat_router
-    from gilbert.web.routes.dashboard import router as dashboard_router
     from gilbert.web.routes.documents import router as documents_router
-    from gilbert.web.routes.entities import router as entities_router
     from gilbert.web.routes.inbox import router as inbox_router
-    from gilbert.web.routes.roles import router as roles_router
     from gilbert.web.routes.screens import router as screens_router
-    from gilbert.web.routes.system import router as system_router
     from gilbert.web.routes.websocket import router as ws_router
 
     @app.get("/health")
@@ -68,13 +45,30 @@ def create_app(gilbert: Gilbert) -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(chat_router)
-    app.include_router(dashboard_router)
     app.include_router(documents_router)
-    app.include_router(entities_router)
     app.include_router(inbox_router)
-    app.include_router(roles_router)
     app.include_router(screens_router)
-    app.include_router(system_router)
     app.include_router(ws_router)
+
+    # --- API routes (JSON only, for the SPA) ---
+    from gilbert.web.routes.api import router as api_router
+
+    app.include_router(api_router)
+
+    # --- SPA serving ---
+    if _SPA_DIR.exists():
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(_SPA_DIR / "assets")),
+            name="spa_assets",
+        )
+
+        @app.get("/{full_path:path}")
+        async def spa_fallback(request: Request, full_path: str) -> Response:
+            """Serve the SPA index.html for all unmatched routes."""
+            index = _SPA_DIR / "index.html"
+            if index.exists():
+                return FileResponse(str(index), media_type="text/html")
+            return Response(status_code=404)
 
     return app

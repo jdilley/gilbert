@@ -9,7 +9,6 @@ from starlette.responses import JSONResponse, RedirectResponse
 
 from gilbert.core.app import Gilbert
 from gilbert.interfaces.auth import UserContext
-from gilbert.web import templates
 from gilbert.web.auth import get_user_context
 
 logger = logging.getLogger(__name__)
@@ -23,28 +22,6 @@ def _get_auth_service(request: Request) -> Any:
     if svc is None:
         raise HTTPException(status_code=503, detail="Authentication is not enabled")
     return svc
-
-
-# ---- Login page ----
-
-
-@router.get("/login")
-async def login_page(request: Request) -> Any:
-    """Render login page with all available authentication methods."""
-    gilbert: Gilbert = request.app.state.gilbert
-    auth_svc = gilbert.service_manager.get_by_capability("authentication")
-
-    methods = []
-    if auth_svc is not None:
-        methods = auth_svc.get_login_methods()
-
-    error = request.query_params.get("error")
-
-    return templates.TemplateResponse(
-        request,
-        "login.html",
-        {"methods": methods, "error": error},
-    )
 
 
 # ---- Local (email/password) login ----

@@ -18,6 +18,7 @@ async def user_backend(sqlite_storage: SQLiteStorage) -> StorageUserBackend:
 
 async def test_create_and_get_user(user_backend: StorageUserBackend) -> None:
     user = await user_backend.create_user("u1", {
+        "username": "testuser",
         "email": "test@example.com",
         "display_name": "Test User",
     })
@@ -35,9 +36,26 @@ async def test_get_user_not_found(user_backend: StorageUserBackend) -> None:
     assert await user_backend.get_user("nonexistent") is None
 
 
+async def test_get_user_by_username(user_backend: StorageUserBackend) -> None:
+    await user_backend.create_user("u1", {"username": "alice", "email": "alice@example.com", "display_name": "Alice"})
+
+    user = await user_backend.get_user_by_username("alice")
+    assert user is not None
+    assert user["_id"] == "u1"
+
+    # Case-insensitive
+    user2 = await user_backend.get_user_by_username("Alice")
+    assert user2 is not None
+    assert user2["_id"] == "u1"
+
+
+async def test_get_user_by_username_not_found(user_backend: StorageUserBackend) -> None:
+    assert await user_backend.get_user_by_username("nobody") is None
+
+
 async def test_get_user_by_email(user_backend: StorageUserBackend) -> None:
-    await user_backend.create_user("u1", {"email": "alice@example.com", "display_name": "Alice"})
-    await user_backend.create_user("u2", {"email": "bob@example.com", "display_name": "Bob"})
+    await user_backend.create_user("u1", {"username": "alice", "email": "alice@example.com", "display_name": "Alice"})
+    await user_backend.create_user("u2", {"username": "bob", "email": "bob@example.com", "display_name": "Bob"})
 
     user = await user_backend.get_user_by_email("bob@example.com")
     assert user is not None
@@ -64,14 +82,14 @@ async def test_update_user_not_found(user_backend: StorageUserBackend) -> None:
 
 
 async def test_delete_user(user_backend: StorageUserBackend) -> None:
-    await user_backend.create_user("u1", {"email": "test@example.com", "display_name": "Test"})
+    await user_backend.create_user("u1", {"username": "test", "email": "test@example.com", "display_name": "Test"})
     await user_backend.delete_user("u1")
     assert await user_backend.get_user("u1") is None
 
 
 async def test_list_users(user_backend: StorageUserBackend) -> None:
-    await user_backend.create_user("u1", {"email": "alice@example.com", "display_name": "Alice"})
-    await user_backend.create_user("u2", {"email": "bob@example.com", "display_name": "Bob"})
+    await user_backend.create_user("u1", {"username": "alice", "email": "alice@example.com", "display_name": "Alice"})
+    await user_backend.create_user("u2", {"username": "bob", "email": "bob@example.com", "display_name": "Bob"})
 
     users = await user_backend.list_users()
     assert len(users) == 2
@@ -82,7 +100,7 @@ async def test_list_users(user_backend: StorageUserBackend) -> None:
 async def test_list_users_with_limit(user_backend: StorageUserBackend) -> None:
     for i in range(5):
         await user_backend.create_user(
-            f"u{i}", {"email": f"u{i}@example.com", "display_name": f"U{i}"}
+            f"u{i}", {"username": f"u{i}", "email": f"u{i}@example.com", "display_name": f"U{i}"}
         )
 
     users = await user_backend.list_users(limit=2)
@@ -93,7 +111,7 @@ async def test_list_users_with_limit(user_backend: StorageUserBackend) -> None:
 
 
 async def test_add_and_lookup_provider_link(user_backend: StorageUserBackend) -> None:
-    await user_backend.create_user("u1", {"email": "test@example.com", "display_name": "Test"})
+    await user_backend.create_user("u1", {"username": "test", "email": "test@example.com", "display_name": "Test"})
 
     # Store the provider user.
     await user_backend.put_provider_user("google", "g123", {
@@ -116,7 +134,7 @@ async def test_add_and_lookup_provider_link(user_backend: StorageUserBackend) ->
 
 
 async def test_remove_provider_link(user_backend: StorageUserBackend) -> None:
-    await user_backend.create_user("u1", {"email": "test@example.com", "display_name": "Test"})
+    await user_backend.create_user("u1", {"username": "test", "email": "test@example.com", "display_name": "Test"})
     await user_backend.add_provider_link("u1", "google", "g123")
     await user_backend.remove_provider_link("u1", "google")
 
@@ -126,7 +144,7 @@ async def test_remove_provider_link(user_backend: StorageUserBackend) -> None:
 
 
 async def test_add_provider_link_replaces_same_type(user_backend: StorageUserBackend) -> None:
-    await user_backend.create_user("u1", {"email": "test@example.com", "display_name": "Test"})
+    await user_backend.create_user("u1", {"username": "test", "email": "test@example.com", "display_name": "Test"})
     await user_backend.add_provider_link("u1", "google", "g123")
     await user_backend.add_provider_link("u1", "google", "g456")
 
@@ -140,7 +158,7 @@ async def test_add_provider_link_replaces_same_type(user_backend: StorageUserBac
 
 
 async def test_set_and_get_roles(user_backend: StorageUserBackend) -> None:
-    await user_backend.create_user("u1", {"email": "test@example.com", "display_name": "Test"})
+    await user_backend.create_user("u1", {"username": "test", "email": "test@example.com", "display_name": "Test"})
     await user_backend.set_roles("u1", {"admin", "user"})
 
     roles = await user_backend.get_roles("u1")

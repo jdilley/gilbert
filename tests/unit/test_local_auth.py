@@ -25,6 +25,12 @@ class StubUserBackend(UserBackend):
     async def get_user(self, user_id: str) -> dict[str, Any] | None:
         return self._users.get(user_id)
 
+    async def get_user_by_username(self, username: str) -> dict[str, Any] | None:
+        for u in self._users.values():
+            if u.get("username", "").lower() == username.lower():
+                return u
+        return None
+
     async def get_user_by_email(self, email: str) -> dict[str, Any] | None:
         for u in self._users.values():
             if u.get("email") == email:

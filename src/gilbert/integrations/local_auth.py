@@ -56,22 +56,29 @@ class LocalAuthenticationService(Service, AuthenticationService):
     def get_login_method(self) -> LoginMethod:
         return LoginMethod(
             provider_type="local",
-            display_name="Email & Password",
+            display_name="Sign In",
             method="form",
             form_action="/auth/login/local",
         )
 
     async def authenticate(self, credentials: dict[str, Any]) -> AuthInfo | None:
-        """Authenticate with ``{"email": ..., "password": ...}``."""
+        """Authenticate with username or email plus password.
+
+        Accepts ``{"email": ..., "password": ...}`` where the ``email``
+        field can contain either a username or an email address.
+        """
         if self._users is None:
             return None
 
-        email = credentials.get("email", "")
+        identifier = credentials.get("email", "")
         password = credentials.get("password", "")
-        if not email or not password:
+        if not identifier or not password:
             return None
 
-        user = await self._users.get_user_by_email(email)
+        # Try username first, fall back to email
+        user = await self._users.get_user_by_username(identifier)
+        if user is None:
+            user = await self._users.get_user_by_email(identifier)
         if user is None:
             return None
 
@@ -85,7 +92,7 @@ class LocalAuthenticationService(Service, AuthenticationService):
         return AuthInfo(
             provider_type="local",
             provider_user_id=user["_id"],
-            email=user["email"],
+            email=user.get("email", ""),
             display_name=user.get("display_name", ""),
             roles=frozenset(user.get("roles", [])),
         )
@@ -129,12 +136,15 @@ class LocalAuthProvider(AuthProvider):
         pass
 
     async def authenticate(self, credentials: dict[str, Any]) -> AuthInfo | None:
-        email = credentials.get("email", "")
+        identifier = credentials.get("email", "")
         password = credentials.get("password", "")
-        if not email or not password:
+        if not identifier or not password:
             return None
 
-        user = await self._users.get_user_by_email(email)
+        # Try username first, fall back to email
+        user = await self._users.get_user_by_username(identifier)
+        if user is None:
+            user = await self._users.get_user_by_email(identifier)
         if user is None:
             return None
 
@@ -151,7 +161,7 @@ class LocalAuthProvider(AuthProvider):
         return AuthInfo(
             provider_type="local",
             provider_user_id=user["_id"],
-            email=user["email"],
+            email=user.get("email", ""),
             display_name=user.get("display_name", ""),
             roles=frozenset(user.get("roles", [])),
         )

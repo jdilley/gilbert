@@ -762,6 +762,36 @@ class AIService(Service):
             )
         )
 
+    async def list_shared_conversations(
+        self, user_id: str, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """List shared conversations visible to user_id.
+
+        Returns conversations where the user is a member, plus public rooms
+        they haven't joined yet (so they can see and join them).
+        """
+        if self._storage is None:
+            return []
+        shared = await self._storage.query(
+            Query(
+                collection=_COLLECTION,
+                filters=[Filter(field="shared", op=FilterOp.EQ, value=True)],
+                sort=[SortField(field="updated_at", descending=True)],
+                limit=200,
+            )
+        )
+        results = []
+        for conv in shared:
+            members = conv.get("members", [])
+            is_member = any(m.get("user_id") == user_id for m in members)
+            is_public = conv.get("visibility") == "public"
+            if is_member or is_public:
+                conv["_is_member"] = is_member
+                results.append(conv)
+                if len(results) >= limit:
+                    break
+        return results
+
     async def _load_conversation(self, conv_id: str) -> list[Message]:
         """Load a conversation from storage. Returns empty list if not found."""
         if self._storage is None:
@@ -792,6 +822,12 @@ class AIService(Service):
                 }
                 for tr in msg.tool_results
             ]
+        if msg.author_id:
+            d["author_id"] = msg.author_id
+        if msg.author_name:
+            d["author_name"] = msg.author_name
+        if msg.visible_to is not None:
+            d["visible_to"] = msg.visible_to
         return d
 
     @staticmethod
@@ -817,6 +853,9 @@ class AIService(Service):
             content=data.get("content", ""),
             tool_calls=tool_calls,
             tool_results=tool_results,
+            author_id=data.get("author_id", ""),
+            author_name=data.get("author_name", ""),
+            visible_to=data.get("visible_to"),
         )
 
     # --- History Management ---

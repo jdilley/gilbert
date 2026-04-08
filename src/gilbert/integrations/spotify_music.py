@@ -158,9 +158,9 @@ class SpotifyMusic(MusicBackend):
             "limit": limit,
         })
 
-        tracks = [_parse_track(t) for t in data.get("tracks", {}).get("items", [])]
-        albums = [_parse_album(a) for a in data.get("albums", {}).get("items", [])]
-        playlists = [_parse_playlist(p) for p in data.get("playlists", {}).get("items", [])]
+        tracks = [_parse_track(t) for t in data.get("tracks", {}).get("items", []) if t]
+        albums = [_parse_album(a) for a in data.get("albums", {}).get("items", []) if a]
+        playlists = [_parse_playlist(p) for p in data.get("playlists", {}).get("items", []) if p]
 
         return SearchResults(tracks=tracks, albums=albums, playlists=playlists)
 

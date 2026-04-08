@@ -164,17 +164,38 @@ class PluginLoader:
 
         Expects the directory to contain a `plugin.py` with a
         `create_plugin() -> Plugin` function.
+
+        The plugin directory is registered as a Python package so that
+        relative imports (``from .module import ...``) work inside
+        plugin code.
         """
         plugin_file = path / "plugin.py"
         if not plugin_file.exists():
             raise PluginError(f"No plugin.py found in {path}")
 
-        module_name = f"gilbert_plugin_{path.name}"
-        spec = importlib.util.spec_from_file_location(module_name, plugin_file)
+        # Sanitize directory name for use as a Python identifier
+        pkg_name = f"gilbert_plugin_{path.name}".replace("-", "_")
+
+        # Register the plugin directory as a package so relative imports work
+        if pkg_name not in sys.modules:
+            from types import ModuleType
+
+            pkg = ModuleType(pkg_name)
+            pkg.__path__ = [str(path)]
+            pkg.__package__ = pkg_name
+            pkg.__file__ = str(path / "__init__.py")
+            sys.modules[pkg_name] = pkg
+
+        module_name = f"{pkg_name}.plugin"
+        spec = importlib.util.spec_from_file_location(
+            module_name, plugin_file,
+            submodule_search_locations=[],
+        )
         if spec is None or spec.loader is None:
             raise PluginError(f"Could not load module spec from {plugin_file}")
 
         module = importlib.util.module_from_spec(spec)
+        module.__package__ = pkg_name
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
 

@@ -44,12 +44,19 @@ class Message:
     - USER: content only
     - ASSISTANT: content (text reply) + optional tool_calls
     - TOOL_RESULT: tool_results only
+
+    Shared-conversation fields (optional):
+    - author_id / author_name: who sent this message
+    - visible_to: list of user_ids who can see it (None = everyone)
     """
 
     role: MessageRole
     content: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_results: list[ToolResult] = field(default_factory=list)
+    author_id: str = ""
+    author_name: str = ""
+    visible_to: list[str] | None = None
 
 
 @dataclass(frozen=True)

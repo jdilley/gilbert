@@ -66,7 +66,7 @@ async def user_service(storage: Any) -> UserService:
 async def test_root_user_created_on_start(user_service: UserService) -> None:
     root = await user_service.get_user(_ROOT_USER_ID)
     assert root is not None
-    assert root["email"] == "root@localhost"
+    assert root["username"] == "root"
     assert root["is_root"] is True
     assert "admin" in root["roles"]
     assert root["password_hash"] == "hashed_pw"
