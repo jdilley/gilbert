@@ -294,7 +294,7 @@ export function ChatPage() {
   return (
     <div className="flex h-[calc(100dvh-3.5rem)]">
       {/* Desktop sidebar */}
-      <div className="hidden md:flex w-64 shrink-0 border-r">
+      <div className="hidden md:flex w-64 shrink-0 border-r min-w-0 overflow-hidden">
         <ChatSidebarContent {...sidebarProps} />
       </div>
 

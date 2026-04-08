@@ -42,7 +42,7 @@ export function ChatSidebarContent({
               <div
                 key={conv.conversation_id}
                 className={cn(
-                  "group flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm cursor-pointer transition-colors hover:bg-accent",
+                  "group flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm cursor-pointer transition-colors hover:bg-accent min-w-0",
                   activeId === conv.conversation_id && "bg-accent",
                 )}
                 onClick={() =>
@@ -88,7 +88,7 @@ export function ChatSidebarContent({
             <div
               key={conv.conversation_id}
               className={cn(
-                "group flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm cursor-pointer transition-colors hover:bg-accent",
+                "group flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm cursor-pointer transition-colors hover:bg-accent min-w-0",
                 activeId === conv.conversation_id && "bg-accent",
               )}
               onClick={() => onSelect(conv.conversation_id)}
