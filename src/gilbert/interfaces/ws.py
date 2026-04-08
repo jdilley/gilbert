@@ -7,12 +7,13 @@ similar to how ``ToolProvider`` exposes AI tools. Declare the
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from gilbert.web.ws_protocol import RpcHandler, WsConnection
 
 
+@runtime_checkable
 class WsHandlerProvider(Protocol):
     """Protocol for services that expose WebSocket RPC handlers."""
 
