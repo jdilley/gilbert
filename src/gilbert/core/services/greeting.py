@@ -146,8 +146,13 @@ class GreetingService(Service):
         if not to_greet:
             return
 
+        # Collect recent greetings across all users for variety
+        all_recent: list[str] = []
+        for p in here:
+            all_recent.extend(await self._get_recent_greetings(p.user_id))
+
         # Generate a single combined greeting
-        greeting = await self._generate_group_greeting(to_greet)
+        greeting = await self._generate_group_greeting(to_greet, all_recent)
         logger.info("Startup greeting: %s", greeting)
 
         await self._announce(greeting)
@@ -155,7 +160,7 @@ class GreetingService(Service):
         # Mark all as greeted
         for p in here:
             if not await self._has_been_greeted_today(p.user_id):
-                await self._mark_greeted(p.user_id)
+                await self._mark_greeted(p.user_id, greeting)
 
         if self._event_bus:
             await self._event_bus.publish(Event(
@@ -179,11 +184,12 @@ class GreetingService(Service):
             return
 
         display_name = await self._get_display_name(user_id)
-        greeting = await self._generate_greeting(display_name)
+        recent = await self._get_recent_greetings(user_id)
+        greeting = await self._generate_greeting(display_name, recent)
 
         logger.info("Greeting %s: %s", user_id, greeting)
 
-        await self._mark_greeted(user_id)
+        await self._mark_greeted(user_id, greeting)
         await self._announce(greeting)
 
         if self._event_bus:
@@ -222,8 +228,8 @@ class GreetingService(Service):
         today = self._today_str()
         return record.get("last_greeting_date") == today
 
-    async def _mark_greeted(self, user_id: str) -> None:
-        """Mark user as greeted today."""
+    async def _mark_greeted(self, user_id: str, greeting: str = "") -> None:
+        """Mark user as greeted today and store the greeting text."""
         if self._storage_backend is None:
             return
 
@@ -231,11 +237,27 @@ class GreetingService(Service):
         record = await self._storage_backend.get(_GREETING_COLLECTION, user_id)
         count = (record.get("greeting_count", 0) if record else 0) + 1
 
+        # Keep a rolling log of recent greetings so the AI can avoid repeats
+        recent: list[str] = (record.get("recent_greetings", []) if record else [])
+        if greeting:
+            recent.append(greeting)
+            recent = recent[-10:]  # keep last 10
+
         await self._storage_backend.put(_GREETING_COLLECTION, user_id, {
             "user_id": user_id,
             "last_greeting_date": today,
             "greeting_count": count,
+            "recent_greetings": recent,
         })
+
+    async def _get_recent_greetings(self, user_id: str) -> list[str]:
+        """Get recent greeting texts for a user (for anti-repetition)."""
+        if self._storage_backend is None:
+            return []
+        record = await self._storage_backend.get(_GREETING_COLLECTION, user_id)
+        if not record:
+            return []
+        return record.get("recent_greetings", [])
 
     def _today_str(self) -> str:
         """Get today's date string in the configured timezone."""
@@ -246,9 +268,8 @@ class GreetingService(Service):
         except Exception:
             return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    async def _generate_greeting(self, name: str) -> str:
+    async def _generate_greeting(self, name: str, recent: list[str] | None = None) -> str:
         """Generate a personalized greeting via AI, with fallback."""
-        # Resolve AI lazily (it may start after us)
         if self._resolver is None:
             return f"Good morning, {name}!"
 
@@ -258,13 +279,24 @@ class GreetingService(Service):
 
         style_instruction = ""
         if self._style:
-            style_instruction = f" Style: {self._style}."
+            style_instruction = f"\nStyle: {self._style}."
+
+        avoid_section = ""
+        if recent:
+            avoid_section = (
+                "\n\nHere are your recent greetings — do NOT repeat or closely "
+                "paraphrase any of these. Be completely different in tone, "
+                "structure, and word choice:\n"
+                + "\n".join(f"- {g}" for g in recent[-7:])
+            )
 
         prompt = (
-            f"Generate a unique, fun morning greeting for {name} who just arrived. "
-            f"You're Gilbert, an AI assistant. Be playful, creative, and different "
-            f"every time. Mention their name. Keep it to 1-2 sentences. "
-            f"Write ONLY the greeting text — no quotes, no preamble.{style_instruction}"
+            f"Generate a morning greeting for {name} who just arrived at the shop. "
+            f"You're Gilbert, an AI assistant at a business. Be creative — vary your "
+            f"tone across days (witty, warm, dramatic, deadpan, poetic, nerdy, etc.). "
+            f"Mention their name. 1-2 sentences max. "
+            f"Write ONLY the greeting — no quotes, no preamble."
+            f"{style_instruction}{avoid_section}"
         )
 
         try:
@@ -282,10 +314,10 @@ class GreetingService(Service):
 
         return f"Good morning, {name}!"
 
-    async def _generate_group_greeting(self, names: list[str]) -> str:
+    async def _generate_group_greeting(self, names: list[str], recent: list[str] | None = None) -> str:
         """Generate a single greeting for multiple people."""
         if len(names) == 1:
-            return await self._generate_greeting(names[0])
+            return await self._generate_greeting(names[0], recent)
 
         if self._resolver is None:
             return f"Good morning, {', '.join(names)}!"
@@ -296,15 +328,24 @@ class GreetingService(Service):
 
         style_instruction = ""
         if self._style:
-            style_instruction = f" Style: {self._style}."
+            style_instruction = f"\nStyle: {self._style}."
+
+        avoid_section = ""
+        if recent:
+            avoid_section = (
+                "\n\nHere are recent greetings — do NOT repeat or closely "
+                "paraphrase any of these. Be completely different:\n"
+                + "\n".join(f"- {g}" for g in recent[-7:])
+            )
 
         names_str = ", ".join(names[:-1]) + f", and {names[-1]}"
         prompt = (
-            f"Generate a fun morning greeting for the crew: {names_str}. "
-            f"You're Gilbert, an AI assistant. Greet them as a group with "
-            f"energy and personality. Mention a few names naturally. "
-            f"Keep it to 2-3 sentences. "
-            f"Write ONLY the greeting text.{style_instruction}"
+            f"Generate a morning greeting for the crew: {names_str}. "
+            f"You're Gilbert, an AI assistant at a business. Greet them as a group "
+            f"with personality — vary your tone (witty, warm, dramatic, deadpan, etc.). "
+            f"Mention a few names naturally. 2-3 sentences max. "
+            f"Write ONLY the greeting."
+            f"{style_instruction}{avoid_section}"
         )
 
         try:
