@@ -764,16 +764,17 @@ class AIService(Service):
         filters: list[Filter] = []
         if user_id:
             filters.append(Filter(field="user_id", op=FilterOp.EQ, value=user_id))
-        # Exclude shared conversations — those are listed separately
-        filters.append(Filter(field="shared", op=FilterOp.NEQ, value=True))
-        return await self._storage.query(
+        results = await self._storage.query(
             Query(
                 collection=_COLLECTION,
                 filters=filters,
                 sort=[SortField(field="updated_at", descending=True)],
-                limit=limit,
+                limit=limit * 2,  # fetch extra to account for shared filtering
             )
         )
+        # Exclude shared conversations — those are listed separately.
+        # Can't use NEQ filter because shared=None (missing field) doesn't match.
+        return [c for c in results if not c.get("shared")][:limit]
 
     async def list_shared_conversations(
         self, user_id: str, limit: int = 50
