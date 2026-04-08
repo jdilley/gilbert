@@ -92,12 +92,6 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       timeout?: number,
     ): Promise<T> => {
       return new Promise<T>((resolve, reject) => {
-        const ws = wsRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          reject(new ApiError(503, "WebSocket not connected"));
-          return;
-        }
-
         const id = nextFrameId();
         const ms =
           timeout ?? (LONG_TIMEOUT_TYPES.has(frame.type as string) ? LONG_TIMEOUT : DEFAULT_TIMEOUT);
@@ -113,7 +107,25 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           timer,
         });
 
-        ws.send(JSON.stringify({ ...frame, id }));
+        // If WS is open, send immediately. Otherwise the frame will be
+        // sent when the connection opens (or timeout will fire).
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ ...frame, id }));
+        } else {
+          // Queue: check periodically until connected or timeout
+          const check = setInterval(() => {
+            const w = wsRef.current;
+            if (w && w.readyState === WebSocket.OPEN) {
+              clearInterval(check);
+              w.send(JSON.stringify({ ...frame, id }));
+            }
+            // If pending was already removed (timeout/cleanup), stop checking
+            if (!pendingRef.current.has(id)) {
+              clearInterval(check);
+            }
+          }, 100);
+        }
       });
     },
     [],
@@ -155,7 +167,11 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         setConnected(false);
         wsRef.current = null;
         clearInterval(pingInterval.current);
-        rejectAllPending(new ApiError(503, "Connection lost"));
+        // Only reject pending RPCs if the provider is unmounting.
+        // During reconnects, pending RPCs will timeout naturally.
+        if (disposed) {
+          rejectAllPending(new ApiError(503, "Connection closed"));
+        }
         if (!disposed) {
           reconnectTimeout.current = setTimeout(connect, backoff);
           backoff = Math.min(backoff * 2, 30000);
