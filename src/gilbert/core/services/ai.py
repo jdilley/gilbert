@@ -118,7 +118,7 @@ class AIService(Service):
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="ai",
-            capabilities=frozenset({"ai_chat", "ai_tools"}),
+            capabilities=frozenset({"ai_chat", "ai_tools", "ws_handlers"}),
             requires=frozenset({"credentials", "entity_storage", "persona"}),
             optional=frozenset({"ai_tools", "configuration", "access_control"}),
             events=frozenset({"chat.conversation.renamed"}),
@@ -1172,3 +1172,383 @@ class AIService(Service):
             len(request.tools),
             len(request.messages),
         )
+
+    # --- WebSocket RPC handlers ---
+
+    def get_ws_handlers(self) -> dict[str, Any]:
+        return {
+            "chat.message.send": self._ws_chat_send,
+            "chat.form.submit": self._ws_form_submit,
+            "chat.history.load": self._ws_history_load,
+            "chat.conversation.list": self._ws_conversation_list,
+            "chat.conversation.rename": self._ws_conversation_rename,
+            "chat.conversation.delete": self._ws_conversation_delete,
+            "chat.room.create": self._ws_room_create,
+            "chat.room.join": self._ws_room_join,
+            "chat.room.leave": self._ws_room_leave,
+            "chat.room.kick": self._ws_room_kick,
+            "chat.room.invite": self._ws_room_invite,
+        }
+
+    async def _ws_chat_send(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.web.ws_protocol import WsConnection
+        conn: WsConnection = conn
+
+        message = frame.get("message", "").strip()
+        if not message:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "message is required", "code": 400}
+
+        conversation_id = frame.get("conversation_id") or None
+
+        try:
+            response_text, conv_id, ui_blocks = await self.chat(
+                user_message=message,
+                conversation_id=conversation_id,
+                user_ctx=conn.user_ctx,
+                ai_call="human_chat",
+            )
+        except Exception as exc:
+            logger.warning("chat.message.send failed", exc_info=True)
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": str(exc), "code": 500}
+
+        return {
+            "type": "chat.message.send.result",
+            "ref": frame.get("id"),
+            "response": response_text,
+            "conversation_id": conv_id,
+            "ui_blocks": ui_blocks,
+        }
+
+    async def _ws_form_submit(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.web.ws_protocol import WsConnection
+        conn: WsConnection = conn
+
+        conversation_id = frame.get("conversation_id")
+        block_id = frame.get("block_id")
+        values = frame.get("values", {})
+
+        if not conversation_id or not block_id:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id and block_id required", "code": 400}
+
+        # Mark block as submitted in storage
+        block_title = "Form"
+        if self._storage is not None:
+            conv_data = await self._storage.get(_COLLECTION, conversation_id)
+            if conv_data:
+                for block in conv_data.get("ui_blocks", []):
+                    if block.get("block_id") == block_id:
+                        block["submitted"] = True
+                        block["submission"] = values
+                        block_title = block.get("title") or "Form"
+                        break
+                await self._storage.put(_COLLECTION, conversation_id, conv_data)
+
+        # Build text message for AI
+        form_message = f"[Form submitted: {block_title}]\n"
+        for k, v in values.items():
+            form_message += f"- {k}: {v}\n"
+
+        try:
+            response_text, conv_id, ui_blocks = await self.chat(
+                user_message=form_message,
+                conversation_id=conversation_id,
+                user_ctx=conn.user_ctx,
+                ai_call="human_chat",
+            )
+        except Exception as exc:
+            logger.warning("chat.form.submit failed", exc_info=True)
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": str(exc), "code": 500}
+
+        return {
+            "type": "chat.form.submit.result",
+            "ref": frame.get("id"),
+            "response": response_text,
+            "conversation_id": conv_id,
+            "ui_blocks": ui_blocks,
+        }
+
+    async def _ws_history_load(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.web.ws_protocol import WsConnection
+        conn: WsConnection = conn
+
+        conversation_id = frame.get("conversation_id")
+        if not conversation_id:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id required", "code": 400}
+
+        if self._storage is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+
+        data = await self._storage.get(_COLLECTION, conversation_id)
+        if data is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Conversation not found", "code": 404}
+
+        is_shared = data.get("shared", False)
+        display_messages = []
+        for m in data.get("messages", []):
+            role = m.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            visible_to = m.get("visible_to")
+            if visible_to is not None and conn.user_id not in visible_to:
+                continue
+            msg: dict[str, Any] = {"role": role, "content": m.get("content", "")}
+            if is_shared:
+                msg["author_id"] = m.get("author_id", "")
+                msg["author_name"] = m.get("author_name", "")
+            display_messages.append(msg)
+
+        ui_blocks = [b for b in data.get("ui_blocks", [])
+                     if not b.get("for_user") or b.get("for_user") == conn.user_id]
+
+        result: dict[str, Any] = {
+            "type": "chat.history.load.result",
+            "ref": frame.get("id"),
+            "messages": display_messages,
+            "ui_blocks": ui_blocks,
+            "shared": is_shared,
+            "title": data.get("title", ""),
+        }
+        if is_shared:
+            result["members"] = data.get("members", [])
+        return result
+
+    async def _ws_conversation_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.web.chat_helpers import conv_summary
+        from gilbert.web.ws_protocol import WsConnection
+        conn: WsConnection = conn
+
+        personal = await self.list_conversations(user_id=conn.user_id, limit=30)
+        shared = await self.list_shared_conversations(user_id=conn.user_id, limit=30)
+
+        conversations = [conv_summary(c, shared=True) for c in shared]
+        conversations += [conv_summary(c, shared=False) for c in personal]
+
+        return {"type": "chat.conversation.list.result", "ref": frame.get("id"), "conversations": conversations}
+
+    async def _ws_conversation_rename(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.web.chat_helpers import check_conversation_access, publish_event
+        from gilbert.web.ws_protocol import WsConnection
+        conn: WsConnection = conn
+
+        conversation_id = frame.get("conversation_id")
+        title = (frame.get("title") or "").strip()
+        if not conversation_id or not title:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id and title required", "code": 400}
+
+        if self._storage is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+
+        data = await self._storage.get(_COLLECTION, conversation_id)
+        if data is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Conversation not found", "code": 404}
+
+        err = check_conversation_access(data, conn.user_ctx)
+        if err:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": err, "code": 403}
+
+        data["title"] = title
+        await self._storage.put(_COLLECTION, conversation_id, data)
+
+        gilbert = conn.manager._gilbert
+        if gilbert is not None:
+            await publish_event(gilbert, "chat.conversation.renamed", {"conversation_id": conversation_id, "title": title})
+
+        return {"type": "chat.conversation.rename.result", "ref": frame.get("id"), "status": "ok", "title": title}
+
+    async def _ws_conversation_delete(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.web.ws_protocol import WsConnection
+        conn: WsConnection = conn
+
+        conversation_id = frame.get("conversation_id")
+        if not conversation_id:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id required", "code": 400}
+
+        if self._storage is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+
+        data = await self._storage.get(_COLLECTION, conversation_id)
+        if data is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Conversation not found", "code": 404}
+        if data.get("shared"):
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Use room destroy for shared conversations", "code": 400}
+        conv_owner = data.get("user_id", "")
+        if conv_owner and conn.user_id != "system" and conv_owner != conn.user_id:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Access denied", "code": 403}
+
+        await self._storage.delete(_COLLECTION, conversation_id)
+        return {"type": "chat.conversation.delete.result", "ref": frame.get("id"), "status": "ok"}
+
+    async def _ws_room_create(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.web.chat_helpers import publish_event
+        from gilbert.web.ws_protocol import WsConnection
+        conn: WsConnection = conn
+
+        title = (frame.get("title") or "").strip()
+        if not title:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "title required", "code": 400}
+        visibility = frame.get("visibility", "public")
+
+        if self._storage is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+
+        import uuid as _uuid
+        from datetime import datetime, timezone as tz
+        conv_id = str(_uuid.uuid4())
+        now = datetime.now(tz.utc).isoformat()
+
+        members = [{"user_id": conn.user_id, "display_name": conn.user_ctx.display_name, "role": "owner", "joined_at": now}]
+        data = {
+            "shared": True,
+            "visibility": visibility,
+            "title": title,
+            "user_id": conn.user_id,
+            "members": members,
+            "messages": [],
+            "created_at": now,
+            "updated_at": now,
+        }
+        await self._storage.put(_COLLECTION, conv_id, data)
+
+        gilbert = conn.manager._gilbert
+        if gilbert is not None:
+            await publish_event(gilbert, "chat.conversation.created", {
+                "conversation_id": conv_id, "title": title, "shared": True,
+                "members": members, "visibility": visibility,
+            })
+
+        return {
+            "type": "chat.room.create.result", "ref": frame.get("id"),
+            "conversation_id": conv_id, "title": title,
+            "members": [{"user_id": m["user_id"], "display_name": m["display_name"]} for m in members],
+        }
+
+    async def _ws_room_join(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.web.chat_helpers import publish_event
+        from gilbert.web.ws_protocol import WsConnection
+        conn: WsConnection = conn
+
+        conversation_id = frame.get("conversation_id")
+        if not conversation_id:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id required", "code": 400}
+
+        if self._storage is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+
+        data = await self._storage.get(_COLLECTION, conversation_id)
+        if data is None or not data.get("shared"):
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Room not found", "code": 404}
+
+        members = data.get("members", [])
+        if any(m.get("user_id") == conn.user_id for m in members):
+            return {"type": "chat.room.join.result", "ref": frame.get("id"), "status": "already_member"}
+
+        from datetime import datetime, timezone as tz
+        members.append({"user_id": conn.user_id, "display_name": conn.user_ctx.display_name, "role": "member", "joined_at": datetime.now(tz.utc).isoformat()})
+        data["members"] = members
+        await self._storage.put(_COLLECTION, conversation_id, data)
+
+        gilbert = conn.manager._gilbert
+        if gilbert is not None:
+            await publish_event(gilbert, "chat.member.joined", {
+                "conversation_id": conversation_id, "user_id": conn.user_id,
+                "display_name": conn.user_ctx.display_name,
+            })
+
+        return {"type": "chat.room.join.result", "ref": frame.get("id"), "status": "ok"}
+
+    async def _ws_room_leave(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.web.chat_helpers import publish_event
+        from gilbert.web.ws_protocol import WsConnection
+        conn: WsConnection = conn
+
+        conversation_id = frame.get("conversation_id")
+        if not conversation_id:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id required", "code": 400}
+
+        if self._storage is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+
+        data = await self._storage.get(_COLLECTION, conversation_id)
+        if data is None or not data.get("shared"):
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Room not found", "code": 404}
+
+        gilbert = conn.manager._gilbert
+
+        # Owner leaving destroys the room
+        if data.get("user_id") == conn.user_id:
+            await self._storage.delete(_COLLECTION, conversation_id)
+            if gilbert is not None:
+                await publish_event(gilbert, "chat.conversation.destroyed", {"conversation_id": conversation_id})
+            return {"type": "chat.room.leave.result", "ref": frame.get("id"), "status": "destroyed"}
+
+        members = [m for m in data.get("members", []) if m.get("user_id") != conn.user_id]
+        data["members"] = members
+        await self._storage.put(_COLLECTION, conversation_id, data)
+        if gilbert is not None:
+            await publish_event(gilbert, "chat.member.left", {"conversation_id": conversation_id, "user_id": conn.user_id})
+
+        return {"type": "chat.room.leave.result", "ref": frame.get("id"), "status": "ok"}
+
+    async def _ws_room_kick(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.web.chat_helpers import publish_event
+        from gilbert.web.ws_protocol import WsConnection
+        conn: WsConnection = conn
+
+        conversation_id = frame.get("conversation_id")
+        target_user = frame.get("user_id")
+        if not conversation_id or not target_user:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id and user_id required", "code": 400}
+
+        if self._storage is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+
+        data = await self._storage.get(_COLLECTION, conversation_id)
+        if data is None or not data.get("shared"):
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Room not found", "code": 404}
+        if data.get("user_id") != conn.user_id:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Only the room owner can kick members", "code": 403}
+
+        members = [m for m in data.get("members", []) if m.get("user_id") != target_user]
+        data["members"] = members
+        await self._storage.put(_COLLECTION, conversation_id, data)
+
+        gilbert = conn.manager._gilbert
+        if gilbert is not None:
+            await publish_event(gilbert, "chat.member.kicked", {"conversation_id": conversation_id, "user_id": target_user})
+
+        return {"type": "chat.room.kick.result", "ref": frame.get("id"), "status": "ok"}
+
+    async def _ws_room_invite(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.web.chat_helpers import publish_event
+        from gilbert.web.ws_protocol import WsConnection
+        conn: WsConnection = conn
+
+        conversation_id = frame.get("conversation_id")
+        target_user = frame.get("user_id")
+        display_name = frame.get("display_name", "")
+        if not conversation_id or not target_user:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id and user_id required", "code": 400}
+
+        if self._storage is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+
+        data = await self._storage.get(_COLLECTION, conversation_id)
+        if data is None or not data.get("shared"):
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Room not found", "code": 404}
+
+        members = data.get("members", [])
+        if any(m.get("user_id") == target_user for m in members):
+            return {"type": "chat.room.invite.result", "ref": frame.get("id"), "status": "already_member"}
+
+        from datetime import datetime, timezone as tz
+        members.append({"user_id": target_user, "display_name": display_name, "role": "member", "joined_at": datetime.now(tz.utc).isoformat()})
+        data["members"] = members
+        await self._storage.put(_COLLECTION, conversation_id, data)
+
+        gilbert = conn.manager._gilbert
+        if gilbert is not None:
+            await publish_event(gilbert, "chat.member.joined", {
+                "conversation_id": conversation_id, "user_id": target_user, "display_name": display_name,
+            })
+
+        return {"type": "chat.room.invite.result", "ref": frame.get("id"), "status": "ok"}

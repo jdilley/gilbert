@@ -54,7 +54,7 @@ class KnowledgeService(Service):
         optional = frozenset({"scheduler", "google_api", "configuration", "credentials", "event_bus", "vision", "ocr"}) - required
         return ServiceInfo(
             name="knowledge",
-            capabilities=frozenset({"knowledge", "ai_tools"}),
+            capabilities=frozenset({"knowledge", "ai_tools", "ws_handlers"}),
             requires=required,
             optional=optional,
             events=frozenset({"knowledge.document.indexed", "knowledge.document.removed", "knowledge.document.discovered"}),
@@ -920,3 +920,50 @@ class KnowledgeService(Service):
             "tracking_records_cleared": cleared,
             "message": f"Cleared {cleared} tracking records. Full re-index running in background.",
         })
+
+    # --- WebSocket RPC handlers ---
+
+    async def list_sources_with_trees(self) -> list[dict[str, Any]]:
+        """List all sources with their document trees for the UI."""
+        sources: list[dict[str, Any]] = []
+        for backend in self._backends.values():
+            source_info: dict[str, Any] = {
+                "source_id": backend.source_id,
+                "display_name": backend.display_name,
+                "read_only": backend.read_only,
+                "documents": [],
+            }
+            try:
+                docs = await backend.list_documents()
+                source_info["documents"] = [
+                    {
+                        "document_id": d.document_id,
+                        "name": d.name,
+                        "type": d.document_type.value,
+                        "size": d.size_bytes,
+                        "modified": d.last_modified.isoformat() if d.last_modified else "",
+                    }
+                    for d in docs
+                ]
+            except Exception:
+                logger.warning("Failed to list documents from %s", backend.source_id, exc_info=True)
+            sources.append(source_info)
+        return sources
+
+    def get_ws_handlers(self) -> dict[str, Any]:
+        return {
+            "documents.list": self._ws_documents_list,
+            "documents.search": self._ws_documents_search,
+        }
+
+    async def _ws_documents_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        sources = await self.list_sources_with_trees()
+        return {"type": "documents.list.result", "ref": frame.get("id"), "sources": sources}
+
+    async def _ws_documents_search(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        query = frame.get("query", "").strip()
+        if not query:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "query required", "code": 400}
+
+        results = await self.search(query, source_filter=frame.get("source_id"), n_results=frame.get("max_results", 20))
+        return {"type": "documents.search.result", "ref": frame.get("id"), "results": results, "query": query}

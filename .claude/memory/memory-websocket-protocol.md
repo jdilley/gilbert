@@ -1,20 +1,31 @@
 # WebSocket Protocol
 
 ## Summary
-Bidirectional WebSocket at `/ws/events` with typed message frames, role-based event filtering, chat RPC, and peer publishing. Primary real-time channel for web UI, inter-Gilbert communication, and external integrations.
+Bidirectional WebSocket at `/ws/events` with typed message frames, role-based event filtering, and peer publishing. Primary real-time channel for web UI, inter-Gilbert communication, and external integrations. RPC handlers are distributed across owning services via the `WsHandlerProvider` protocol.
 
 ## Details
 
 ### Wire Protocol
 All frames are JSON with a `type` field using `namespace.resource.verb` naming. Optional `id` (request correlation) and `ref` (response correlation).
 
-### Core Frames (`gilbert.*`)
-- **Client → Server**: `gilbert.sub.add`, `gilbert.sub.remove`, `gilbert.sub.list`, `gilbert.ping`, `gilbert.peer.publish`
-- **Server → Client**: `gilbert.event` (wrapped bus events), `gilbert.welcome`, `gilbert.pong`, `gilbert.error`, `*.result` acks
+### Handler Architecture
+RPC handlers are split between core and service-owned:
 
-### Chat Frames (`chat.*`)
-- **Client → Server**: `chat.message.send`, `chat.form.submit`, `chat.history.load`
-- **Server → Client**: `chat.message.send.result`, `chat.form.submit.result`, `chat.history.load.result`
+- **Core handlers** (`gilbert.*`) live in `ws_protocol.py` and are registered via `@rpc_handler` decorator into `_rpc_handlers`.
+- **Service handlers** live on service classes that declare `ws_handlers` capability and implement `get_ws_handlers() -> dict[str, handler]`. Each handler is a bound method: `async def _ws_foo(self, conn, frame) -> dict | None`.
+- `WsConnectionManager.subscribe_to_bus()` merges core + service handlers into a single registry.
+- Shared `require_admin()` helper is in `interfaces/ws.py`.
+
+### Handler Ownership
+| Namespace | Service | File |
+|-----------|---------|------|
+| `gilbert.*` | (core) | `web/ws_protocol.py` |
+| `chat.*` | AIService | `core/services/ai.py` |
+| `roles.*` | AccessControlService | `core/services/access_control.py` |
+| `inbox.*` | InboxService | `core/services/inbox.py` |
+| `documents.*` | KnowledgeService | `core/services/knowledge.py` |
+| `screens.*` | ScreenService | `core/services/screens.py` |
+| `dashboard.*`, `system.*`, `entities.*` | WebApiService | `core/services/web_api.py` |
 
 ### Authentication
 - Cookie (`gilbert_session`) for web UI
@@ -45,12 +56,13 @@ Longest prefix match. System user bypasses. Overrides stored in `acl_event_visib
 - Events tagged `_from_peer: true` — skipped when forwarding to peers (loop prevention)
 
 ### Key Files
-- `src/gilbert/web/ws_protocol.py` — WsConnection, WsConnectionManager, visibility, frame handlers, RPC dispatch
+- `src/gilbert/web/ws_protocol.py` — WsConnection, WsConnectionManager, visibility, core `gilbert.*` handlers, RPC dispatch
+- `src/gilbert/interfaces/ws.py` — `WsHandlerProvider` protocol, `require_admin()` helper
 - `src/gilbert/web/routes/websocket.py` — thin route handler (auth, connect, send/recv loop)
-- `src/gilbert/core/services/access_control.py` — event visibility overrides + AI tools
+- `src/gilbert/core/services/web_api.py` — WebApiService for dashboard/system/entities handlers
 - `frontend/src/hooks/useWebSocket.tsx` — React provider with `send()`, typed frames, ping heartbeat
 - `frontend/src/types/events.ts` — frame type definitions
-- `tests/unit/test_ws_protocol.py` — 31 tests
+- `tests/unit/test_ws_protocol.py` — tests for core WS protocol
 
 ### Connection Lifecycle
 connect → auth (cookie/token) → accept → `gilbert.welcome` → auto-subscribe(`*`) → event stream → client pings every 30s → disconnect → cleanup

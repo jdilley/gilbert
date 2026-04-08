@@ -59,7 +59,7 @@ class AccessControlService(Service):
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="access_control",
-            capabilities=frozenset({"access_control", "ai_tools"}),
+            capabilities=frozenset({"access_control", "ai_tools", "ws_handlers"}),
             requires=frozenset({"entity_storage"}),
         )
 
@@ -582,3 +582,292 @@ class AccessControlService(Service):
             return json.dumps({"status": "set"})
         except ValueError as e:
             return json.dumps({"error": str(e)})
+
+    # --- WebSocket RPC handlers ---
+
+    def get_ws_handlers(self) -> dict[str, Any]:
+        return {
+            "roles.role.list": self._ws_role_list,
+            "roles.role.create": self._ws_role_create,
+            "roles.role.update": self._ws_role_update,
+            "roles.role.delete": self._ws_role_delete,
+            "roles.tool.list": self._ws_tool_list,
+            "roles.tool.set": self._ws_tool_set,
+            "roles.tool.clear": self._ws_tool_clear,
+            "roles.profile.list": self._ws_profile_list,
+            "roles.profile.save": self._ws_profile_save,
+            "roles.profile.delete": self._ws_profile_delete,
+            "roles.profile.assign": self._ws_profile_assign,
+            "roles.user.list": self._ws_user_list,
+            "roles.user.set": self._ws_user_set,
+            "roles.collection.list": self._ws_collection_list,
+            "roles.collection.set": self._ws_collection_set,
+            "roles.collection.clear": self._ws_collection_clear,
+        }
+
+    async def _ws_role_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        roles = await self.list_roles()
+        for r in roles:
+            r.pop("_id", None)
+        return {"type": "roles.role.list.result", "ref": frame.get("id"), "roles": roles}
+
+    async def _ws_role_create(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+        await self.create_role(frame.get("name", ""), frame.get("level", 100), frame.get("description", ""))
+        return {"type": "roles.role.create.result", "ref": frame.get("id"), "status": "ok"}
+
+    async def _ws_role_update(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+        await self.update_role(frame.get("name", ""), level=frame.get("level"), description=frame.get("description"))
+        return {"type": "roles.role.update.result", "ref": frame.get("id"), "status": "ok"}
+
+    async def _ws_role_delete(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+        await self.delete_role(frame.get("name", ""))
+        return {"type": "roles.role.delete.result", "ref": frame.get("id"), "status": "ok"}
+
+    async def _ws_tool_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+
+        gilbert = conn.manager._gilbert
+        if gilbert is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+
+        from gilbert.interfaces.tools import ToolProvider
+        tools = []
+        for svc in gilbert.service_manager.get_all_by_capability("ai_tools"):
+            if isinstance(svc, ToolProvider):
+                for t in svc.get_tools():
+                    effective = self._tool_overrides.get(t.name, t.required_role)
+                    tools.append({
+                        "provider": svc.tool_provider_name,
+                        "tool_name": t.name,
+                        "default_role": t.required_role,
+                        "effective_role": effective,
+                        "has_override": t.name in self._tool_overrides,
+                    })
+        role_names = sorted(self._role_levels.keys())
+        return {"type": "roles.tool.list.result", "ref": frame.get("id"), "tools": tools, "role_names": role_names}
+
+    async def _ws_tool_set(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+        await self.set_tool_override(frame.get("tool_name", ""), frame.get("role", ""))
+        return {"type": "roles.tool.set.result", "ref": frame.get("id"), "status": "ok"}
+
+    async def _ws_tool_clear(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+        await self.clear_tool_override(frame.get("tool_name", ""))
+        return {"type": "roles.tool.clear.result", "ref": frame.get("id"), "status": "ok"}
+
+    async def _ws_profile_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+
+        gilbert = conn.manager._gilbert
+        if gilbert is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+
+        ai_svc = gilbert.service_manager.get_by_capability("ai_chat")
+        if ai_svc is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "AI service not available", "code": 503}
+
+        profiles_raw = ai_svc.list_profiles()
+        assignments = ai_svc._assignments
+
+        profiles = []
+        for p in profiles_raw:
+            assigned = [call for call, prof in assignments.items() if prof == p.name]
+            profiles.append({
+                "name": p.name, "description": p.description, "tool_mode": p.tool_mode,
+                "tools": list(p.tools), "tool_roles": dict(p.tool_roles),
+                "assigned_calls": assigned,
+            })
+
+        declared_calls: set[str] = set()
+        for svc in gilbert.service_manager.get_all_by_capability("ai_tools"):
+            info = svc.service_info()
+            declared_calls.update(info.ai_calls)
+
+        from gilbert.interfaces.tools import ToolProvider
+        all_tools: set[str] = set()
+        for svc in gilbert.service_manager.get_all_by_capability("ai_tools"):
+            if isinstance(svc, ToolProvider):
+                for t in svc.get_tools():
+                    all_tools.add(t.name)
+
+        return {
+            "type": "roles.profile.list.result", "ref": frame.get("id"),
+            "profiles": profiles, "declared_calls": sorted(declared_calls),
+            "profile_names": [p["name"] for p in profiles],
+            "all_tool_names": sorted(all_tools),
+        }
+
+    async def _ws_profile_save(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+
+        gilbert = conn.manager._gilbert
+        if gilbert is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+
+        ai_svc = gilbert.service_manager.get_by_capability("ai_chat")
+        if ai_svc is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "AI service not available", "code": 503}
+
+        from gilbert.core.services.ai import AIContextProfile
+        profile = AIContextProfile(
+            name=frame.get("name", ""),
+            description=frame.get("description", ""),
+            tool_mode=frame.get("tool_mode", "all"),
+            tools=frame.get("tools", []),
+            tool_roles=frame.get("tool_roles", {}),
+        )
+        await ai_svc.set_profile(profile)
+        return {"type": "roles.profile.save.result", "ref": frame.get("id"), "status": "ok"}
+
+    async def _ws_profile_delete(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+
+        gilbert = conn.manager._gilbert
+        if gilbert is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+
+        ai_svc = gilbert.service_manager.get_by_capability("ai_chat")
+        if ai_svc is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "AI service not available", "code": 503}
+
+        await ai_svc.delete_profile(frame.get("name", ""))
+        return {"type": "roles.profile.delete.result", "ref": frame.get("id"), "status": "ok"}
+
+    async def _ws_profile_assign(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+
+        gilbert = conn.manager._gilbert
+        if gilbert is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+
+        ai_svc = gilbert.service_manager.get_by_capability("ai_chat")
+        if ai_svc is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "AI service not available", "code": 503}
+
+        await ai_svc.set_assignment(frame.get("ai_call", ""), frame.get("profile_name", ""))
+        return {"type": "roles.profile.assign.result", "ref": frame.get("id"), "status": "ok"}
+
+    async def _ws_user_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+
+        gilbert = conn.manager._gilbert
+        if gilbert is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+
+        user_svc = gilbert.service_manager.get_by_capability("users")
+        if user_svc is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+
+        users = await user_svc.list_users()
+        result = []
+        for u in users:
+            result.append({
+                "user_id": u.get("user_id", u.get("_id", "")),
+                "email": u.get("email", ""),
+                "display_name": u.get("display_name", ""),
+                "roles": u.get("roles", []),
+            })
+        role_names = sorted(self._role_levels.keys())
+        return {"type": "roles.user.list.result", "ref": frame.get("id"), "users": result, "role_names": role_names}
+
+    async def _ws_user_set(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+
+        gilbert = conn.manager._gilbert
+        if gilbert is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+
+        user_svc = gilbert.service_manager.get_by_capability("users")
+        if user_svc is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "User service not available", "code": 503}
+
+        user_id = frame.get("user_id", "")
+        roles = frame.get("roles", [])
+        await user_svc.backend.update_user(user_id, {"roles": roles})
+        return {"type": "roles.user.set.result", "ref": frame.get("id"), "status": "ok"}
+
+    async def _ws_collection_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+
+        gilbert = conn.manager._gilbert
+        if gilbert is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+
+        storage_svc = gilbert.service_manager.get_by_capability("entity_storage")
+        if storage_svc is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+
+        collections = await storage_svc.backend.list_collections()
+        acl_entries = []
+        for col in sorted(collections):
+            entry = self._collection_acl.get(col)
+            acl_entries.append({
+                "collection": col,
+                "read_role": entry["read_role"] if entry else "user",
+                "write_role": entry["write_role"] if entry else "admin",
+                "has_custom": entry is not None,
+            })
+        roles = await self.list_roles()
+        return {
+            "type": "roles.collection.list.result", "ref": frame.get("id"),
+            "collections": acl_entries, "role_names": [r["name"] for r in roles],
+        }
+
+    async def _ws_collection_set(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+        await self.set_collection_acl(frame.get("collection", ""), read_role=frame.get("read_role", "user"), write_role=frame.get("write_role", "admin"))
+        return {"type": "roles.collection.set.result", "ref": frame.get("id"), "status": "ok"}
+
+    async def _ws_collection_clear(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+        await self.clear_collection_acl(frame.get("collection", ""))
+        return {"type": "roles.collection.clear.result", "ref": frame.get("id"), "status": "ok"}

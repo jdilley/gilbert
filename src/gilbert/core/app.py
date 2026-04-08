@@ -313,6 +313,11 @@ class Gilbert:
 
         self.service_manager.register(MemoryService())
 
+        # Web API service (always — dashboard, system inspector, entity browser)
+        from gilbert.core.services.web_api import WebApiService
+
+        self.service_manager.register(WebApiService())
+
         if self.config.ai.enabled:
             ai_backend = self._create_ai_backend(self.config.ai.backend)
             self.service_manager.register(

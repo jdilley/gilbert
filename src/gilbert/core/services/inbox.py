@@ -55,7 +55,7 @@ class InboxService(Service):
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="inbox",
-            capabilities=frozenset({"email", "ai_tools"}),
+            capabilities=frozenset({"email", "ai_tools", "ws_handlers"}),
             requires=frozenset({"entity_storage", "scheduler"}),
             optional=frozenset({"event_bus", "google_api", "knowledge"}),
             events=frozenset({"inbox.message.received", "inbox.message.replied", "inbox.message.sent"}),
@@ -698,3 +698,157 @@ class InboxService(Service):
                 logger.warning("Failed to resolve attachment: %s", doc_id, exc_info=True)
 
         return attachments
+
+    # --- WebSocket RPC handlers ---
+
+    def get_ws_handlers(self) -> dict[str, Any]:
+        return {
+            "inbox.stats.get": self._ws_stats_get,
+            "inbox.message.list": self._ws_message_list,
+            "inbox.message.get": self._ws_message_get,
+            "inbox.thread.get": self._ws_thread_get,
+            "inbox.pending.list": self._ws_pending_list,
+            "inbox.pending.cancel": self._ws_pending_cancel,
+        }
+
+    async def _ws_stats_get(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+        stats = await self.get_stats()
+        return {"type": "inbox.stats.get.result", "ref": frame.get("id"), **stats}
+
+    async def _ws_message_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+        messages = await self.search_messages(
+            sender=frame.get("sender", ""), subject=frame.get("subject", ""),
+            limit=frame.get("limit", 50), include_body=False,
+        )
+        summaries = []
+        for m in messages:
+            snippet = m.get("snippet", "")
+            if not snippet:
+                body = m.get("body_text", "")
+                snippet = body[:120] + ("..." if len(body) > 120 else "")
+            summaries.append({
+                "message_id": m.get("_id", ""), "thread_id": m.get("thread_id", ""),
+                "subject": m.get("subject", ""), "sender_email": m.get("sender_email", ""),
+                "sender_name": m.get("sender_name", ""), "date": m.get("date", ""),
+                "is_inbound": m.get("is_inbound", True), "snippet": snippet,
+            })
+        return {"type": "inbox.message.list.result", "ref": frame.get("id"), "messages": summaries, "total": len(summaries)}
+
+    async def _ws_message_get(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+        record = await self.get_message(frame.get("message_id", ""))
+        if not record:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Message not found", "code": 404}
+        return {
+            "type": "inbox.message.get.result", "ref": frame.get("id"),
+            "message_id": record.get("_id", ""), "thread_id": record.get("thread_id", ""),
+            "subject": record.get("subject", ""), "sender_email": record.get("sender_email", ""),
+            "sender_name": record.get("sender_name", ""), "date": record.get("date", ""),
+            "to": record.get("to", []), "cc": record.get("cc", []),
+            "body_text": record.get("body_text", ""), "body_html": record.get("body_html", ""),
+            "is_inbound": record.get("is_inbound", True),
+        }
+
+    async def _ws_thread_get(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+        messages = await self.get_thread(frame.get("thread_id", ""))
+        result = []
+        for m in messages:
+            result.append({
+                "message_id": m.get("_id", ""), "thread_id": m.get("thread_id", ""),
+                "subject": m.get("subject", ""), "sender_email": m.get("sender_email", ""),
+                "sender_name": m.get("sender_name", ""), "date": m.get("date", ""),
+                "to": m.get("to", []), "cc": m.get("cc", []),
+                "body_text": m.get("body_text", ""), "body_html": m.get("body_html", ""),
+                "is_inbound": m.get("is_inbound", True),
+            })
+        return {"type": "inbox.thread.get.result", "ref": frame.get("id"), "messages": result}
+
+    async def _ws_pending_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+
+        gilbert = conn.manager._gilbert
+        if gilbert is None:
+            return {"type": "inbox.pending.list.result", "ref": frame.get("id"), "pending": []}
+
+        storage_svc = gilbert.service_manager.get_by_capability("entity_storage")
+        if storage_svc is None:
+            return {"type": "inbox.pending.list.result", "ref": frame.get("id"), "pending": []}
+        raw_storage = getattr(storage_svc, "raw_backend", None)
+        if raw_storage is None:
+            return {"type": "inbox.pending.list.result", "ref": frame.get("id"), "pending": []}
+
+        from gilbert.interfaces.storage import Filter, FilterOp, Query, SortField
+        from datetime import datetime, timedelta, timezone as tz
+        cutoff = (datetime.now(tz.utc) - timedelta(days=1)).isoformat()
+        _PENDING_COLLECTIONS = ["gilbert.plugin.current-sales-assistant.pending_replies"]
+
+        pending: list[dict[str, Any]] = []
+        for collection in _PENDING_COLLECTIONS:
+            try:
+                pending_results = await raw_storage.query(Query(
+                    collection=collection,
+                    filters=[Filter(field="status", op=FilterOp.EQ, value="pending")],
+                    sort=[SortField(field="send_at", descending=False)],
+                ))
+                failed_results = await raw_storage.query(Query(
+                    collection=collection,
+                    filters=[Filter(field="status", op=FilterOp.EQ, value="failed"), Filter(field="send_at", op=FilterOp.GTE, value=cutoff)],
+                    sort=[SortField(field="send_at", descending=False)],
+                ))
+                for r in pending_results + failed_results:
+                    pending.append({
+                        "id": r.get("_id", ""), "collection": collection,
+                        "customer_email": r.get("customer_email", ""), "subject": r.get("subject", ""),
+                        "status": r.get("status", ""), "send_at": r.get("send_at", ""),
+                    })
+            except Exception:
+                pass
+        return {"type": "inbox.pending.list.result", "ref": frame.get("id"), "pending": pending}
+
+    async def _ws_pending_cancel(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        from gilbert.interfaces.ws import require_admin
+        err = require_admin(conn, frame)
+        if err:
+            return err
+        reply_id = frame.get("reply_id", "")
+        if not reply_id:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "reply_id required", "code": 400}
+
+        gilbert = conn.manager._gilbert
+        if gilbert is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+
+        storage_svc = gilbert.service_manager.get_by_capability("entity_storage")
+        raw_storage = getattr(storage_svc, "raw_backend", None) if storage_svc else None
+        if raw_storage is None:
+            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+
+        _PENDING_COLLECTIONS = ["gilbert.plugin.current-sales-assistant.pending_replies"]
+        for collection in _PENDING_COLLECTIONS:
+            try:
+                existing = await raw_storage.get(collection, reply_id)
+                if existing and existing.get("status") in ("pending", "failed"):
+                    existing["status"] = "cancelled"
+                    await raw_storage.put(collection, reply_id, existing)
+                    return {"type": "inbox.pending.cancel.result", "ref": frame.get("id"), "status": "cancelled"}
+            except Exception:
+                pass
+        return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Pending reply not found", "code": 404}

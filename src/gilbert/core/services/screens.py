@@ -121,7 +121,7 @@ class ScreenService(Service):
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="screens",
-            capabilities=frozenset({"screen_display", "ai_tools"}),
+            capabilities=frozenset({"screen_display", "ai_tools", "ws_handlers"}),
             requires=frozenset(),
             optional=frozenset({"knowledge", "scheduler", "event_bus", "configuration"}),
             events=frozenset({"screen.connected", "screen.disconnected"}),
@@ -897,3 +897,14 @@ class ScreenService(Service):
         title = arguments.get("title", "Images")
         self.push_images(resolved, title, images)
         return f'Showing {len(images)} image{"s" if len(images) != 1 else ""} on {resolved}.'
+
+    # --- WebSocket RPC handlers ---
+
+    def get_ws_handlers(self) -> dict[str, Any]:
+        return {
+            "screens.list": self._ws_screens_list,
+        }
+
+    async def _ws_screens_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+        screens = self.list_screens()
+        return {"type": "screens.list.result", "ref": frame.get("id"), "screens": screens}
