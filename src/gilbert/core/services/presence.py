@@ -45,8 +45,7 @@ class PresenceService(Service):
         self._event_bus: EventBus | None = None
         self._storage: Any = None
         self._resolver: ServiceResolver | None = None
-        # Last-known state per user for change detection
-        self._last_state: dict[str, PresenceState] = {}
+        self._first_poll: bool = True
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
@@ -111,14 +110,10 @@ class PresenceService(Service):
 
         await self._backend.initialize(init_config)
 
-        # Seed initial state and persist to entity store
-        try:
-            all_presence = await self._backend.get_all_presence()
-            for p in all_presence:
-                self._last_state[p.user_id] = p.state
-            await self._persist_presence(all_presence)
-        except Exception:
-            logger.warning("Failed to seed initial presence state", exc_info=True)
+        # First poll flag — on the very first poll we skip event emission
+        # for users that have no prior stored state (prevents spurious
+        # arrived events for everyone on fresh install).
+        self._first_poll = True
 
         # Register polling with scheduler
         scheduler = resolver.get_capability("scheduler")
@@ -185,51 +180,59 @@ class PresenceService(Service):
     # --- Polling and event detection ---
 
     async def _check_for_changes(self) -> None:
-        """Poll backend, compare to last-known state, publish events for changes."""
+        """Poll backend, diff against stored state, emit events, persist new state.
+
+        All state is kept in the entity store so it survives restarts.
+        The backend only reports who is *currently* visible — users who
+        disappear from the poll are transitioned to AWAY.
+        """
+        # 1. Load previous state from entity store
+        previous = await self._load_stored_presence()
+
+        # 2. Poll the backend for current signals
         try:
             all_presence = await self._backend.get_all_presence()
         except Exception:
             logger.warning("Failed to poll presence", exc_info=True)
             return
 
-        current_ids = set()
-        for p in all_presence:
-            current_ids.add(p.user_id)
-            old_state = self._last_state.get(p.user_id)
+        # 3. Build current state map from poll results
+        current: dict[str, UserPresence] = {p.user_id: p for p in all_presence}
+
+        # 4. Diff: users in current poll
+        for user_id, p in current.items():
+            old_state = previous.get(user_id)
             if old_state == p.state:
                 continue
-
-            self._last_state[p.user_id] = p.state
-
-            # New user or state changed
             if old_state is not None:
                 await self._emit_change(p, old_state)
+            elif not self._first_poll:
+                # New user appearing after first poll — treat as arrived
+                await self._emit_change(p, PresenceState.AWAY)
             else:
-                # First time seeing this user — don't emit arrived/departed
-                logger.debug("New tracked user: %s (%s)", p.user_id, p.state.value)
+                logger.debug("Initial tracked user: %s (%s)", user_id, p.state.value)
 
-        # Detect users who disappeared from the poll (phone disconnected,
-        # no face/badge signals). They should transition to AWAY.
-        for user_id, old_state in list(self._last_state.items()):
-            if user_id in current_ids:
+        # 5. Diff: users in previous state but missing from current poll → AWAY
+        for user_id, old_state in previous.items():
+            if user_id in current:
                 continue
             if old_state == PresenceState.AWAY:
                 continue
-            self._last_state[user_id] = PresenceState.AWAY
             away = UserPresence(
-                user_id=user_id,
-                state=PresenceState.AWAY,
-                source="unifi",
+                user_id=user_id, state=PresenceState.AWAY, source="presence",
             )
             await self._emit_change(away, old_state)
 
-        # Persist current state to entity store (include AWAY users)
-        full_presence = list(all_presence) + [
-            UserPresence(user_id=uid, state=PresenceState.AWAY, source="unifi")
-            for uid in self._last_state
-            if uid not in current_ids and self._last_state[uid] == PresenceState.AWAY
-        ]
-        await self._persist_presence(full_presence)
+        # 6. Persist new state (current poll + AWAY for vanished users)
+        new_state: dict[str, UserPresence] = dict(current)
+        for user_id in previous:
+            if user_id not in current:
+                new_state[user_id] = UserPresence(
+                    user_id=user_id, state=PresenceState.AWAY, source="presence",
+                )
+        await self._persist_presence(list(new_state.values()))
+
+        self._first_poll = False
 
     async def _emit_change(self, presence: UserPresence, old_state: PresenceState) -> None:
         """Publish presence change events."""
@@ -278,8 +281,29 @@ class PresenceService(Service):
 
     # --- Entity persistence ---
 
+    _COLLECTION = "user_presence"
+
+    async def _load_stored_presence(self) -> dict[str, PresenceState]:
+        """Load the previous presence state from the entity store."""
+        if self._storage is None:
+            return {}
+        try:
+            from gilbert.interfaces.storage import Query
+
+            records = await self._storage.query(Query(
+                collection=self._COLLECTION, limit=500,
+            ))
+            return {
+                r["user_id"]: PresenceState(r["state"])
+                for r in records
+                if "user_id" in r and "state" in r
+            }
+        except Exception:
+            logger.warning("Failed to load stored presence", exc_info=True)
+            return {}
+
     async def _persist_presence(self, presence_list: list[UserPresence]) -> None:
-        """Write current presence state to the entity store for quick lookups."""
+        """Replace stored presence state with the latest poll results."""
         if self._storage is None:
             return
         try:
@@ -287,11 +311,11 @@ class PresenceService(Service):
 
             now = datetime.now(timezone.utc).isoformat()
             for p in presence_list:
-                await self._storage.put("user_presence", p.user_id, {
+                await self._storage.put(self._COLLECTION, p.user_id, {
                     "user_id": p.user_id,
                     "state": p.state.value,
-                    "since": p.since,
-                    "source": p.source,
+                    "since": p.since or "",
+                    "source": p.source or "",
                     "updated_at": now,
                 })
         except Exception:
