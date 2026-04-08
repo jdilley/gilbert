@@ -166,7 +166,7 @@ async def inbox_api_cancel_pending(
     for collection in _PENDING_COLLECTIONS:
         try:
             existing = await storage.get(collection, reply_id)
-            if existing and existing.get("status") == "pending":
+            if existing and existing.get("status") in ("pending", "failed"):
                 existing["status"] = "cancelled"
                 await storage.put(collection, reply_id, existing)
                 return JSONResponse(content={"status": "cancelled", "id": reply_id})
