@@ -72,17 +72,17 @@ export function InboxPage() {
             <div className="space-y-2">
               {pending.map((p) => (
                 <div
-                  key={p._id}
+                  key={p.id}
                   className="flex items-center gap-3 text-sm border-b pb-2 last:border-0"
                 >
                   <Badge variant="outline">{p.status}</Badge>
-                  <span className="text-muted-foreground">{p.scheduled_time}</span>
-                  <span className="truncate flex-1">{p.recipient} — {p.subject}</span>
+                  <span className="text-muted-foreground">{p.send_at}</span>
+                  <span className="truncate flex-1">{p.customer_email} — {p.subject}</span>
                   <Button
                     variant="ghost"
                     size="sm"
                     className="text-destructive"
-                    onClick={() => cancelMutation.mutate(p._id)}
+                    onClick={() => cancelMutation.mutate(p.id)}
                   >
                     Cancel
                   </Button>
@@ -126,17 +126,17 @@ export function InboxPage() {
             <tbody>
               {messages.map((msg) => (
                 <tr
-                  key={msg._id}
+                  key={msg.message_id}
                   className="border-b hover:bg-accent/50 cursor-pointer"
-                  onClick={() => handleRowClick(msg._id)}
+                  onClick={() => handleRowClick(msg.message_id)}
                 >
                   <td className="px-3 py-2">
-                    {msg.inbound ? "→" : "←"}
+                    {msg.is_inbound ? "→" : "←"}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     {new Date(msg.date).toLocaleDateString()}
                   </td>
-                  <td className="px-3 py-2 truncate max-w-32">{msg.from}</td>
+                  <td className="px-3 py-2 truncate max-w-32">{msg.sender_name || msg.sender_email}</td>
                   <td className="px-3 py-2 truncate max-w-48">{msg.subject}</td>
                   <td className="px-3 py-2 truncate max-w-64 text-muted-foreground">
                     {msg.snippet}
@@ -156,9 +156,9 @@ export function InboxPage() {
           {selectedMsg && (
             <div className="space-y-3 text-sm">
               <div className="text-muted-foreground">
-                <div>From: {selectedMsg.from}</div>
-                {selectedMsg.to && <div>To: {selectedMsg.to}</div>}
-                {selectedMsg.cc && <div>CC: {selectedMsg.cc}</div>}
+                <div>From: {selectedMsg.sender_name || selectedMsg.sender_email}</div>
+                {selectedMsg.to?.length > 0 && <div>To: {selectedMsg.to.join(", ")}</div>}
+                {selectedMsg.cc?.length > 0 && <div>CC: {selectedMsg.cc.join(", ")}</div>}
                 <div>Date: {new Date(selectedMsg.date).toLocaleString()}</div>
               </div>
               <div className="border-t pt-3">

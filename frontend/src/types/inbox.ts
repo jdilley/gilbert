@@ -4,28 +4,33 @@ export interface InboxStats {
 }
 
 export interface InboxMessage {
-  _id: string;
+  message_id: string;
+  thread_id?: string;
   date: string;
-  from: string;
-  to?: string;
-  cc?: string;
+  sender_email: string;
+  sender_name: string;
   subject: string;
   snippet: string;
-  inbound: boolean;
-  thread_id?: string;
+  is_inbound: boolean;
 }
 
 export interface MessageDetail extends InboxMessage {
+  to: string[];
+  cc: string[];
   body_text?: string;
   body_html?: string;
+  in_reply_to?: string;
 }
 
 export interface PendingReply {
-  _id: string;
-  status: string;
-  scheduled_time: string;
-  recipient: string;
-  subject: string;
-  preview: string;
+  id: string;
   collection: string;
+  lead_id: string;
+  customer_email: string;
+  subject: string;
+  status: string;
+  is_initial: boolean;
+  send_at: string;
+  created_at: string;
+  response_text: string;
 }
