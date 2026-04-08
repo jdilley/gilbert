@@ -171,23 +171,53 @@ class WsConnection:
 
 
 class WsConnectionManager:
-    """Manages all WebSocket connections and dispatches events."""
+    """Manages all WebSocket connections and dispatches events.
+
+    Service-provided handlers are discovered via the ``ws_handlers``
+    capability (services implementing ``WsHandlerProvider``).  Core
+    ``gilbert.*`` handlers are always registered from this module.
+    """
 
     def __init__(self) -> None:
         self._connections: set[WsConnection] = set()
         self._unsubscribe: Callable[[], None] | None = None
         self._gilbert: Any = None
+        # Combined handler registry: core + service-provided
+        self._handlers: dict[str, RpcHandler] = {}
 
     def subscribe_to_bus(self, gilbert: Any) -> None:
-        """Subscribe to the event bus (call once at app startup)."""
+        """Subscribe to the event bus and discover service handlers."""
         self._gilbert = gilbert
+
+        # Start with core handlers (gilbert.*)
+        self._handlers = dict(_rpc_handlers)
+
+        # Discover service-provided handlers
+        from gilbert.interfaces.ws import WsHandlerProvider
+        for svc in gilbert.service_manager.get_all_by_capability("ws_handlers"):
+            if isinstance(svc, WsHandlerProvider):
+                service_handlers = svc.get_ws_handlers()
+                for frame_type, handler in service_handlers.items():
+                    if frame_type in self._handlers:
+                        logger.warning(
+                            "WS handler conflict: %s already registered, skipping from %s",
+                            frame_type, svc.service_info().name,
+                        )
+                    else:
+                        self._handlers[frame_type] = handler
+                logger.info(
+                    "Registered %d WS handlers from %s",
+                    len(service_handlers), svc.service_info().name,
+                )
+
+        logger.info("WebSocket manager ready: %d handlers registered", len(self._handlers))
+
         event_bus_svc = gilbert.service_manager.get_by_capability("event_bus")
         if event_bus_svc is None:
             return
         from gilbert.core.services.event_bus import EventBusService
         if isinstance(event_bus_svc, EventBusService):
             self._unsubscribe = event_bus_svc.bus.subscribe_pattern("*", self._dispatch_event)
-            logger.info("WebSocket manager subscribed to event bus")
 
     def shutdown(self) -> None:
         """Unsubscribe from the bus."""
@@ -1380,9 +1410,15 @@ async def _handle_screens_list(conn: WsConnection, frame: dict[str, Any]) -> dic
 
 
 async def dispatch_frame(conn: WsConnection, frame: dict[str, Any]) -> dict[str, Any] | None:
-    """Route an incoming frame to the appropriate handler."""
+    """Route an incoming frame to the appropriate handler.
+
+    Checks the connection manager's combined handler registry (core +
+    service-provided handlers).
+    """
     frame_type = frame.get("type", "")
-    handler = _rpc_handlers.get(frame_type)
+
+    # Use the manager's combined registry (core + service handlers)
+    handler = conn.manager._handlers.get(frame_type)
     if handler is not None:
         return await handler(conn, frame)
 

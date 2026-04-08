@@ -190,6 +190,9 @@ class TestFrameDispatch:
     def _conn(self) -> WsConnection:
         user = UserContext(user_id="test", email="", display_name="Test", roles=frozenset({"user"}))
         manager = MagicMock(spec=WsConnectionManager)
+        # Populate handler registry with core handlers
+        from gilbert.web.ws_protocol import _rpc_handlers
+        manager._handlers = dict(_rpc_handlers)
         return WsConnection(user, 100, manager)
 
     async def test_subscribe(self) -> None:
