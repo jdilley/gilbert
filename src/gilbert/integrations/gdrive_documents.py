@@ -78,6 +78,8 @@ class GoogleDriveDocumentBackend(DocumentBackend):
         self._shared_drive_id = shared_drive_id
         self._drive: Any = None
         self._file_cache: dict[str, dict[str, Any]] = {}
+        # path → folder_id cache for directory navigation
+        self._folder_id_cache: dict[str, str] = {}
         # Lock to serialize Drive API calls — httplib2 is not thread-safe
         self._api_lock = asyncio.Lock()
 
@@ -197,6 +199,127 @@ class GoogleDriveDocumentBackend(DocumentBackend):
             external_url=f.get("webViewLink", ""),
             metadata={"file_id": f.get("id", "")},
         )
+
+    async def list_children(self, path: str = "") -> list[dict[str, Any]]:
+        """List immediate children (folders + files) at a directory path.
+
+        Unlike list_documents(), this does NOT recurse — it makes a single
+        Drive API call for the folder's direct children.
+        """
+        if self._drive is None:
+            return []
+
+        # Resolve path to folder ID
+        if not path:
+            parent_id = self._folder_id or "root"
+        else:
+            parent_id = await self._resolve_folder_id(path)
+            if not parent_id:
+                return []
+
+        query_parts = [f"'{parent_id}' in parents", "trashed = false"]
+        q = " and ".join(query_parts)
+        kwargs: dict[str, Any] = {
+            "q": q,
+            "fields": "nextPageToken, files(id, name, mimeType, size, modifiedTime, md5Checksum, webViewLink)",
+            "pageSize": 200,
+            "includeItemsFromAllDrives": True,
+            "supportsAllDrives": True,
+            "orderBy": "folder,name",
+        }
+
+        children: list[dict[str, Any]] = []
+        page_token: str | None = None
+
+        while True:
+            if page_token:
+                kwargs["pageToken"] = page_token
+            try:
+                async with self._api_lock:
+                    result = await asyncio.to_thread(
+                        self._drive.files().list(**kwargs).execute
+                    )
+            except Exception:
+                logger.warning("Drive API error listing children at %s", path, exc_info=True)
+                return []
+
+            for f in result.get("files", []):
+                name = f.get("name", "")
+                child_path = f"{path}/{name}" if path else name
+                is_folder = f.get("mimeType") == "application/vnd.google-apps.folder"
+
+                if is_folder:
+                    # Cache folder ID for future navigation
+                    self._folder_id_cache[child_path] = f["id"]
+                    children.append({
+                        "name": name,
+                        "path": child_path,
+                        "is_folder": True,
+                    })
+                else:
+                    doc_type = _type_from_mime(f.get("mimeType", ""), name)
+                    if doc_type == DocumentType.UNKNOWN:
+                        continue
+                    children.append({
+                        "name": name,
+                        "path": child_path,
+                        "is_folder": False,
+                        "size": int(f.get("size", 0)),
+                        "modified": f.get("modifiedTime", ""),
+                        "type": doc_type.value,
+                        "external_url": f.get("webViewLink", ""),
+                    })
+                    # Cache file for metadata lookups
+                    f["_path"] = child_path
+                    self._file_cache[child_path] = f
+
+            page_token = result.get("nextPageToken")
+            if not page_token:
+                break
+
+        return children
+
+    async def _resolve_folder_id(self, path: str) -> str | None:
+        """Resolve a path like 'Foo/Bar' to a Drive folder ID.
+
+        Walks the path segments, using the cache when possible and
+        falling back to Drive API lookups.
+        """
+        if path in self._folder_id_cache:
+            return self._folder_id_cache[path]
+
+        # Walk segments from root
+        parts = path.strip("/").split("/")
+        current_id = self._folder_id or "root"
+
+        built_path = ""
+        for part in parts:
+            built_path = f"{built_path}/{part}" if built_path else part
+
+            if built_path in self._folder_id_cache:
+                current_id = self._folder_id_cache[built_path]
+                continue
+
+            # Look up this folder in the current parent
+            q = f"'{current_id}' in parents and name = '{part}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+            try:
+                async with self._api_lock:
+                    result = await asyncio.to_thread(
+                        self._drive.files().list(
+                            q=q, fields="files(id)", pageSize=1,
+                            includeItemsFromAllDrives=True, supportsAllDrives=True,
+                        ).execute
+                    )
+                files = result.get("files", [])
+                if not files:
+                    return None
+                current_id = files[0]["id"]
+                self._folder_id_cache[built_path] = current_id
+            except Exception:
+                logger.warning("Failed to resolve folder path: %s", built_path, exc_info=True)
+                return None
+
+        return current_id
 
     async def list_documents(self, prefix: str = "") -> list[DocumentMeta]:
         files = await self._list_files(prefix)

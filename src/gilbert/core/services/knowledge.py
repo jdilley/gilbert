@@ -931,21 +931,23 @@ class KnowledgeService(Service):
         ]
 
     async def browse(self, source_id: str, path: str = "") -> list[dict[str, Any]]:
-        """Browse a source at a directory path. Returns immediate children (folders + files).
+        """Browse a source at a directory path from the entity store.
 
-        Builds a virtual directory structure from flat document paths.
+        Reads from knowledge_documents (synced separately), not from the
+        backend directly. Returns immediate children (folders + files).
         """
-        backend = self._backends.get(source_id)
-        if backend is None:
+        if self._storage is None:
             return []
 
-        try:
-            docs = await backend.list_documents(prefix=path)
-        except Exception:
-            logger.warning("Failed to list documents from %s", source_id, exc_info=True)
-            return []
+        from gilbert.interfaces.storage import Filter, FilterOp, Query
 
-        # Normalize the prefix for stripping
+        # Query all documents for this source
+        filters = [Filter(field="source_id", op=FilterOp.EQ, value=source_id)]
+        docs = await self._storage.query(Query(
+            collection="knowledge_documents", filters=filters, limit=5000,
+        ))
+
+        # Build directory listing from stored paths
         prefix = path.rstrip("/") + "/" if path else ""
         prefix_len = len(prefix)
 
@@ -953,14 +955,13 @@ class KnowledgeService(Service):
         children: list[dict[str, Any]] = []
 
         for d in docs:
-            # Get the relative path after the prefix
-            rel = d.path
+            doc_path = d.get("path", "")
+            rel = doc_path
             if prefix and rel.startswith(prefix):
                 rel = rel[prefix_len:]
             elif prefix:
-                continue  # not under this path
+                continue
 
-            # If there's a "/" in the relative path, the first segment is a folder
             if "/" in rel:
                 folder_name = rel.split("/", 1)[0]
                 folder_path = f"{prefix}{folder_name}" if prefix else folder_name
@@ -972,21 +973,16 @@ class KnowledgeService(Service):
                         "is_folder": True,
                     })
             else:
-                # Direct child file
-                modified = d.last_modified
-                if hasattr(modified, "isoformat"):
-                    modified = modified.isoformat()
                 children.append({
-                    "name": d.name,
-                    "path": d.path,
+                    "name": d.get("name", rel),
+                    "path": doc_path,
                     "is_folder": False,
-                    "size": d.size_bytes,
-                    "modified": modified or "",
-                    "type": d.document_type.value,
-                    "external_url": d.external_url or "",
+                    "size": d.get("size_bytes", 0),
+                    "modified": d.get("last_modified", ""),
+                    "type": d.get("type", ""),
+                    "external_url": d.get("external_url", ""),
                 })
 
-        # Sort: folders first, then files, alphabetically
         children.sort(key=lambda c: (not c["is_folder"], c["name"].lower()))
         return children
 

@@ -133,6 +133,49 @@ class DocumentBackend(ABC):
         """List all documents, optionally filtered by path prefix."""
         ...
 
+    async def list_children(self, path: str = "") -> list[dict[str, Any]]:
+        """List immediate children at a directory path (folders + files).
+
+        Returns dicts with keys: name, path, is_folder, and optionally
+        size, modified, type, external_url for files.
+
+        Default implementation falls back to list_documents() and builds
+        the directory structure client-side. Backends should override for
+        efficient single-level listing.
+        """
+        docs = await self.list_documents(prefix=path)
+        prefix_str = path.rstrip("/") + "/" if path else ""
+        prefix_len = len(prefix_str)
+
+        seen_folders: set[str] = set()
+        children: list[dict[str, Any]] = []
+
+        for d in docs:
+            rel = d.path
+            if prefix_str and rel.startswith(prefix_str):
+                rel = rel[prefix_len:]
+            elif prefix_str:
+                continue
+
+            if "/" in rel:
+                folder_name = rel.split("/", 1)[0]
+                folder_path = f"{prefix_str}{folder_name}" if prefix_str else folder_name
+                if folder_path not in seen_folders:
+                    seen_folders.add(folder_path)
+                    children.append({"name": folder_name, "path": folder_path, "is_folder": True})
+            else:
+                modified = d.last_modified
+                if hasattr(modified, "isoformat"):
+                    modified = modified.isoformat()
+                children.append({
+                    "name": d.name, "path": d.path, "is_folder": False,
+                    "size": d.size_bytes, "modified": modified or "",
+                    "type": d.document_type.value, "external_url": d.external_url or "",
+                })
+
+        children.sort(key=lambda c: (not c["is_folder"], c["name"].lower()))
+        return children
+
     @abstractmethod
     async def get_document(self, path: str) -> DocumentContent | None:
         """Fetch the full content of a document by path."""
