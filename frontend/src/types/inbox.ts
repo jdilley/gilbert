@@ -14,9 +14,14 @@ export interface InboxMessage {
   is_inbound: boolean;
 }
 
+export interface EmailAddress {
+  email: string;
+  name: string;
+}
+
 export interface MessageDetail extends InboxMessage {
-  to: string[];
-  cc: string[];
+  to: EmailAddress[];
+  cc: EmailAddress[];
   body_text?: string;
   body_html?: string;
   in_reply_to?: string;

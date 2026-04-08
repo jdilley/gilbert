@@ -24,6 +24,7 @@ export function InboxPage() {
   const [sender, setSender] = useState("");
   const [subject, setSubject] = useState("");
   const [selectedMsg, setSelectedMsg] = useState<MessageDetail | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
   const { data: stats } = useQuery({
     queryKey: ["inbox-stats"],
@@ -46,8 +47,14 @@ export function InboxPage() {
   });
 
   async function handleRowClick(id: string) {
-    const detail = await fetchMessageDetail(id);
-    setSelectedMsg(detail);
+    if (loadingDetail) return;
+    setLoadingDetail(true);
+    try {
+      const detail = await fetchMessageDetail(id);
+      setSelectedMsg(detail);
+    } finally {
+      setLoadingDetail(false);
+    }
   }
 
   return (
@@ -149,7 +156,7 @@ export function InboxPage() {
       </Card>
 
       <Dialog open={!!selectedMsg} onOpenChange={() => setSelectedMsg(null)}>
-        <DialogContent className="max-w-5xl w-[90vw] h-[85vh] flex flex-col">
+        <DialogContent className="max-w-[95vw] w-full h-[92vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>{selectedMsg?.subject}</DialogTitle>
           </DialogHeader>
@@ -157,8 +164,12 @@ export function InboxPage() {
             <div className="flex flex-col flex-1 min-h-0 text-sm">
               <div className="text-muted-foreground shrink-0 pb-3">
                 <div>From: {selectedMsg.sender_name || selectedMsg.sender_email}</div>
-                {selectedMsg.to?.length > 0 && <div>To: {selectedMsg.to.join(", ")}</div>}
-                {selectedMsg.cc?.length > 0 && <div>CC: {selectedMsg.cc.join(", ")}</div>}
+                {selectedMsg.to?.length > 0 && (
+                  <div>To: {selectedMsg.to.map((a) => a.name || a.email).join(", ")}</div>
+                )}
+                {selectedMsg.cc?.length > 0 && (
+                  <div>CC: {selectedMsg.cc.map((a) => a.name || a.email).join(", ")}</div>
+                )}
                 <div>Date: {new Date(selectedMsg.date).toLocaleString()}</div>
               </div>
               <div className="border-t pt-3 flex-1 min-h-0">
