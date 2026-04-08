@@ -100,7 +100,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
         const id = nextFrameId();
         const ms =
-          timeout ?? (LONG_TIMEOUT_TYPES.has(frame.type) ? LONG_TIMEOUT : DEFAULT_TIMEOUT);
+          timeout ?? (LONG_TIMEOUT_TYPES.has(frame.type as string) ? LONG_TIMEOUT : DEFAULT_TIMEOUT);
 
         const timer = setTimeout(() => {
           pendingRef.current.delete(id);
