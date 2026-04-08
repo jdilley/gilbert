@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchRoles, createRole, deleteRole } from "@/api/roles";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,7 +44,7 @@ export function RolesList() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["roles"] }),
   });
 
-  if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
+  if (isLoading) return <LoadingSpinner text="Loading roles..." className="p-4" />;
 
   return (
     <>

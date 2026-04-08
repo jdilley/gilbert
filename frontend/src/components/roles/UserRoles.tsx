@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchUserRoles, setUserRoles } from "@/api/roles";
 import { Card, CardContent } from "@/components/ui/card";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
 export function UserRoles() {
   const queryClient = useQueryClient();
@@ -23,7 +24,7 @@ export function UserRoles() {
     mutation.mutate({ userId, roles: next });
   }
 
-  if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
+  if (isLoading) return <LoadingSpinner text="Loading users..." className="p-4" />;
 
   return (
     <Card>

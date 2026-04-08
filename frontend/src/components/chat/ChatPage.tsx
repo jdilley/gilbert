@@ -30,6 +30,7 @@ import {
 import { MenuIcon, MessageSquareIcon, PlusIcon, UsersRoundIcon } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { PromptDialog } from "@/components/ui/PromptDialog";
 
 export function ChatPage() {
   const { user } = useAuth();
@@ -37,6 +38,7 @@ export function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [uiBlocks, setUiBlocks] = useState<UIBlock[]>([]);
   const [sending, setSending] = useState(false);
+  const [loadingConv, setLoadingConv] = useState(false);
   const [isShared, setIsShared] = useState(false);
   const [members, setMembers] = useState<
     { user_id: string; display_name: string; role?: "owner" | "member" }[]
@@ -45,6 +47,12 @@ export function ChatPage() {
   const [roomTitle, setRoomTitle] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [promptDialog, setPromptDialog] = useState<{
+    title: string;
+    placeholder?: string;
+    defaultValue?: string;
+    onSubmit: (value: string) => void;
+  } | null>(null);
 
   const { data: conversations = [], refetch: refetchConversations } = useQuery({
     queryKey: ["conversations"],
@@ -52,6 +60,7 @@ export function ChatPage() {
   });
 
   const loadConversation = useCallback(async (id: string) => {
+    setLoadingConv(true);
     try {
       const conv = await fetchConversation(id);
       setActiveConvId(id);
@@ -69,6 +78,8 @@ export function ChatPage() {
       setSidebarOpen(false);
     } catch {
       setActiveConvId(null);
+    } finally {
+      setLoadingConv(false);
     }
   }, []);
 
@@ -150,12 +161,17 @@ export function ChatPage() {
     setSidebarOpen(false);
   }, []);
 
-  const handleCreateRoom = useCallback(async () => {
-    const title = prompt("Room name:");
-    if (!title?.trim()) return;
-    const room = await createSharedRoom(title.trim());
-    refetchConversations();
-    loadConversation(room.conversation_id);
+  const handleCreateRoom = useCallback(() => {
+    setPromptDialog({
+      title: "Create Room",
+      placeholder: "Room name",
+      onSubmit: async (title) => {
+        setPromptDialog(null);
+        const room = await createSharedRoom(title);
+        refetchConversations();
+        loadConversation(room.conversation_id);
+      },
+    });
   }, [refetchConversations, loadConversation]);
 
   const handleJoinRoom = useCallback(
@@ -186,14 +202,21 @@ export function ChatPage() {
   );
 
   const handleRename = useCallback(
-    async (id: string) => {
-      const title = prompt("New name:");
-      if (!title?.trim()) return;
-      await renameConversation(id, title.trim());
-      refetchConversations();
-      if (id === activeConvId) setRoomTitle(title.trim());
+    (id: string) => {
+      const current = conversations.find((c) => c.conversation_id === id)?.title || "";
+      setPromptDialog({
+        title: "Rename Conversation",
+        placeholder: "New name",
+        defaultValue: current,
+        onSubmit: async (title) => {
+          setPromptDialog(null);
+          await renameConversation(id, title);
+          refetchConversations();
+          if (id === activeConvId) setRoomTitle(title);
+        },
+      });
     },
-    [activeConvId, refetchConversations],
+    [activeConvId, conversations, refetchConversations],
   );
 
   // WebSocket event handlers
@@ -398,7 +421,11 @@ export function ChatPage() {
         </div>
 
         {/* Messages */}
-        {messages.length === 0 && !activeConvId ? (
+        {loadingConv ? (
+          <div className="flex flex-1 flex-col items-center justify-center">
+            <LoadingSpinner text="Loading conversation..." />
+          </div>
+        ) : messages.length === 0 && !activeConvId ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground p-4">
             <MessageSquareIcon className="size-10 opacity-30" />
             <p className="text-sm">Start a new conversation</p>
@@ -460,6 +487,15 @@ export function ChatPage() {
           />
         </SheetContent>
       </Sheet>
+
+      <PromptDialog
+        open={!!promptDialog}
+        title={promptDialog?.title || ""}
+        placeholder={promptDialog?.placeholder}
+        defaultValue={promptDialog?.defaultValue}
+        onSubmit={(v) => promptDialog?.onSubmit(v)}
+        onCancel={() => setPromptDialog(null)}
+      />
     </div>
   );
 }

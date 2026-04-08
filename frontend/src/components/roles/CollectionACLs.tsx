@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import {
   fetchCollectionACLs,
   setCollectionACL,
@@ -37,7 +38,7 @@ export function CollectionACLs() {
       queryClient.invalidateQueries({ queryKey: ["collection-acls"] }),
   });
 
-  if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
+  if (isLoading) return <LoadingSpinner text="Loading collections..." className="p-4" />;
 
   return (
     <Card>

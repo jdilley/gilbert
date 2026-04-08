@@ -172,16 +172,11 @@ ai:
       tool_mode: all
     human_chat:
       description: "Human conversations via web or Slack"
-      tool_mode: exclude
-      tools: [sales_lead]
+      tool_mode: all
     text_only:
       description: "Text generation only, no tool access"
       tool_mode: include
       tools: []
-    sales_agent:
-      description: "Sales lead qualification pipeline"
-      tool_mode: include
-      tools: [sales_lead]
 
 speaker:
   enabled: false

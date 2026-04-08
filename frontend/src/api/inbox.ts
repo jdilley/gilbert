@@ -28,8 +28,11 @@ export async function fetchMessageDetail(id: string): Promise<MessageDetail> {
   return apiFetch(`/inbox/api/messages/${id}`);
 }
 
-export async function fetchThread(threadId: string): Promise<InboxMessage[]> {
-  return apiFetch(`/inbox/api/threads/${threadId}`);
+export async function fetchThread(threadId: string): Promise<MessageDetail[]> {
+  const resp = await apiFetch<{ thread_id: string; messages: MessageDetail[] }>(
+    `/inbox/api/threads/${threadId}`,
+  );
+  return resp.messages;
 }
 
 export async function fetchPending(): Promise<PendingReply[]> {

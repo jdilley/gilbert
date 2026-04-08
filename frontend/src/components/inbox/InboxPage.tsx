@@ -4,14 +4,16 @@ import {
   fetchInboxStats,
   fetchMessages,
   fetchMessageDetail,
+  fetchThread,
   fetchPending,
   cancelPending,
 } from "@/api/inbox";
-import type { MessageDetail } from "@/types/inbox";
+import type { MessageDetail, InboxMessage } from "@/types/inbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import {
   Dialog,
   DialogContent,
@@ -24,6 +26,7 @@ export function InboxPage() {
   const [sender, setSender] = useState("");
   const [subject, setSubject] = useState("");
   const [selectedMsg, setSelectedMsg] = useState<MessageDetail | null>(null);
+  const [threadMsgs, setThreadMsgs] = useState<MessageDetail[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   const { data: stats } = useQuery({
@@ -46,12 +49,24 @@ export function InboxPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["inbox-pending"] }),
   });
 
-  async function handleRowClick(id: string) {
+  async function handleRowClick(msg: InboxMessage) {
     if (loadingDetail) return;
     setLoadingDetail(true);
+    setThreadMsgs([]);
     try {
-      const detail = await fetchMessageDetail(id);
+      const detail = await fetchMessageDetail(msg.message_id);
       setSelectedMsg(detail);
+      // Load full thread if this message has one
+      if (msg.thread_id) {
+        try {
+          const threadDetails = await fetchThread(msg.thread_id);
+          if (threadDetails.length > 1) {
+            setThreadMsgs(threadDetails);
+          }
+        } catch {
+          // Thread load failed — just show the single message
+        }
+      }
     } finally {
       setLoadingDetail(false);
     }
@@ -135,7 +150,7 @@ export function InboxPage() {
                 <tr
                   key={msg.message_id}
                   className="border-b hover:bg-accent/50 cursor-pointer"
-                  onClick={() => handleRowClick(msg.message_id)}
+                  onClick={() => handleRowClick(msg)}
                 >
                   <td className="px-3 py-2">
                     {msg.is_inbound ? "→" : "←"}
@@ -155,35 +170,48 @@ export function InboxPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={!!selectedMsg} onOpenChange={() => setSelectedMsg(null)}>
+      {/* Loading overlay for detail fetch */}
+      <Dialog open={loadingDetail} onOpenChange={() => {}}>
+        <DialogContent showCloseButton={false} className="flex items-center justify-center py-8">
+          <LoadingSpinner text="Loading message..." />
+        </DialogContent>
+      </Dialog>
+
+      {/* Message detail modal */}
+      <Dialog open={!!selectedMsg && !loadingDetail} onOpenChange={() => { setSelectedMsg(null); setThreadMsgs([]); }}>
         <DialogContent className="flex flex-col" style={{ maxWidth: "95vw", width: "95vw", height: "92vh" }}>
           <DialogHeader>
             <DialogTitle>{selectedMsg?.subject}</DialogTitle>
           </DialogHeader>
           {selectedMsg && (
-            <div className="flex flex-col flex-1 min-h-0 text-sm">
-              <div className="text-muted-foreground shrink-0 pb-3">
-                <div>From: {selectedMsg.sender_name || selectedMsg.sender_email}</div>
-                {selectedMsg.to?.length > 0 && (
-                  <div>To: {selectedMsg.to.map((a) => a.name || a.email).join(", ")}</div>
-                )}
-                {selectedMsg.cc?.length > 0 && (
-                  <div>CC: {selectedMsg.cc.map((a) => a.name || a.email).join(", ")}</div>
-                )}
-                <div>Date: {new Date(selectedMsg.date).toLocaleString()}</div>
-              </div>
-              <div className="border-t pt-3 flex-1 min-h-0">
-                {selectedMsg.body_html ? (
-                  <iframe
-                    sandbox=""
-                    srcDoc={selectedMsg.body_html}
-                    className="w-full h-full border-0 rounded bg-white"
-                    title="Email content"
-                  />
-                ) : (
-                  <pre className="whitespace-pre-wrap overflow-y-auto h-full">{selectedMsg.body_text}</pre>
-                )}
-              </div>
+            <div className="flex flex-col flex-1 min-h-0 text-sm overflow-y-auto">
+              {(threadMsgs.length > 1 ? threadMsgs : [selectedMsg]).map((msg, i) => (
+                <div key={msg.message_id || i} className={i > 0 ? "border-t pt-3 mt-3" : ""}>
+                  <div className="text-muted-foreground shrink-0 pb-3">
+                    <div>From: {msg.sender_name || msg.sender_email}</div>
+                    {msg.to?.length > 0 && (
+                      <div>To: {msg.to.map((a) => a.name || a.email).join(", ")}</div>
+                    )}
+                    {msg.cc?.length > 0 && (
+                      <div>CC: {msg.cc.map((a) => a.name || a.email).join(", ")}</div>
+                    )}
+                    <div>Date: {new Date(msg.date).toLocaleString()}</div>
+                  </div>
+                  <div className="min-h-[200px]">
+                    {msg.body_html ? (
+                      <iframe
+                        sandbox=""
+                        srcDoc={msg.body_html}
+                        className="w-full border-0 rounded bg-white"
+                        style={{ height: threadMsgs.length > 1 ? "300px" : "100%" }}
+                        title="Email content"
+                      />
+                    ) : (
+                      <pre className="whitespace-pre-wrap">{msg.body_text}</pre>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </DialogContent>

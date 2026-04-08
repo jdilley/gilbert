@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import {
   fetchProfiles,
   saveProfile,
@@ -84,7 +85,7 @@ export function AIProfiles() {
     setEditing({ ...profile });
   }
 
-  if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
+  if (isLoading) return <LoadingSpinner text="Loading profiles..." className="p-4" />;
 
   return (
     <>

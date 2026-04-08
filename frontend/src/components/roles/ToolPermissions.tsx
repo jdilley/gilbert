@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchToolPermissions, setToolRole, clearToolRole } from "@/api/roles";
 import { Card, CardContent } from "@/components/ui/card";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -31,7 +32,7 @@ export function ToolPermissions() {
       queryClient.invalidateQueries({ queryKey: ["tool-permissions"] }),
   });
 
-  if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
+  if (isLoading) return <LoadingSpinner text="Loading tools..." className="p-4" />;
 
   return (
     <Card>
