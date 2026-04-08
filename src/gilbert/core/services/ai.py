@@ -747,12 +747,14 @@ class AIService(Service):
     async def list_conversations(
         self, user_id: str | None = None, limit: int = 50
     ) -> list[dict[str, Any]]:
-        """List conversations, optionally filtered by owning user."""
+        """List personal (non-shared) conversations, optionally filtered by owning user."""
         if self._storage is None:
             return []
         filters: list[Filter] = []
         if user_id:
             filters.append(Filter(field="user_id", op=FilterOp.EQ, value=user_id))
+        # Exclude shared conversations — those are listed separately
+        filters.append(Filter(field="shared", op=FilterOp.NE, value=True))
         return await self._storage.query(
             Query(
                 collection=_COLLECTION,
