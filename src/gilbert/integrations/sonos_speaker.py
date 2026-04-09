@@ -17,10 +17,11 @@ from gilbert.interfaces.speaker import (
 
 logger = logging.getLogger(__name__)
 
-# Time to wait for a group to form/settle before verifying
-_GROUP_SETTLE_SECONDS = 3.0
-_GROUP_VERIFY_RETRIES = 10
-_GROUP_RETRY_DELAY = 2.0
+# Grouping timing constants
+_GROUP_SETTLE_SECONDS = 2.0
+_GROUP_POLL_INTERVAL = 1.0
+_GROUP_POLL_TIMEOUT = 5.0  # seconds to poll before retrying group command
+_GROUP_MAX_ATTEMPTS = 5  # max times to retry the whole group operation
 
 # Map SoCo transport states to our enum
 _STATE_MAP: dict[str, PlaybackState] = {
@@ -216,124 +217,167 @@ class SonosSpeaker(SpeakerBackend):
         if len(speaker_ids) < 2:
             raise ValueError("Need at least 2 speakers to form a group")
 
-        devices = [_find_device(self._devices, sid) for sid in speaker_ids]
+        target_set = set(speaker_ids)
 
-        # Check if they're already grouped together
-        if await self._already_grouped(devices):
-            group = devices[0].group
-            logger.info("Speakers already grouped as '%s' — skipping regroup", group.label)
-            return SpeakerGroup(
-                group_id=group.uid,
-                name=group.label,
-                coordinator_id=_speaker_id(group.coordinator),
-                member_ids=[_speaker_id(m) for m in group.members],
+        # Check if already correctly grouped
+        result = await self._check_group_state(speaker_ids)
+        if result:
+            logger.info(
+                "Speakers already grouped as '%s' — no changes needed",
+                result.name,
+            )
+            return result
+
+        # Retry loop: attempt to form the group, poll until formed,
+        # re-attempt if it doesn't converge within the poll timeout
+        for attempt in range(1, _GROUP_MAX_ATTEMPTS + 1):
+            await self._apply_group_changes(speaker_ids, target_set)
+
+            # Poll until the group is formed or timeout
+            result = await self._poll_until_grouped(
+                speaker_ids, _GROUP_POLL_TIMEOUT,
+            )
+            if result:
+                logger.info(
+                    "Speaker group formed: '%s' with %d members",
+                    result.name, len(result.member_ids),
+                )
+                return result
+
+            logger.warning(
+                "Group not formed after attempt %d/%d — retrying",
+                attempt, _GROUP_MAX_ATTEMPTS,
             )
 
-        # Use the first device as the coordinator
-        coordinator = devices[0]
-
-        # Only unjoin devices that are in the target set — don't disrupt other groups
-        await asyncio.to_thread(self._unjoin_target_devices, devices)
-        await asyncio.sleep(1.0)  # let unjoins settle
-
-        # Join the rest to the coordinator in parallel
-        await asyncio.gather(*(
-            asyncio.to_thread(device.join, coordinator)
-            for device in devices[1:]
-        ))
-
-        # Wait for the group to settle
-        await asyncio.sleep(_GROUP_SETTLE_SECONDS)
-
-        # Verify the group formed
-        group = await self._verify_group(coordinator, speaker_ids)
-        logger.info("Speaker group formed: '%s' with %d members", group.name, len(group.member_ids))
-        return group
+        raise RuntimeError(
+            f"Failed to form speaker group after {_GROUP_MAX_ATTEMPTS} "
+            f"attempts with {len(speaker_ids)} speakers"
+        )
 
     async def ungroup_speakers(self, speaker_ids: list[str]) -> None:
         changed = False
         for sid in speaker_ids:
             device = self._devices.get(sid)
-            if device:
-                group = await asyncio.to_thread(lambda d=device: d.group)
-                if group and len(group.members) > 1:
-                    await asyncio.to_thread(device.unjoin)
-                    changed = True
+            if not device:
+                continue
+            group = await asyncio.to_thread(lambda d=device: d.group)
+            if group and len(group.members) > 1:
+                await asyncio.to_thread(device.unjoin)
+                changed = True
         if changed:
             await asyncio.sleep(_GROUP_SETTLE_SECONDS)
             logger.info("Ungrouped %d speakers", len(speaker_ids))
 
-    # --- Private helpers ---
+    # --- Private grouping helpers ---
 
-    @staticmethod
-    def _unjoin_target_devices(devices: list[SoCo]) -> None:
-        """Unjoin only the target devices from their current groups.
+    async def _check_group_state(
+        self, speaker_ids: list[str],
+    ) -> SpeakerGroup | None:
+        """Check if the target speakers are already in the correct group.
 
-        Does NOT touch other speakers that aren't in our target set.
+        Returns the SpeakerGroup if all target speakers are in the same
+        group with no extra members. Returns None otherwise.
         """
-        for device in devices:
-            group = device.group
-            if group and len(group.members) > 1:
-                # Only unjoin if this device is part of a group
-                device.unjoin()
+        target_set = set(speaker_ids)
 
-    async def _already_grouped(self, devices: list[SoCo]) -> bool:
-        """Check if all devices are already in the same group with exactly these members."""
-        def check() -> bool:
-            if not devices:
-                return False
-            first_group = devices[0].group
-            if first_group is None:
-                return False
-            target_uids = {d.uid for d in devices}
-            group_uids = {m.uid for m in first_group.members}
-            return target_uids == group_uids
+        def check() -> SpeakerGroup | None:
+            first = self._devices.get(speaker_ids[0])
+            if first is None:
+                return None
+            group = first.group
+            if group is None:
+                return None
+            group_uids = {_speaker_id(m) for m in group.members}
+            if group_uids == target_set:
+                return SpeakerGroup(
+                    group_id=group.uid,
+                    name=group.label,
+                    coordinator_id=_speaker_id(group.coordinator),
+                    member_ids=[_speaker_id(m) for m in group.members],
+                )
+            return None
 
         return await asyncio.to_thread(check)
 
-    async def _verify_group(self, coordinator: SoCo, expected_ids: list[str]) -> SpeakerGroup:
-        """Verify the group formed correctly, retrying if needed."""
-        expected = set(expected_ids)
+    async def _apply_group_changes(
+        self, speaker_ids: list[str], target_set: set[str],
+    ) -> None:
+        """Apply the minimal changes to form the desired group.
 
-        for attempt in range(_GROUP_VERIFY_RETRIES):
-            await self._discover()
-            coord = self._devices.get(_speaker_id(coordinator))
-            if coord is None:
-                coord = coordinator
+        Figures out which speakers need to be unjoined from other groups
+        and which need to join the coordinator. Avoids touching speakers
+        that are already correct.
+        """
+        coordinator = _find_device(self._devices, speaker_ids[0])
 
-            group = await asyncio.to_thread(lambda: coord.group)
-            if group is not None:
-                actual = {_speaker_id(m) for m in group.members}
-                if expected.issubset(actual):
-                    return SpeakerGroup(
-                        group_id=group.uid,
-                        name=group.label,
-                        coordinator_id=_speaker_id(group.coordinator),
-                        member_ids=[_speaker_id(m) for m in group.members],
-                    )
-
-            if attempt < _GROUP_VERIFY_RETRIES - 1:
-                logger.debug(
-                    "Group not yet formed (attempt %d/%d), retrying...",
-                    attempt + 1, _GROUP_VERIFY_RETRIES,
-                )
-                await asyncio.sleep(_GROUP_RETRY_DELAY)
-
-        # Final check — log what we have vs what we expected
-        group = await asyncio.to_thread(lambda: coord.group)
-        if group:
-            actual = {_speaker_id(m) for m in group.members}
-            missing = expected - actual
-            if missing:
-                logger.warning(
-                    "Group formed with %d/%d speakers (missing %d)",
-                    len(actual & expected), len(expected), len(missing),
-                )
-            return SpeakerGroup(
-                group_id=group.uid,
-                name=group.label,
-                coordinator_id=_speaker_id(group.coordinator),
-                member_ids=[_speaker_id(m) for m in group.members],
+        def compute_changes() -> tuple[list[SoCo], list[SoCo]]:
+            """Returns (to_unjoin, to_join) lists."""
+            to_unjoin: list[SoCo] = []
+            to_join: list[SoCo] = []
+            coord_group = coordinator.group
+            coord_group_uids = (
+                {_speaker_id(m) for m in coord_group.members}
+                if coord_group else {_speaker_id(coordinator)}
             )
 
-        raise RuntimeError("Failed to form speaker group after retries")
+            for sid in speaker_ids:
+                device = self._devices.get(sid)
+                if device is None:
+                    continue
+                if device is coordinator:
+                    # Coordinator: unjoin if it's in a group with
+                    # non-target members
+                    if coord_group and len(coord_group.members) > 1:
+                        extras = coord_group_uids - target_set
+                        if extras:
+                            # Unjoin the extras, not the coordinator
+                            for m in coord_group.members:
+                                mid = _speaker_id(m)
+                                if mid in extras:
+                                    to_unjoin.append(m)
+                    continue
+                # Non-coordinator: check if already in coordinator's group
+                if _speaker_id(device) in coord_group_uids:
+                    continue
+                # Needs to leave its current group and join ours
+                dev_group = device.group
+                if dev_group and len(dev_group.members) > 1:
+                    to_unjoin.append(device)
+                to_join.append(device)
+
+            return to_unjoin, to_join
+
+        to_unjoin, to_join = await asyncio.to_thread(compute_changes)
+
+        # Unjoin speakers that are in wrong groups
+        if to_unjoin:
+            await asyncio.gather(*(
+                asyncio.to_thread(d.unjoin) for d in to_unjoin
+            ))
+            await asyncio.sleep(_GROUP_SETTLE_SECONDS)
+            logger.debug("Unjoined %d speakers from other groups", len(to_unjoin))
+
+        # Join speakers to the coordinator
+        if to_join:
+            await asyncio.gather(*(
+                asyncio.to_thread(d.join, coordinator) for d in to_join
+            ))
+            await asyncio.sleep(_GROUP_SETTLE_SECONDS)
+            logger.debug("Joined %d speakers to coordinator", len(to_join))
+
+    async def _poll_until_grouped(
+        self, speaker_ids: list[str], timeout: float,
+    ) -> SpeakerGroup | None:
+        """Poll until the target speakers are in the correct group.
+
+        Returns the SpeakerGroup if formed within timeout, None otherwise.
+        """
+        elapsed = 0.0
+        while elapsed < timeout:
+            await self._discover()
+            result = await self._check_group_state(speaker_ids)
+            if result:
+                return result
+            await asyncio.sleep(_GROUP_POLL_INTERVAL)
+            elapsed += _GROUP_POLL_INTERVAL
+        return None
