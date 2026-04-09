@@ -27,7 +27,7 @@ export function MessageList({
   }, [messages, uiBlocks]);
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto overscroll-contain">
+    <div ref={containerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">
       <div className="space-y-4 px-3 py-4 sm:px-4">
         {messages.map((msg, i) => (
           <MessageBubble

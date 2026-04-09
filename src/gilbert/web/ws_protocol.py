@@ -204,10 +204,23 @@ class WsConnection:
         if event.data.get("_from_peer") and self.user_level <= _PEER_LEVEL:
             return
 
+        data = event.data
+
+        # Filter ui_blocks by for_user / exclude_user for this connection
+        ui_blocks = data.get("ui_blocks")
+        if ui_blocks and isinstance(ui_blocks, list):
+            filtered = [
+                b for b in ui_blocks
+                if (not b.get("for_user") or b.get("for_user") == self.user_id)
+                and b.get("exclude_user") != self.user_id
+            ]
+            if len(filtered) != len(ui_blocks):
+                data = {**data, "ui_blocks": filtered}
+
         self.enqueue({
             "type": "gilbert.event",
             "event_type": event.event_type,
-            "data": event.data,
+            "data": data,
             "source": event.source,
             "timestamp": event.timestamp.isoformat() if event.timestamp else "",
         })

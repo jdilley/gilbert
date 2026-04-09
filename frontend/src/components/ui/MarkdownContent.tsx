@@ -18,7 +18,7 @@ export function MarkdownContent({
 
   return (
     <div
-      className={`prose prose-invert prose-sm max-w-none break-words ${className}`}
+      className={`prose prose-invert prose-sm max-w-none break-words overflow-hidden ${className}`}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

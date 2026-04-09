@@ -60,7 +60,7 @@ export function ChatInput({
           placeholder={placeholder}
           disabled={disabled}
           rows={1}
-          className="min-h-[40px] max-h-[150px] resize-none text-sm"
+          className="min-h-[40px] max-h-[150px] resize-none text-base sm:text-sm"
         />
         <Button
           onClick={handleSend}

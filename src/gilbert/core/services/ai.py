@@ -699,6 +699,20 @@ class AIService(Service):
                 tc.arguments["_user_id"] = user_ctx.user_id
                 tc.arguments["_user_name"] = user_ctx.display_name
 
+            # Inject room members if in a shared conversation
+            conv_id = getattr(self, "_current_conversation_id", None)
+            storage = getattr(self, "_storage", None)
+            if conv_id and storage:
+                conv_data = await storage.get(_COLLECTION, conv_id)
+                if conv_data and conv_data.get("shared"):
+                    tc.arguments["_room_members"] = [
+                        {
+                            "user_id": m.get("user_id", ""),
+                            "display_name": m.get("display_name", ""),
+                        }
+                        for m in conv_data.get("members", [])
+                    ]
+
             try:
                 raw_result = await provider.execute_tool(tc.tool_name, tc.arguments)
 
@@ -1184,6 +1198,17 @@ class AIService(Service):
 
     # --- WebSocket RPC handlers ---
 
+    @staticmethod
+    def _filter_blocks_for_user(
+        blocks: list[dict[str, Any]], user_id: str,
+    ) -> list[dict[str, Any]]:
+        """Filter UI blocks by for_user/exclude_user targeting."""
+        return [
+            b for b in blocks
+            if (not b.get("for_user") or b.get("for_user") == user_id)
+            and b.get("exclude_user") != user_id
+        ]
+
     def get_ws_handlers(self) -> dict[str, Any]:
         return {
             "chat.message.send": self._ws_chat_send,
@@ -1278,7 +1303,7 @@ class AIService(Service):
             "ref": frame.get("id"),
             "response": response_text,
             "conversation_id": conv_id,
-            "ui_blocks": ui_blocks,
+            "ui_blocks": self._filter_blocks_for_user(ui_blocks, conn.user_id),
         }
 
     async def _ws_conversation_create(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
@@ -1377,7 +1402,7 @@ class AIService(Service):
             "ref": frame.get("id"),
             "response": response_text,
             "conversation_id": conv_id,
-            "ui_blocks": ui_blocks,
+            "ui_blocks": self._filter_blocks_for_user(ui_blocks, conn.user_id),
         }
 
     async def _ws_history_load(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
@@ -1410,11 +1435,9 @@ class AIService(Service):
                 msg["author_name"] = m.get("author_name", "")
             display_messages.append(msg)
 
-        ui_blocks = [
-            b for b in data.get("ui_blocks", [])
-            if (not b.get("for_user") or b.get("for_user") == conn.user_id)
-            and b.get("exclude_user") != conn.user_id
-        ]
+        ui_blocks = self._filter_blocks_for_user(
+            data.get("ui_blocks", []), conn.user_id,
+        )
 
         result: dict[str, Any] = {
             "type": "chat.history.load.result",
