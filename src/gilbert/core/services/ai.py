@@ -624,8 +624,11 @@ class AIService(Service):
                     "1. Ask what the skill should help with — its purpose and when it should be used.\n"
                     "2. Ask about the specific steps, workflows, or guidelines it should follow.\n"
                     "3. Ask about any gotchas, edge cases, or important constraints.\n"
-                    "4. Ask whether it should be personal (just for them) or global (for all users).\n"
-                    "5. Once you have enough information, use the `create_skill` tool to create it.\n\n"
+                    "4. Once you have enough information, use the `create_skill` tool to create it.\n\n"
+                    "Scope: By default, create skills as personal (scope='user'). Only offer "
+                    "to create a global skill if the user explicitly asks for it — the system "
+                    "will enforce permissions automatically. Do NOT ask about scope unless "
+                    "the user brings it up.\n\n"
                     "When building the SKILL.md content for `create_skill`:\n"
                     "- The frontmatter MUST include `name` (kebab-case, e.g. 'sales-outreach') "
                     "and `description` (1-2 sentences explaining what it does and when to use it).\n"
@@ -781,6 +784,7 @@ class AIService(Service):
             if user_ctx is not None:
                 tc.arguments["_user_id"] = user_ctx.user_id
                 tc.arguments["_user_name"] = user_ctx.display_name
+                tc.arguments["_user_roles"] = list(user_ctx.roles)
 
             # Inject room members if in a shared conversation
             conv_id = getattr(self, "_current_conversation_id", None)

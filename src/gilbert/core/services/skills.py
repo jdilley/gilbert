@@ -880,6 +880,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
     async def _tool_manage_skills(self, arguments: dict[str, Any]) -> str:
         action = arguments.get("action", "")
         user_id = arguments.get("_user_id", "system")
+        user_roles = arguments.get("_user_roles")
 
         if action == "list":
             entries = [
@@ -900,18 +901,21 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                 return json.dumps({"error": "url is required for install"})
 
             scope = arguments.get("scope", "")
-            if not scope:
-                return json.dumps({
-                    "needs_scope": True,
-                    "message": (
-                        "Please ask the user whether to install this skill globally "
-                        "(available to all users) or just for themselves. "
-                        "Then call this tool again with scope='global' or scope='user'."
-                    ),
-                })
+            is_admin = self._is_admin_user(user_roles)
 
-            # Non-admins can only install for themselves
-            if scope == "global" and not self._is_admin_user(user_id):
+            if not scope:
+                if is_admin:
+                    return json.dumps({
+                        "needs_scope": True,
+                        "message": (
+                            "Please ask the user whether to install this skill globally "
+                            "(available to all users) or just for themselves. "
+                            "Then call this tool again with scope='global' or scope='user'."
+                        ),
+                    })
+                scope = "user"
+
+            if scope == "global" and not is_admin:
                 scope = "user"
 
             try:
@@ -950,7 +954,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
             name = arguments.get("skill_name", "")
             if url:
                 scope = arguments.get("scope", "user")
-                if scope == "global" and not self._is_admin_user(user_id):
+                if scope == "global" and not self._is_admin_user(user_roles):
                     scope = "user"
                 try:
                     installed = await _to_thread(
@@ -992,7 +996,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
             # Ownership check
             if entry.scope == "user" and entry.owner_id != user_id:
                 return json.dumps({"error": "Cannot delete another user's skill"})
-            if entry.scope == "global" and not self._is_admin_user(user_id):
+            if entry.scope == "global" and not self._is_admin_user(user_roles):
                 return json.dumps({"error": "Only admins can delete global skills"})
             # Remove from storage
             if self._storage is not None:
@@ -1013,6 +1017,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         """Create or update an entity-stored skill."""
         skill_md = arguments.get("skill_md", "")
         user_id = arguments.get("_user_id", "system")
+        user_roles = arguments.get("_user_roles")
         scope = arguments.get("scope", "user")
 
         if not skill_md:
@@ -1033,7 +1038,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
             })
 
         # Enforce scope
-        if scope == "global" and not self._is_admin_user(user_id):
+        if scope == "global" and not self._is_admin_user(user_roles):
             scope = "user"
 
         owner_id = user_id if scope == "user" else ""
@@ -1106,23 +1111,19 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
             "scope": scope,
         })
 
-    def _is_admin_user(self, user_id: str) -> bool:
-        """Check if a user_id has admin-level access."""
+    def _is_admin_user(self, user_roles: list[str] | None) -> bool:
+        """Check if user roles include admin-level access."""
         if self._acl_svc is None:
             return True  # No ACL = no restrictions
+        if not user_roles:
+            return False
         from gilbert.core.services.access_control import AccessControlService
 
         if not isinstance(self._acl_svc, AccessControlService):
             return True
-        # Look up user level — admin is 0
-        try:
-            # We don't have the full UserContext here, but we can check
-            # if the calling context had admin role via the tool's required_role
-            # Since manage_skills was changed to required_role="user",
-            # we need to check the actual user level
-            return self._acl_svc.get_role_level("admin") >= 0
-        except Exception:
-            return False
+        admin_level = self._acl_svc.get_role_level("admin")
+        user_level = min(self._acl_svc.get_role_level(r) for r in user_roles)
+        return user_level <= admin_level
 
     async def _tool_read_skill_file(self, arguments: dict[str, Any]) -> str:
         skill_name = arguments.get("skill_name", "")
