@@ -25,3 +25,5 @@
 - [AI Context Profiles](memory-ai-context-profiles.md) — named profiles controlling tool access per AI interaction, with per-profile role overrides
 - [UI Blocks](memory-ui-blocks.md) — tools push interactive forms (inputs, selects, sliders, buttons) into chat via ToolOutput
 - [WebSocket Protocol](memory-websocket-protocol.md) — bidirectional WS with typed frames, role-filtered events, chat RPC, peer publishing
+- [Skills System](memory-skills-system.md) — Agent Skills standard support, per-conversation skill activation via SKILL.md files
+- [Web Search Service](memory-websearch-service.md) — web search AI tool with Tavily backend

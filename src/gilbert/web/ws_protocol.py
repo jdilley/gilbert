@@ -59,6 +59,9 @@ _RPC_PERMISSIONS: dict[str, int] = {
     "dashboard.get": 200,
     "documents.": 200,
     "screens.list": 200,
+    "skills.list": 200,
+    "skills.conversation.": 200,
+    "skills.workspace.": 200,
     # user (100)
     "chat.": 100,
     # admin (0)

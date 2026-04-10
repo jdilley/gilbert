@@ -1,10 +1,12 @@
+import { useState } from "react";
 import { MarkdownContent } from "@/components/ui/MarkdownContent";
-import type { ChatMessage } from "@/types/chat";
+import type { ChatMessageWithMeta, ToolUsageEntry } from "@/types/chat";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { ChevronRightIcon, WrenchIcon } from "lucide-react";
 
 interface MessageBubbleProps {
-  message: ChatMessage;
+  message: ChatMessageWithMeta;
   isShared: boolean;
   currentUserId?: string;
 }
@@ -37,6 +39,8 @@ export function MessageBubble({
   const initials = isAssistant
     ? "G"
     : (message.author_name || "You").charAt(0).toUpperCase();
+
+  const toolUsage = isAssistant ? message.tool_usage : undefined;
 
   return (
     <div
@@ -79,7 +83,49 @@ export function MessageBubble({
             <p className="whitespace-pre-wrap break-words">{displayContent}</p>
           )}
         </div>
+        {toolUsage && toolUsage.length > 0 && (
+          <ToolUsageFooter tools={toolUsage} />
+        )}
       </div>
+    </div>
+  );
+}
+
+function ToolUsageFooter({ tools }: { tools: ToolUsageEntry[] }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Deduplicate and count
+  const counts = new Map<string, number>();
+  for (const t of tools) {
+    counts.set(t.tool_name, (counts.get(t.tool_name) || 0) + 1);
+  }
+  const uniqueTools = [...counts.entries()];
+
+  return (
+    <div className="px-1">
+      <button
+        type="button"
+        className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <WrenchIcon className="size-3" />
+        <span>{tools.length} tool{tools.length !== 1 ? "s" : ""} used</span>
+        <ChevronRightIcon
+          className={cn(
+            "size-3 transition-transform",
+            expanded && "rotate-90",
+          )}
+        />
+      </button>
+      {expanded && (
+        <div className="mt-0.5 pl-4 text-[11px] text-muted-foreground space-y-px">
+          {uniqueTools.map(([name, count]) => (
+            <div key={name} className="font-mono">
+              {name}{count > 1 ? ` (x${count})` : ""}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

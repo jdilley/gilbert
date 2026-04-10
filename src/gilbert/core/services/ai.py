@@ -395,7 +395,7 @@ class AIService(Service):
         user_ctx: UserContext | None = None,
         system_prompt: str | None = None,
         ai_call: str | None = None,
-    ) -> tuple[str, str, list[dict[str, Any]]]:
+    ) -> tuple[str, str, list[dict[str, Any]], list[dict[str, Any]]]:
         """Send a user message and get an AI response (with full agentic loop).
 
         Args:
@@ -409,8 +409,9 @@ class AIService(Service):
                 requirements. When ``None``, all tools are available.
 
         Returns:
-            (response_text, conversation_id, ui_blocks) tuple.  ``ui_blocks``
-            is a list of serialized UI block dicts (possibly empty).
+            (response_text, conversation_id, ui_blocks, tool_usage) tuple.
+            ``ui_blocks`` is a list of serialized UI block dicts (possibly empty).
+            ``tool_usage`` is a list of {tool_name, is_error} dicts.
         """
         if user_ctx is None:
             user_ctx = get_current_user()
@@ -434,18 +435,40 @@ class AIService(Service):
 
         tool_defs = [defn for _, defn in tools_by_name.values()]
 
+        # Add tools from active skills (additive — only tools that already
+        # exist via ToolProviders, restoring any that the profile filtered out)
+        if self._resolver:
+            skills_svc = self._resolver.get_capability("skills")
+            if skills_svc is not None:
+                from gilbert.core.services.skills import SkillService
+
+                if isinstance(skills_svc, SkillService):
+                    active = await skills_svc.get_active_skills(conversation_id)
+                    if active:
+                        skill_tool_names = skills_svc.get_active_allowed_tools(active)
+                        if skill_tool_names:
+                            # Re-discover unfiltered tools and add missing ones
+                            all_tools = self._discover_tools(user_ctx=user_ctx)
+                            for tname in skill_tool_names:
+                                if tname not in tools_by_name and tname in all_tools:
+                                    tools_by_name[tname] = all_tools[tname]
+                            tool_defs = [defn for _, defn in tools_by_name.values()]
+
         # Resolve system prompt — always prepend current date/time
         date_ctx = self._current_datetime_context()
         if system_prompt is not None:
             effective_prompt = f"{date_ctx}\n\n{system_prompt}"
         else:
-            effective_prompt = await self._build_system_prompt(user_ctx=user_ctx)
+            effective_prompt = await self._build_system_prompt(
+                user_ctx=user_ctx, conversation_id=conversation_id,
+            )
 
         # Agentic loop
         from gilbert.interfaces.ui import UIBlock
 
         response: AIResponse | None = None
         all_ui_blocks: list[UIBlock] = []
+        tool_usage: list[dict[str, Any]] = []
 
         for round_num in range(self._max_tool_rounds):
             truncated = self._truncate_history(messages)
@@ -486,6 +509,13 @@ class AIService(Service):
             )
             all_ui_blocks.extend(round_ui_blocks)
             messages.append(Message(role=MessageRole.TOOL_RESULT, tool_results=tool_results))
+
+            # Track tool usage for the response metadata
+            for tc, tr in zip(response.message.tool_calls, tool_results):
+                tool_usage.append({
+                    "tool_name": tc.tool_name,
+                    "is_error": tr.is_error,
+                })
         else:
             logger.warning(
                 "Agentic loop hit max rounds (%d) for conversation %s",
@@ -513,7 +543,7 @@ class AIService(Service):
 
         # Return final text response
         final_text = response.message.content if response else ""
-        return final_text, conversation_id, ui_block_dicts
+        return final_text, conversation_id, ui_block_dicts, tool_usage
 
     # --- System Prompt ---
 
@@ -534,8 +564,12 @@ class AIService(Service):
             f"Yesterday was {yesterday}."
         )
 
-    async def _build_system_prompt(self, user_ctx: UserContext | None = None) -> str:
-        """Build the full system prompt: base identity, persona, and user memories."""
+    async def _build_system_prompt(
+        self,
+        user_ctx: UserContext | None = None,
+        conversation_id: str | None = None,
+    ) -> str:
+        """Build the full system prompt: base identity, persona, user memories, and active skills."""
         parts: list[str] = []
 
         # Always inject current date/time first
@@ -570,6 +604,55 @@ class AIService(Service):
                             parts.append(summaries)
                 except Exception:
                     pass  # Memory unavailable — not critical
+
+        # Inject skill system awareness and active skill instructions
+        if self._resolver:
+            skills_svc = self._resolver.get_capability("skills")
+            if skills_svc is not None:
+                parts.append(
+                    "## Skills\n"
+                    "This system supports skills — specialized instruction sets that "
+                    "users can enable or disable per conversation. Skills may appear or "
+                    "disappear between messages as the user toggles them. When skills "
+                    "are active, their instructions will appear below. Follow them when "
+                    "relevant. If a skill you were using disappears, the user disabled "
+                    "it — stop following its instructions.\n\n"
+                    "### Creating Skills\n"
+                    "Users can ask you to create custom skills. When they do, guide them "
+                    "through the process conversationally — you don't need to explain the "
+                    "SKILL.md format to them. Instead:\n"
+                    "1. Ask what the skill should help with — its purpose and when it should be used.\n"
+                    "2. Ask about the specific steps, workflows, or guidelines it should follow.\n"
+                    "3. Ask about any gotchas, edge cases, or important constraints.\n"
+                    "4. Ask whether it should be personal (just for them) or global (for all users).\n"
+                    "5. Once you have enough information, use the `create_skill` tool to create it.\n\n"
+                    "When building the SKILL.md content for `create_skill`:\n"
+                    "- The frontmatter MUST include `name` (kebab-case, e.g. 'sales-outreach') "
+                    "and `description` (1-2 sentences explaining what it does and when to use it).\n"
+                    "- Optionally include `metadata.category` and `metadata.icon` for UI grouping.\n"
+                    "- Optionally include `allowed-tools` (space-separated tool names) to declare "
+                    "which tools the skill uses — these are existing tools, NOT scripts.\n"
+                    "- The body should contain clear, actionable instructions: workflows, "
+                    "decision trees, gotchas, templates, and examples.\n"
+                    "- Entity-stored skills CANNOT execute scripts or read files from disk. "
+                    "They CAN use any AI tools available in the conversation (search, "
+                    "data lookups, web fetch, etc.).\n"
+                    "- Keep the instructions focused and under 500 lines.\n"
+                    "- After creating, let the user know they can enable it from the Skills "
+                    "panel in chat settings."
+                )
+                if conversation_id:
+                    try:
+                        from gilbert.core.services.skills import SkillService
+
+                        if isinstance(skills_svc, SkillService):
+                            skills_ctx = await skills_svc.build_skills_context(
+                                conversation_id,
+                            )
+                            if skills_ctx:
+                                parts.append(skills_ctx)
+                    except Exception:
+                        pass  # Skills unavailable — not critical
 
         return "\n\n".join(parts) if parts else ""
 
@@ -713,6 +796,13 @@ class AIService(Service):
                         for m in conv_data.get("members", [])
                     ]
 
+            await self._publish_tool_event("chat.tool.started", {
+                "conversation_id": self._current_conversation_id,
+                "tool_name": tc.tool_name,
+                "tool_call_id": tc.tool_call_id,
+                "arguments": self._sanitize_tool_args(tc.arguments),
+            })
+
             try:
                 raw_result = await provider.execute_tool(tc.tool_name, tc.arguments)
 
@@ -735,6 +825,14 @@ class AIService(Service):
                     tool_call_id=tc.tool_call_id,
                     content=result_text,
                 ))
+
+                await self._publish_tool_event("chat.tool.completed", {
+                    "conversation_id": self._current_conversation_id,
+                    "tool_name": tc.tool_name,
+                    "tool_call_id": tc.tool_call_id,
+                    "is_error": False,
+                    "result_preview": result_text[:200] if result_text else "",
+                })
             except Exception as exc:
                 logger.exception("Tool execution failed: %s", tc.tool_name)
                 results.append(ToolResult(
@@ -742,7 +840,38 @@ class AIService(Service):
                     content=f"Error executing tool: {exc}",
                     is_error=True,
                 ))
+                await self._publish_tool_event("chat.tool.completed", {
+                    "conversation_id": self._current_conversation_id,
+                    "tool_name": tc.tool_name,
+                    "tool_call_id": tc.tool_call_id,
+                    "is_error": True,
+                    "result_preview": str(exc)[:200],
+                })
         return results, ui_blocks
+
+    # --- Tool Event Publishing ---
+
+    async def _publish_tool_event(
+        self, event_type: str, data: dict[str, Any],
+    ) -> None:
+        """Publish a tool execution event for real-time UI updates."""
+        if self._resolver is None:
+            return
+        event_bus_svc = self._resolver.get_capability("event_bus")
+        if event_bus_svc is None:
+            return
+        from gilbert.core.services.event_bus import EventBusService
+        from gilbert.interfaces.events import Event
+
+        if isinstance(event_bus_svc, EventBusService):
+            await event_bus_svc.bus.publish(Event(
+                event_type=event_type, data=data, source="ai",
+            ))
+
+    @staticmethod
+    def _sanitize_tool_args(args: dict[str, Any]) -> dict[str, Any]:
+        """Remove injected internal arguments before sending to frontend."""
+        return {k: v for k, v in args.items() if not k.startswith("_")}
 
     # --- Conversation Persistence ---
 
@@ -1255,9 +1384,10 @@ class AIService(Service):
 
                 response_text = ""
                 ui_blocks: list[dict[str, Any]] = []
+                tool_usage: list[dict[str, Any]] = []
 
                 if addressed:
-                    response_text, conv_id, ui_blocks = await self.chat(
+                    response_text, conv_id, ui_blocks, tool_usage = await self.chat(
                         user_message=tagged_message,
                         conversation_id=conversation_id,
                         user_ctx=conn.user_ctx,
@@ -1288,7 +1418,7 @@ class AIService(Service):
                     })
             else:
                 # Personal chat — normal AI flow
-                response_text, conv_id, ui_blocks = await self.chat(
+                response_text, conv_id, ui_blocks, tool_usage = await self.chat(
                     user_message=message,
                     conversation_id=conversation_id,
                     user_ctx=conn.user_ctx,
@@ -1304,6 +1434,7 @@ class AIService(Service):
             "response": response_text,
             "conversation_id": conv_id,
             "ui_blocks": self._filter_blocks_for_user(ui_blocks, conn.user_id),
+            "tool_usage": tool_usage,
         }
 
     async def _ws_conversation_create(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
@@ -1372,7 +1503,7 @@ class AIService(Service):
                 from gilbert.web.chat_helpers import build_room_context
                 system_prompt = build_room_context(conv_data, conn.user_ctx)
 
-            response_text, conv_id, ui_blocks = await self.chat(
+            response_text, conv_id, ui_blocks, _tool_usage = await self.chat(
                 user_message=form_message,
                 conversation_id=conversation_id,
                 user_ctx=conn.user_ctx,

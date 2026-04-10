@@ -314,6 +314,25 @@ class Gilbert:
 
         self.service_manager.register(MemoryService())
 
+        # Web search service
+        if self.config.websearch.enabled:
+            from gilbert.core.services.websearch import WebSearchService
+
+            ws_backend = self._create_websearch_backend(self.config.websearch.backend)
+            self.service_manager.register(
+                WebSearchService(
+                    ws_backend,
+                    self.config.websearch.credential,
+                    self.config.websearch.settings,
+                )
+            )
+
+        # Skills service
+        if self.config.skills.enabled:
+            from gilbert.core.services.skills import SkillService
+
+            self.service_manager.register(SkillService(self.config.skills))
+
         # Web API service (always — dashboard, system inspector, entity browser)
         from gilbert.core.services.web_api import WebApiService
 
@@ -443,6 +462,15 @@ class Gilbert:
 
             return GmailBackend(email_address=email_address)
         raise ValueError(f"Unknown email backend: {backend_name}")
+
+    @staticmethod
+    def _create_websearch_backend(backend_name: str) -> "WebSearchBackend":
+        """Create a web search backend by name."""
+        if backend_name == "tavily":
+            from gilbert.integrations.tavily_search import TavilySearch
+
+            return TavilySearch()
+        raise ValueError(f"Unknown web search backend: {backend_name}")
 
     @staticmethod
     def _create_ai_backend(backend_name: str) -> AIBackend:

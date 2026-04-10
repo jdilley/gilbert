@@ -57,6 +57,24 @@ class PluginsConfig(BaseModel):
     config: dict[str, dict[str, Any]] = {}
 
 
+class WebSearchConfig(BaseModel):
+    """Web search configuration."""
+
+    enabled: bool = False
+    backend: str = "tavily"
+    credential: str = ""
+    settings: dict[str, Any] = {}
+
+
+class SkillsConfig(BaseModel):
+    """Skills system configuration."""
+
+    enabled: bool = True
+    directories: list[str] = ["skills"]
+    cache_dir: str = ".gilbert/skill-cache"
+    user_dir: str = ".gilbert/skills"
+
+
 class LoggingConfig(BaseModel):
     """Logging configuration."""
 
@@ -360,6 +378,8 @@ class GilbertConfig(BaseModel):
     backup: BackupConfig = BackupConfig()
     radio_dj: RadioDJConfig = RadioDJConfig()
     roast: RoastConfig = RoastConfig()
+    websearch: WebSearchConfig = WebSearchConfig()
+    skills: SkillsConfig = SkillsConfig()
 
 
 def load_config(

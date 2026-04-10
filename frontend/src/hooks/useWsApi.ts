@@ -16,6 +16,7 @@ import type { ServiceInfo } from "@/types/system";
 import type { CollectionGroup, CollectionData, EntityData } from "@/types/entities";
 import type { InboxStats, InboxMessage, MessageDetail, PendingReply } from "@/types/inbox";
 import type { UIBlock } from "@/types/ui";
+import type { SkillInfo } from "@/types/skills";
 
 export function useWsApi() {
   const { rpc } = useWebSocket();
@@ -227,6 +228,37 @@ export function useWsApi() {
 
     listScreens: () =>
       rpc<{ screens: { name: string; key: string; connected_at: string }[] }>({ type: "screens.list" }),
+
+    // ── Skills ────────────────────────────────────────────────────
+
+    listSkills: () =>
+      rpc<{ skills: SkillInfo[] }>({ type: "skills.list" })
+        .then((r) => r.skills),
+
+    getConversationSkills: (conversationId: string) =>
+      rpc<{ active_skills: string[] }>({ type: "skills.conversation.active", conversation_id: conversationId })
+        .then((r) => r.active_skills),
+
+    toggleConversationSkill: (conversationId: string, skill: string, enabled: boolean) =>
+      rpc<{ skill: string; enabled: boolean; active_skills: string[] }>({
+        type: "skills.conversation.toggle",
+        conversation_id: conversationId,
+        skill,
+        enabled,
+      }),
+
+    browseSkillWorkspace: (skillName: string) =>
+      rpc<{ skill_name: string; files: { path: string; size: number; modified: string }[] }>({
+        type: "skills.workspace.browse",
+        skill_name: skillName,
+      }),
+
+    downloadSkillWorkspaceFile: (skillName: string, path: string) =>
+      rpc<{ filename: string; size: number; content_base64: string }>({
+        type: "skills.workspace.download",
+        skill_name: skillName,
+        path,
+      }),
 
   }), [rpc]);
 }

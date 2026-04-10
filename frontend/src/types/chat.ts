@@ -39,8 +39,18 @@ export interface ConversationDetail {
   owner_id?: string;
 }
 
+export interface ToolUsageEntry {
+  tool_name: string;
+  is_error: boolean;
+}
+
 export interface ChatResponse {
   response: string;
   conversation_id: string;
   ui_blocks: UIBlock[];
+  tool_usage?: ToolUsageEntry[];
+}
+
+export interface ChatMessageWithMeta extends ChatMessage {
+  tool_usage?: ToolUsageEntry[];
 }

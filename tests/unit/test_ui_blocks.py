@@ -130,9 +130,13 @@ class TestToolOutputInAgenticLoop:
         """Minimal mock of AIService with _execute_tool_calls accessible."""
         from gilbert.core.services.ai import AIService
         svc = MagicMock(spec=AIService)
-        # Use the real method
+        # Use the real methods
         svc._execute_tool_calls = AIService._execute_tool_calls.__get__(svc, AIService)
+        svc._publish_tool_event = AIService._publish_tool_event.__get__(svc, AIService)
+        svc._sanitize_tool_args = AIService._sanitize_tool_args
         svc._acl_svc = None
+        svc._resolver = None
+        svc._current_conversation_id = None
         return svc
 
     async def test_plain_string_result(self, ai_service: MagicMock) -> None:

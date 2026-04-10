@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
 import { MessageBubble } from "./MessageBubble";
-import type { ChatMessage } from "@/types/chat";
+import type { ChatMessageWithMeta } from "@/types/chat";
 import type { UIBlock } from "@/types/ui";
 import { UIBlockRenderer } from "@/components/ui/UIBlockRenderer";
 
 interface MessageListProps {
-  messages: ChatMessage[];
+  messages: ChatMessageWithMeta[];
   uiBlocks: UIBlock[];
   isShared: boolean;
   currentUserId?: string;

@@ -4,13 +4,15 @@ import { useAuth } from "@/hooks/useAuth";
 import { useEventBus } from "@/hooks/useEventBus";
 import { useWsApi } from "@/hooks/useWsApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import type { ChatMessage } from "@/types/chat";
+import type { ChatMessageWithMeta } from "@/types/chat";
 import type { UIBlock } from "@/types/ui";
 import { ChatSidebarContent } from "./ChatSidebar";
 import { MessageList } from "./MessageList";
 import { ChatInput } from "./ChatInput";
 import { MemberPanelContent } from "./MemberPanel";
 import { InviteModal } from "./InviteModal";
+import { SkillsModal } from "./SkillsModal";
+import { ThinkingPanel } from "./ThinkingPanel";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +32,7 @@ import {
   MenuIcon,
   MessageSquareIcon,
   PlusIcon,
+  SparklesIcon,
   UserPlusIcon,
   UsersRoundIcon,
 } from "lucide-react";
@@ -42,7 +45,7 @@ export function ChatPage() {
   const api = useWsApi();
   const { connected } = useWebSocket();
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessageWithMeta[]>([]);
   const [uiBlocks, setUiBlocks] = useState<UIBlock[]>([]);
   const [sending, setSending] = useState(false);
   const [loadingConv, setLoadingConv] = useState(false);
@@ -62,6 +65,7 @@ export function ChatPage() {
     onSubmit: (value: string) => void;
   } | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [skillsOpen, setSkillsOpen] = useState(false);
   const [allUsers, setAllUsers] = useState<{ user_id: string; display_name: string }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [pendingInvites, setPendingInvites] = useState<{ user_id: string; display_name: string }[]>([]);
@@ -116,7 +120,11 @@ export function ChatPage() {
         if (resp.response) {
           setMessages((prev) => [
             ...prev,
-            { role: "assistant", content: resp.response },
+            {
+              role: "assistant",
+              content: resp.response,
+              tool_usage: resp.tool_usage,
+            },
           ]);
         }
 
@@ -527,6 +535,21 @@ export function ChatPage() {
                   <Button
                     variant="ghost"
                     size="icon-sm"
+                    onClick={() => setSkillsOpen(true)}
+                  />
+                }
+              >
+                <SparklesIcon className="size-4" />
+              </TooltipTrigger>
+              <TooltipContent>Skills</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={handleNewChat}
                   />
                 }
@@ -588,11 +611,11 @@ export function ChatPage() {
           />
         )}
 
-        {/* Thinking indicator */}
+        {/* Thinking indicator with real-time tool visibility */}
         {sending && (
           <div className="shrink-0 px-4 pb-2">
             <div className="max-w-3xl mx-auto">
-              <LoadingSpinner text="Thinking..." />
+              <ThinkingPanel conversationId={activeConvId} />
             </div>
           </div>
         )}
@@ -657,6 +680,12 @@ export function ChatPage() {
         loading={loadingUsers}
         onInvite={handleInviteUsers}
         onCancel={() => setInviteOpen(false)}
+      />
+
+      <SkillsModal
+        open={skillsOpen}
+        conversationId={activeConvId}
+        onClose={() => setSkillsOpen(false)}
       />
 
       <Dialog

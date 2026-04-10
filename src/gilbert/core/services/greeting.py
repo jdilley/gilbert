@@ -302,7 +302,7 @@ class GreetingService(Service):
         try:
             from gilbert.interfaces.auth import UserContext
 
-            response, _, _ui = await ai_svc.chat(
+            response, _, _ui, _tu = await ai_svc.chat(
                 prompt,
                 user_ctx=UserContext.SYSTEM,
                 ai_call="greeting",
@@ -351,7 +351,7 @@ class GreetingService(Service):
         try:
             from gilbert.interfaces.auth import UserContext
 
-            response, _, _ui = await ai_svc.chat(
+            response, _, _ui, _tu = await ai_svc.chat(
                 prompt,
                 user_ctx=UserContext.SYSTEM,
                 ai_call="greeting",
