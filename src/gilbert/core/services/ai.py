@@ -605,6 +605,21 @@ class AIService(Service):
                 except Exception:
                     pass  # Memory unavailable — not critical
 
+            # Inject tool memory summaries if available
+            tool_memory_svc = self._resolver.get_capability("tool_memory")
+            if tool_memory_svc is not None:
+                try:
+                    from gilbert.core.services.tool_memory import ToolMemoryService
+
+                    if isinstance(tool_memory_svc, ToolMemoryService):
+                        summaries = await tool_memory_svc.get_user_summaries(
+                            user_ctx.user_id,
+                        )
+                        if summaries:
+                            parts.append(summaries)
+                except Exception:
+                    pass  # Tool memory unavailable — not critical
+
         # Inject skill system awareness and active skill instructions
         if self._resolver:
             skills_svc = self._resolver.get_capability("skills")

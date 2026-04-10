@@ -314,6 +314,11 @@ class Gilbert:
 
         self.service_manager.register(MemoryService())
 
+        # Tool memory service (per-user key-value store for tools/skills)
+        from gilbert.core.services.tool_memory import ToolMemoryService
+
+        self.service_manager.register(ToolMemoryService())
+
         # Web search service
         if self.config.websearch.enabled:
             from gilbert.core.services.websearch import WebSearchService
