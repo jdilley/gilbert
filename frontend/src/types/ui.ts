@@ -38,4 +38,5 @@ export interface UIBlock {
   exclude_user?: string;
   submitted?: boolean;
   submission?: Record<string, unknown>;
+  response_index?: number;
 }
