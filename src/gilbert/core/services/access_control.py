@@ -841,6 +841,7 @@ class AccessControlService(Service):
         for u in users:
             result.append({
                 "user_id": u.get("user_id", u.get("_id", "")),
+                "username": u.get("username", ""),
                 "email": u.get("email", ""),
                 "display_name": u.get("display_name", ""),
                 "roles": u.get("roles", []),

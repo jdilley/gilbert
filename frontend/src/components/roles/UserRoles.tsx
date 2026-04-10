@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
-import { PlusIcon, Trash2Icon, XIcon } from "lucide-react";
+import { KeyRoundIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 
 export function UserRoles() {
   const queryClient = useQueryClient();
@@ -31,6 +31,11 @@ export function UserRoles() {
     mutationFn: (userId: string) => api.deleteUser(userId),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["user-roles"] }),
+  });
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: ({ userId, password }: { userId: string; password: string }) =>
+      api.resetUserPassword(userId, password),
   });
 
   function toggle(userId: string, currentRoles: string[], role: string) {
@@ -68,6 +73,7 @@ export function UserRoles() {
             <thead>
               <tr className="border-b">
                 <th className="px-3 py-2 text-left font-medium">User</th>
+                <th className="px-3 py-2 text-left font-medium">Username</th>
                 <th className="px-3 py-2 text-left font-medium">Email</th>
                 {data?.role_names.map((r) => (
                   <th key={r} className="px-3 py-2 text-center font-medium">
@@ -81,6 +87,7 @@ export function UserRoles() {
               {data?.users.map((u) => (
                 <tr key={u.user_id} className="border-b">
                   <td className="px-3 py-2">{u.display_name}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{u.username}</td>
                   <td className="px-3 py-2 text-muted-foreground">{u.email}</td>
                   {data.role_names.map((r) => (
                     <td key={r} className="px-3 py-2 text-center">
@@ -92,7 +99,18 @@ export function UserRoles() {
                       />
                     </td>
                   ))}
-                  <td className="px-3 py-2 text-center">
+                  <td className="px-3 py-2 text-center flex gap-1 justify-center">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        const pw = prompt(`New password for "${u.display_name || u.user_id}":`);
+                        if (pw) resetPasswordMutation.mutate({ userId: u.user_id, password: pw });
+                      }}
+                    >
+                      <KeyRoundIcon className="h-4 w-4" />
+                    </Button>
                     {u.user_id !== "root" && (
                       <Button
                         variant="ghost"
