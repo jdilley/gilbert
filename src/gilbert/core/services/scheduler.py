@@ -70,16 +70,16 @@ class SchedulerService(Service):
     async def start(self, resolver: ServiceResolver) -> None:
         storage_svc = resolver.get_capability("entity_storage")
         if storage_svc is not None:
-            from gilbert.core.services.storage import StorageService
+            from gilbert.interfaces.storage import StorageProvider
 
-            if isinstance(storage_svc, StorageService):
+            if isinstance(storage_svc, StorageProvider):
                 self._storage = storage_svc.backend
 
         event_bus_svc = resolver.get_capability("event_bus")
         if event_bus_svc is not None:
-            from gilbert.core.services.event_bus import EventBusService
+            from gilbert.interfaces.events import EventBusProvider
 
-            if isinstance(event_bus_svc, EventBusService):
+            if isinstance(event_bus_svc, EventBusProvider):
                 self._event_bus = event_bus_svc.bus
 
         logger.info("Scheduler service started")

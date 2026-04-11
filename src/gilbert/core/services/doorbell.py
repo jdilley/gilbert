@@ -11,8 +11,8 @@ from typing import Any
 
 from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.doorbell import DoorbellBackend
-from gilbert.interfaces.events import Event, EventBus
-from gilbert.interfaces.scheduler import Schedule
+from gilbert.interfaces.events import Event, EventBus, EventBusProvider
+from gilbert.interfaces.scheduler import Schedule, SchedulerProvider
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.tools import ToolParameterType
 
@@ -56,22 +56,20 @@ class DoorbellService(Service):
         )
 
     async def start(self, resolver: ServiceResolver) -> None:
-        from gilbert.core.services.event_bus import EventBusService
-
         self._resolver = resolver
 
         # Event bus (required)
         event_bus_svc = resolver.require_capability("event_bus")
-        if isinstance(event_bus_svc, EventBusService):
+        if isinstance(event_bus_svc, EventBusProvider):
             self._event_bus = event_bus_svc.bus
 
         # Config
         full_section: dict[str, Any] = {}
         config_svc = resolver.get_capability("configuration")
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 full_section = config_svc.get_section("doorbell")
                 self._apply_config(full_section)
 
@@ -110,10 +108,8 @@ class DoorbellService(Service):
         self._last_ring_ts = time.time() * 1000
 
         # Register with scheduler
-        from gilbert.core.services.scheduler import SchedulerService
-
         scheduler = resolver.require_capability("scheduler")
-        if isinstance(scheduler, SchedulerService):
+        if isinstance(scheduler, SchedulerProvider):
             scheduler.add_job(
                 name="doorbell-poll",
                 schedule=Schedule.every(self._poll_interval),

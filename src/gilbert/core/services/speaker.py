@@ -73,9 +73,9 @@ class SpeakerService(Service):
         section: dict[str, Any] = {}
         config_svc = resolver.get_capability("configuration")
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section(self.config_namespace)
                 global_ttl = config_svc.get("output_ttl_seconds")
                 if global_ttl is not None:
@@ -133,11 +133,11 @@ class SpeakerService(Service):
 
     def _get_storage_backend(self) -> Any:
         """Get the storage backend from the storage service."""
-        from gilbert.core.services.storage import StorageService
+        from gilbert.interfaces.storage import StorageProvider
 
-        if isinstance(self._storage_svc, StorageService):
+        if isinstance(self._storage_svc, StorageProvider):
             return self._storage_svc.backend
-        raise TypeError("Expected StorageService for entity_storage")
+        raise TypeError("Expected StorageProvider for entity_storage")
 
     def _apply_config(self, section: dict[str, Any]) -> None:
         """Apply tunable config values."""

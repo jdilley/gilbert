@@ -1,9 +1,11 @@
 """Storage interface — generic entity store with queryability."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 
 class FilterOp(StrEnum):
@@ -164,6 +166,29 @@ class StorageBackend(ABC):
     @abstractmethod
     async def list_foreign_keys(self, collection: str) -> list[ForeignKeyDefinition]:
         """List foreign key constraints involving a collection."""
+        ...
+
+
+@runtime_checkable
+class StorageProvider(Protocol):
+    """Protocol for accessing entity storage from a service.
+
+    Services resolve this via ``get_capability("entity_storage")`` to
+    access storage without depending on the concrete StorageService.
+    """
+
+    @property
+    def backend(self) -> StorageBackend:
+        """The default namespaced backend."""
+        ...
+
+    @property
+    def raw_backend(self) -> StorageBackend:
+        """The raw backend with no namespace prefix."""
+        ...
+
+    def create_namespaced(self, namespace: str) -> NamespacedStorageBackend:
+        """Create a backend scoped to a custom namespace."""
         ...
 
 

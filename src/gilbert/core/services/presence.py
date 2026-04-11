@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from gilbert.interfaces.configuration import ConfigParam
-from gilbert.interfaces.events import Event, EventBus
+from gilbert.interfaces.events import Event, EventBus, EventBusProvider
 from gilbert.interfaces.presence import (
     PresenceBackend,
     PresenceState,
@@ -69,18 +69,16 @@ class PresenceService(Service):
         # Event bus for publishing presence changes
         event_bus_svc = resolver.get_capability("event_bus")
         if event_bus_svc is not None:
-            from gilbert.core.services.event_bus import EventBusService
-
-            if isinstance(event_bus_svc, EventBusService):
+            if isinstance(event_bus_svc, EventBusProvider):
                 self._event_bus = event_bus_svc.bus
 
         # Config
         full_section: dict[str, Any] = {}
         config_svc = resolver.get_capability("configuration")
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 full_section = config_svc.get_section("presence")
                 self._apply_config(full_section)
 
@@ -93,17 +91,17 @@ class PresenceService(Service):
         # Storage for persisting presence state
         storage_svc = resolver.get_capability("entity_storage")
         if storage_svc is not None:
-            from gilbert.core.services.storage import StorageService
+            from gilbert.interfaces.storage import StorageProvider
 
-            if isinstance(storage_svc, StorageService):
+            if isinstance(storage_svc, StorageProvider):
                 self._storage = storage_svc.backend
 
         # Create backend from registry
         backend_name = full_section.get("backend", "unifi")
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section("presence")
                 backend_name = section.get("backend", "unifi")
         self._backend_name = backend_name
@@ -137,10 +135,9 @@ class PresenceService(Service):
         # Register polling with scheduler
         scheduler = resolver.get_capability("scheduler")
         if scheduler is not None:
-            from gilbert.core.services.scheduler import SchedulerService
-            from gilbert.interfaces.scheduler import Schedule
+            from gilbert.interfaces.scheduler import Schedule, SchedulerProvider
 
-            if isinstance(scheduler, SchedulerService):
+            if isinstance(scheduler, SchedulerProvider):
                 scheduler.add_job(
                     name="presence-poll",
                     schedule=Schedule.every(self._poll_interval),

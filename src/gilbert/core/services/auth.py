@@ -61,32 +61,44 @@ class AuthService(Service):
         google_oauth_config: dict[str, Any] = {}
         config_svc = resolver.get_capability("configuration")
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section("auth")
                 google_oauth_config = section.get("google_oauth", {})
                 if not isinstance(google_oauth_config, dict):
                     google_oauth_config = {}
 
-        # Local auth backend — always enabled
-        from gilbert.integrations.local_auth import LocalAuthBackend
+        # Register known auth backends (side-effect imports for __init_subclass__)
+        try:
+            import gilbert.integrations.local_auth  # noqa: F401
+        except ImportError:
+            pass
+        try:
+            import gilbert.integrations.google_auth  # noqa: F401
+        except ImportError:
+            pass
 
-        local = LocalAuthBackend()
-        await local.initialize({})
-        local.set_user_backend(self._user_service.backend)
-        self._backends["local"] = local
+        backends = AuthBackend.registered_backends()
+
+        # Local auth backend — always enabled
+        local_cls = backends.get("local")
+        if local_cls:
+            local = local_cls()
+            await local.initialize({})
+            local.set_user_backend(self._user_service.backend)
+            self._backends["local"] = local
 
         # Google OAuth backend — if enabled and configured
         if google_oauth_config.get("enabled") and google_oauth_config.get("client_id"):
-            from gilbert.integrations.google_auth import GoogleAuthBackend
-
-            google = GoogleAuthBackend()
-            await google.initialize(google_oauth_config)
-            tunnel = resolver.get_capability("tunnel")
-            if tunnel:
-                google.set_tunnel(tunnel)
-            self._backends["google"] = google
+            google_cls = backends.get("google")
+            if google_cls:
+                google = google_cls()
+                await google.initialize(google_oauth_config)
+                tunnel = resolver.get_capability("tunnel")
+                if tunnel:
+                    google.set_tunnel(tunnel)
+                self._backends["google"] = google
 
         logger.info(
             "Auth service started — %d backend(s): %s",

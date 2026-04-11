@@ -26,6 +26,52 @@ class DocumentType(StrEnum):
     UNKNOWN = "unknown"
 
 
+# Canonical mapping of file extensions to document types.
+# Shared by all document backends (local, gdrive, etc.).
+EXT_TO_DOCUMENT_TYPE: dict[str, DocumentType] = {
+    ".txt": DocumentType.TEXT,
+    ".md": DocumentType.MARKDOWN,
+    ".csv": DocumentType.CSV,
+    ".json": DocumentType.JSON,
+    ".yaml": DocumentType.YAML,
+    ".yml": DocumentType.YAML,
+    ".pdf": DocumentType.PDF,
+    ".docx": DocumentType.WORD,
+    ".doc": DocumentType.WORD,
+    ".xlsx": DocumentType.EXCEL,
+    ".xls": DocumentType.EXCEL,
+    ".pptx": DocumentType.POWERPOINT,
+    ".ppt": DocumentType.POWERPOINT,
+    # Images
+    ".png": DocumentType.IMAGE,
+    ".jpg": DocumentType.IMAGE,
+    ".jpeg": DocumentType.IMAGE,
+    ".gif": DocumentType.IMAGE,
+    ".webp": DocumentType.IMAGE,
+    ".svg": DocumentType.IMAGE,
+    ".bmp": DocumentType.IMAGE,
+    ".tiff": DocumentType.IMAGE,
+    ".tif": DocumentType.IMAGE,
+    ".ico": DocumentType.IMAGE,
+    # Video
+    ".mp4": DocumentType.VIDEO,
+    ".avi": DocumentType.VIDEO,
+    ".mov": DocumentType.VIDEO,
+    ".mkv": DocumentType.VIDEO,
+    ".webm": DocumentType.VIDEO,
+    ".wmv": DocumentType.VIDEO,
+    ".flv": DocumentType.VIDEO,
+    # Audio
+    ".mp3": DocumentType.AUDIO,
+    ".wav": DocumentType.AUDIO,
+    ".ogg": DocumentType.AUDIO,
+    ".flac": DocumentType.AUDIO,
+    ".aac": DocumentType.AUDIO,
+    ".m4a": DocumentType.AUDIO,
+    ".wma": DocumentType.AUDIO,
+}
+
+
 @dataclass(frozen=True)
 class DocumentMeta:
     """Metadata for a document in a backend."""

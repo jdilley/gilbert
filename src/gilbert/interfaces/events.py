@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -35,4 +35,18 @@ class EventBus(ABC):
     @abstractmethod
     def subscribe_pattern(self, pattern: str, handler: EventHandler) -> Callable[[], None]:
         """Subscribe with a glob pattern (e.g., 'device.*'). Returns an unsubscribe callable."""
+        ...
+
+
+@runtime_checkable
+class EventBusProvider(Protocol):
+    """Protocol for accessing the event bus from a service.
+
+    Services resolve this via ``get_capability("event_bus")`` to publish
+    or subscribe to events without depending on the concrete EventBusService.
+    """
+
+    @property
+    def bus(self) -> EventBus:
+        """The underlying event bus instance."""
         ...

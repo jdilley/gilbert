@@ -5,6 +5,7 @@ Self-contained — reads OAuth client credentials from auth config.
 """
 
 import logging
+import urllib.parse
 from typing import Any
 
 from gilbert.interfaces.auth import (
@@ -84,6 +85,20 @@ class GoogleAuthBackend(AuthBackend):
             return self._tunnel.public_url_for("/auth/login/google/callback")
         base = request_base_url.rstrip("/") if request_base_url else ""
         return f"{base}/auth/login/google/callback"
+
+    def get_authorization_url(self, redirect_uri: str, state: str) -> str:
+        """Build the full Google OAuth authorization URL."""
+        params = urllib.parse.urlencode({
+            "client_id": self._oauth_client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": "openid email profile",
+            "access_type": "offline",
+            "prompt": "select_account",
+            "state": state,
+            **({"hd": self._domain} if self._domain else {}),
+        })
+        return f"https://accounts.google.com/o/oauth2/v2/auth?{params}"
 
     async def authenticate(self, credentials: dict[str, Any]) -> AuthInfo | None:
         id_token_str = credentials.get("id_token", "")

@@ -136,9 +136,9 @@ class ScreenService(Service):
         # Check enabled
         config_svc = resolver.get_capability("configuration")
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section(self.config_namespace)
                 if not section.get("enabled", False):
                     logger.info("Screen service disabled")
@@ -149,9 +149,9 @@ class ScreenService(Service):
 
         # Load config
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section(self.config_namespace)
                 self._ttl = int(section.get("tmp_ttl_seconds", 1800))
                 self._cleanup_interval = int(section.get("cleanup_interval_seconds", 300))

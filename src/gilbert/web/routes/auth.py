@@ -84,20 +84,8 @@ async def google_oauth_start(request: Request) -> Any:
     local_origin = str(request.base_url).rstrip("/")
     state = base64.urlsafe_b64encode(local_origin.encode()).decode()
 
-    params = urllib.parse.urlencode({
-        "client_id": provider.oauth_client_id,
-        "redirect_uri": redirect_uri,
-        "response_type": "code",
-        "scope": "openid email profile",
-        "access_type": "offline",
-        "prompt": "select_account",
-        "state": state,
-        **({"hd": provider.domain} if provider.domain else {}),
-    })
-
-    return RedirectResponse(
-        url=f"https://accounts.google.com/o/oauth2/v2/auth?{params}"
-    )
+    url = provider.get_authorization_url(redirect_uri, state)
+    return RedirectResponse(url=url)
 
 
 @router.get("/login/google/callback")

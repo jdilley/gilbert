@@ -22,7 +22,7 @@ from gilbert.interfaces.ai import (
     MessageRole,
     StopReason,
 )
-from gilbert.interfaces.auth import UserContext
+from gilbert.interfaces.auth import AccessControlProvider, UserContext
 from gilbert.interfaces.configuration import ConfigParam
 
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
@@ -469,15 +469,15 @@ class AIService(Service):
         return self._backend
 
     async def start(self, resolver: ServiceResolver) -> None:
-        from gilbert.core.services.storage import StorageService
+        from gilbert.interfaces.storage import StorageProvider
 
         # Load tunable config from ConfigurationService if available
         config_svc = resolver.get_capability("configuration")
         section: dict[str, Any] = {}
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section("ai")
                 self._apply_config(section)
 
@@ -508,8 +508,8 @@ class AIService(Service):
 
         # Resolve storage
         storage_svc = resolver.require_capability("entity_storage")
-        if not isinstance(storage_svc, StorageService):
-            raise TypeError("Expected StorageService for 'entity_storage' capability")
+        if not isinstance(storage_svc, StorageProvider):
+            raise TypeError("Expected StorageProvider for 'entity_storage' capability")
         self._storage = storage_svc.backend
 
         # Initialize internal helpers
@@ -530,9 +530,9 @@ class AIService(Service):
 
         # Load memory enabled setting
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 memory_section = config_svc.get_section("memory")
                 self._memory_enabled = memory_section.get("enabled", True)
 
@@ -1086,9 +1086,7 @@ class AIService(Service):
 
         # Apply RBAC permissions (with optional profile role overrides)
         if user_ctx is not None and self._acl_svc is not None:
-            from gilbert.core.services.access_control import AccessControlService
-
-            if isinstance(self._acl_svc, AccessControlService):
+            if isinstance(self._acl_svc, AccessControlProvider):
                 tool_roles = profile.tool_roles if profile else {}
                 before = len(tools_by_name)
                 filtered: dict[str, tuple[ToolProvider, ToolDefinition]] = {}
@@ -1140,9 +1138,7 @@ class AIService(Service):
             # Defense in depth: re-check permission before execution.
             # Uses profile tool_roles overrides for consistency with _discover_tools.
             if user_ctx is not None and user_ctx.user_id != "system" and self._acl_svc is not None:
-                from gilbert.core.services.access_control import AccessControlService
-
-                if isinstance(self._acl_svc, AccessControlService):
+                if isinstance(self._acl_svc, AccessControlProvider):
                     effective_role = tool_roles.get(tc.tool_name, tool_def.required_role)
                     role_level = self._acl_svc.get_role_level(effective_role)
                     user_level = self._acl_svc.get_effective_level(user_ctx)
@@ -1238,10 +1234,9 @@ class AIService(Service):
         event_bus_svc = self._resolver.get_capability("event_bus")
         if event_bus_svc is None:
             return
-        from gilbert.core.services.event_bus import EventBusService
-        from gilbert.interfaces.events import Event
+        from gilbert.interfaces.events import Event, EventBusProvider
 
-        if isinstance(event_bus_svc, EventBusService):
+        if isinstance(event_bus_svc, EventBusProvider):
             await event_bus_svc.bus.publish(Event(
                 event_type=event_type, data=data, source="ai",
             ))
@@ -1850,10 +1845,9 @@ class AIService(Service):
         if self._resolver:
             event_bus_svc = self._resolver.get_capability("event_bus")
             if event_bus_svc is not None:
-                from gilbert.core.services.event_bus import EventBusService
-                from gilbert.interfaces.events import Event
+                from gilbert.interfaces.events import Event, EventBusProvider
 
-                if isinstance(event_bus_svc, EventBusService):
+                if isinstance(event_bus_svc, EventBusProvider):
                     await event_bus_svc.bus.publish(Event(
                         event_type="chat.conversation.renamed",
                         data={
@@ -1937,7 +1931,7 @@ class AIService(Service):
 
         try:
             if is_shared:
-                from gilbert.web.chat_helpers import mentions_gilbert, build_room_context, publish_event
+                from gilbert.core.chat import mentions_gilbert, build_room_context, publish_event
 
                 addressed = mentions_gilbert(message)
                 tagged_message = f"[{conn.user_ctx.display_name}]: {message}"
@@ -2060,7 +2054,7 @@ class AIService(Service):
         try:
             system_prompt = None
             if is_shared and conv_data:
-                from gilbert.web.chat_helpers import build_room_context
+                from gilbert.core.chat import build_room_context
                 system_prompt = build_room_context(conv_data, conn.user_ctx)
 
             response_text, conv_id, ui_blocks, _tool_usage = await self.chat(
@@ -2076,7 +2070,7 @@ class AIService(Service):
 
         # Broadcast to room members in shared rooms
         if is_shared:
-            from gilbert.web.chat_helpers import publish_event
+            from gilbert.core.chat import publish_event
             gilbert = conn.manager._gilbert
             if gilbert:
                 await publish_event(gilbert, "chat.message.created", {
@@ -2151,7 +2145,7 @@ class AIService(Service):
         return result
 
     async def _ws_conversation_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.web.chat_helpers import conv_summary
+        from gilbert.core.chat import conv_summary
         from gilbert.web.ws_protocol import WsConnection
         conn: WsConnection = conn
 
@@ -2164,7 +2158,7 @@ class AIService(Service):
         return {"type": "chat.conversation.list.result", "ref": frame.get("id"), "conversations": conversations}
 
     async def _ws_conversation_rename(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.web.chat_helpers import check_conversation_access, publish_event
+        from gilbert.core.chat import check_conversation_access, publish_event
         from gilbert.web.ws_protocol import WsConnection
         conn: WsConnection = conn
 
@@ -2217,7 +2211,7 @@ class AIService(Service):
         return {"type": "chat.conversation.delete.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_room_create(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.web.chat_helpers import publish_event
+        from gilbert.core.chat import publish_event
         from gilbert.web.ws_protocol import WsConnection
         conn: WsConnection = conn
 
@@ -2261,7 +2255,7 @@ class AIService(Service):
         }
 
     async def _ws_room_join(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.web.chat_helpers import publish_event
+        from gilbert.core.chat import publish_event
         from gilbert.web.ws_protocol import WsConnection
         conn: WsConnection = conn
 
@@ -2295,7 +2289,7 @@ class AIService(Service):
         return {"type": "chat.room.join.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_room_leave(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.web.chat_helpers import publish_event
+        from gilbert.core.chat import publish_event
         from gilbert.web.ws_protocol import WsConnection
         conn: WsConnection = conn
 
@@ -2328,7 +2322,7 @@ class AIService(Service):
         return {"type": "chat.room.leave.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_room_kick(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.web.chat_helpers import publish_event
+        from gilbert.core.chat import publish_event
         from gilbert.web.ws_protocol import WsConnection
         conn: WsConnection = conn
 
@@ -2357,7 +2351,7 @@ class AIService(Service):
         return {"type": "chat.room.kick.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_room_invite(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.web.chat_helpers import publish_event
+        from gilbert.core.chat import publish_event
         from gilbert.web.ws_protocol import WsConnection
         conn: WsConnection = conn
 
@@ -2453,7 +2447,7 @@ class AIService(Service):
         }
 
     async def _ws_room_invite_respond(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.web.chat_helpers import publish_event
+        from gilbert.core.chat import publish_event
         from gilbert.web.ws_protocol import WsConnection
         conn: WsConnection = conn
 

@@ -25,13 +25,24 @@ class FakeScheduler(SchedulerService):
 
 
 class FakeConfigService:
-    """Returns config sections."""
+    """Returns config sections — satisfies ConfigurationReader protocol."""
 
     def __init__(self, sections: dict[str, dict[str, Any]] | None = None) -> None:
         self._sections = sections or {}
 
+    def get(self, path: str) -> Any:
+        parts = path.split(".", 1)
+        section = self._sections.get(parts[0], {})
+        return section.get(parts[1], None) if len(parts) > 1 else section
+
     def get_section(self, name: str) -> dict[str, Any]:
         return self._sections.get(name, {})
+
+    def get_section_safe(self, name: str) -> dict[str, Any]:
+        return self._sections.get(name, {})
+
+    async def set(self, path: str, value: Any) -> dict[str, Any]:
+        return {}
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
@@ -96,26 +107,17 @@ class TestBackupStart:
     async def test_reads_config(
         self, backup_service: BackupService, scheduler: FakeScheduler
     ) -> None:
-        from gilbert.core.services.configuration import ConfigurationService
-
         config_svc = FakeConfigService({"backup": {
             "enabled": True,
             "retention_days": 7,
             "backup_hour": 5,
             "backup_minute": 30,
         }})
-        # Patch isinstance check
         resolver = FakeResolver()
         resolver.caps["scheduler"] = scheduler
         resolver.caps["configuration"] = config_svc
 
-        with patch(
-            "gilbert.core.services.backup.isinstance",
-            side_effect=lambda obj, cls: (
-                True if cls is ConfigurationService else type.__instancecheck__(cls, obj)
-            ),
-        ):
-            await backup_service.start(resolver)
+        await backup_service.start(resolver)
 
         assert backup_service._retention_days == 7
         assert backup_service._backup_hour == 5

@@ -128,8 +128,7 @@ def require_role(role: str) -> Any:
     Uses AccessControlService if available, otherwise falls back to a
     hardcoded built-in hierarchy.
     """
-    # Fallback hierarchy when AccessControlService is unavailable
-    _BUILTIN_LEVELS = {"admin": 0, "user": 100, "everyone": 200}
+    from gilbert.interfaces.acl import BUILTIN_ROLE_LEVELS as _BUILTIN_LEVELS
 
     async def _check(
         request: Request,

@@ -67,11 +67,11 @@ class AccessControlService(Service):
         )
 
     async def start(self, resolver: ServiceResolver) -> None:
-        from gilbert.core.services.storage import StorageService
+        from gilbert.interfaces.storage import StorageProvider
 
         storage_svc = resolver.require_capability("entity_storage")
-        if not isinstance(storage_svc, StorageService):
-            raise TypeError("Expected StorageService for entity_storage")
+        if not isinstance(storage_svc, StorageProvider):
+            raise TypeError("Expected StorageProvider for entity_storage")
         self._storage = storage_svc.backend
 
         # Seed built-in roles (idempotent)
@@ -326,7 +326,7 @@ class AccessControlService(Service):
         Checks overrides first, then falls back to the built-in defaults
         in ``ws_protocol``. Longest prefix match wins.
         """
-        from gilbert.web.ws_protocol import _EVENT_VISIBILITY, _DEFAULT_VISIBILITY_LEVEL
+        from gilbert.interfaces.acl import DEFAULT_EVENT_VISIBILITY as _EVENT_VISIBILITY, DEFAULT_VISIBILITY_LEVEL as _DEFAULT_VISIBILITY_LEVEL
 
         # Check overrides (longest prefix match)
         best = ""
@@ -369,7 +369,7 @@ class AccessControlService(Service):
 
     async def list_event_visibility(self) -> list[dict[str, Any]]:
         """List all event visibility rules (defaults + overrides)."""
-        from gilbert.web.ws_protocol import _EVENT_VISIBILITY
+        from gilbert.interfaces.acl import DEFAULT_EVENT_VISIBILITY as _EVENT_VISIBILITY
 
         # Start with defaults
         rules: dict[str, dict[str, Any]] = {}
@@ -408,7 +408,7 @@ class AccessControlService(Service):
 
     async def list_rpc_permissions(self) -> list[dict[str, Any]]:
         """List all RPC permission rules (defaults + overrides)."""
-        from gilbert.web.ws_protocol import _RPC_PERMISSIONS
+        from gilbert.interfaces.acl import DEFAULT_RPC_PERMISSIONS as _RPC_PERMISSIONS
 
         rules: dict[str, dict[str, Any]] = {}
         for prefix, level in _RPC_PERMISSIONS.items():

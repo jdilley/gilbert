@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -140,3 +140,19 @@ class LoginMethod:
     form_action: str = ""
 
 
+@runtime_checkable
+class AccessControlProvider(Protocol):
+    """Protocol for role-based access control queries.
+
+    Services and the web layer resolve this via
+    ``get_capability("access_control")`` to check permissions without
+    depending on the concrete AccessControlService.
+    """
+
+    def get_role_level(self, role_name: str) -> int:
+        """Get the numeric level for a role name."""
+        ...
+
+    def get_effective_level(self, user_ctx: UserContext) -> int:
+        """Get the user's effective permission level (lowest = most privileged)."""
+        ...

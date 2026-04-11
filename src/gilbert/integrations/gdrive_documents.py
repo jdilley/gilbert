@@ -82,9 +82,9 @@ def _type_from_mime(mime: str, name: str) -> DocumentType:
         return _EXT_TYPE_MAP[mime]
     # Fallback to extension
     ext = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
-    from gilbert.integrations.local_documents import _EXT_MAP
+    from gilbert.interfaces.knowledge import EXT_TO_DOCUMENT_TYPE
 
-    return _EXT_MAP.get(ext, DocumentType.UNKNOWN)
+    return EXT_TO_DOCUMENT_TYPE.get(ext, DocumentType.UNKNOWN)
 
 
 class GoogleDriveDocumentBackend(DocumentBackend):

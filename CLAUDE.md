@@ -20,6 +20,7 @@ Everything is designed as an abstract interface (Python ABCs) with concrete impl
 - **Data layer** — e.g., `StorageBackend` ABC with `SQLiteStorage` implementation (swappable to PostgreSQL, etc.)
 - **Backend abstractions** — e.g., `TTSBackend` ABC with `ElevenLabsTTS`, `AIBackend` ABC with `AnthropicAI`, `AuthBackend` with `LocalAuth`/`GoogleAuth`, `VisionBackend` with `AnthropicVision`, `TunnelBackend` with `NgrokTunnel`, etc.
 - **Service-level protocols** — e.g., `Configurable` for runtime config, `ToolProvider` for AI tool registration
+- **Capability protocols** — e.g., `ConfigurationReader` for config access, `SchedulerProvider` for job scheduling, `EventBusProvider` for event pub/sub, `StorageProvider` for entity storage, `AccessControlProvider` for RBAC queries
 
 New integrations are added by implementing the relevant backend ABC. The `__init_subclass__` auto-registration means just defining the class is enough — no wiring code needed.
 
@@ -30,7 +31,7 @@ Plugins are loaded from:
 - **Local file paths** — for development or private plugins
 - **Plugin directories** — scanned for subdirectories containing `plugin.yaml`
 
-Plugins implement published interfaces to extend Gilbert with new integrations or capabilities. Plugins that need configuration implement `Configurable` and read their config from `ConfigurationService`, not from `context.config` (which only contains the initial config snapshot at load time).
+Plugins implement published interfaces to extend Gilbert with new integrations or capabilities. Plugins that need configuration implement `Configurable` and read their config via the `ConfigurationReader` protocol (resolved from the `"configuration"` capability), not from `context.config` (which only contains the initial config snapshot at load time).
 
 ### Installation Data Directory (`.gilbert/`)
 
@@ -67,7 +68,65 @@ All swappable components follow a universal backend pattern:
 
 The owning service exposes backend params in the Settings UI under a "Backend Settings" section (params with `backend_param=True`). Backend selection and credentials (API keys, etc.) are configured directly on each backend via the Settings UI.
 
+**How services discover backends** — services must never directly import concrete backend classes. Instead:
+
+1. Import the integration module as a side-effect to trigger `__init_subclass__` registration:
+   ```python
+   try:
+       import gilbert.integrations.elevenlabs_tts  # noqa: F401
+   except ImportError:
+       pass
+   ```
+2. Look up the backend class by name from the ABC registry:
+   ```python
+   backends = TTSBackend.registered_backends()
+   cls = backends.get("elevenlabs")
+   if cls:
+       backend = cls()
+       await backend.initialize(config)
+   ```
+
+**Never do this** (bypasses the registry):
+```python
+# WRONG — direct import of concrete backend
+from gilbert.integrations.elevenlabs_tts import ElevenLabsTTS
+backend = ElevenLabsTTS()
+```
+
 Backend ABCs following this pattern: `AIBackend`, `TTSBackend`, `AuthBackend`, `UserProviderBackend`, `TunnelBackend`, `VisionBackend`, `DocumentBackend`, `EmailBackend`, `MusicBackend`, `SpeakerBackend`, `DoorbellBackend`, `WebSearchBackend`.
+
+### Capability Protocols
+
+Services resolve dependencies via `resolver.get_capability("name")`, which returns the abstract `Service` type. To access domain-specific methods without depending on concrete service classes, the codebase defines `@runtime_checkable Protocol` classes in `interfaces/`. Services use `isinstance` checks against these protocols — never against concrete service classes.
+
+| Protocol | Module | Capability | Key methods |
+|---|---|---|---|
+| `ConfigurationReader` | `interfaces/configuration.py` | `"configuration"` | `get()`, `get_section()`, `get_section_safe()`, `set()` |
+| `SchedulerProvider` | `interfaces/scheduler.py` | `"scheduler"` | `add_job()`, `remove_job()`, `enable_job()`, `disable_job()`, `list_jobs()`, `get_job()`, `run_now()` |
+| `EventBusProvider` | `interfaces/events.py` | `"event_bus"` | `bus` property → `EventBus` |
+| `StorageProvider` | `interfaces/storage.py` | `"entity_storage"` | `backend` / `raw_backend` properties, `create_namespaced()` |
+| `AccessControlProvider` | `interfaces/auth.py` | `"access_control"` | `get_role_level()`, `get_effective_level()` |
+
+**Usage pattern** (this is the only correct way to access service capabilities):
+
+```python
+from gilbert.interfaces.configuration import ConfigurationReader
+
+config_svc = resolver.get_capability("configuration")
+if isinstance(config_svc, ConfigurationReader):
+    section = config_svc.get_section("my_namespace")
+```
+
+**Never do this** (imports a concrete class from `core/services/`):
+
+```python
+# WRONG — creates a concrete dependency
+from gilbert.core.services.configuration import ConfigurationService
+if isinstance(config_svc, ConfigurationService):
+    ...
+```
+
+When a service exposes new methods that other services need, add a `@runtime_checkable Protocol` in the appropriate `interfaces/` module rather than having consumers import the concrete service class.
 
 ### Configurable Protocol
 
@@ -101,16 +160,49 @@ AI interactions use **named profiles** that control which tools are available. T
 
 ### Key Directories
 
-- `src/gilbert/interfaces/` — ABCs and protocol definitions (AI, tools, storage, events, TTS, auth, users, vision, tunnel, knowledge, configuration, plugins, WS)
-- `src/gilbert/core/` — Application bootstrap, service manager, event bus, logging, config loading
+- `src/gilbert/interfaces/` — ABCs, protocol definitions, and shared data types (AI, tools, storage, events, TTS, auth, users, vision, tunnel, knowledge, configuration, ACL defaults, plugins, WS)
+- `src/gilbert/core/` — Application bootstrap, service manager, event bus, logging, config loading, shared business logic (`core/chat.py`)
 - `src/gilbert/core/services/` — Service wrappers that expose components as discoverable services (including WS RPC handlers via `WsHandlerProvider`)
 - `src/gilbert/integrations/` — Concrete backend implementations (e.g., ElevenLabs TTS, Anthropic AI, ngrok tunnel, Google auth/directory, Gmail, GDrive)
 - `src/gilbert/storage/` — Storage backend implementations (SQLite)
 - `src/gilbert/plugins/` — Plugin loader
-- `src/gilbert/web/` — Web server, SPA assets, API routes
+- `src/gilbert/web/` — Web server, SPA assets, API routes (thin layer — no business logic)
 - `tests/unit/` — Unit tests with mocks
 - `tests/integration/` — Tests against real backends (e.g., SQLite)
 - `.gilbert/` — Per-installation data directory (gitignored): bootstrap config, database, logs
+
+### Layer Dependency Rules
+
+The codebase is organized into layers with strict import rules. Violations of these rules create coupling that defeats the plugin/backend architecture.
+
+```
+interfaces/     ← depends on nothing (pure abstractions + shared data)
+    ↑
+core/           ← depends on interfaces/ only
+    ↑
+integrations/   ← depends on interfaces/ only
+storage/        ← depends on interfaces/ only
+    ↑
+web/            ← depends on interfaces/ and core/ (thin routing layer)
+    ↑
+app.py          ← composition root, may import anything
+```
+
+**Specific rules:**
+
+1. **`interfaces/`** — No imports from `core/`, `integrations/`, `storage/`, or `web/`. Only standard library, third-party types, and cross-references within `interfaces/`.
+
+2. **`core/services/`** — Import from `interfaces/` for types and protocols. Never import from `integrations/` except as side-effect imports (`import gilbert.integrations.foo  # noqa: F401`) to trigger backend registration. Never import from `web/`.
+
+3. **`integrations/`** — Import from `interfaces/` only. Never import from `core/services/`, `web/`, or other integrations. If two integrations share data (e.g., file extension mappings), that data belongs in `interfaces/`.
+
+4. **`web/`** — A thin routing and presentation layer. Import from `interfaces/` for protocols and types, from `core/` for shared business logic. Route handlers should delegate to services — not implement authorization logic, build AI prompts, resolve backends, or construct third-party API URLs. If a route handler is doing more than parsing the request, calling a service method, and formatting the response, the logic belongs in a service or `core/` module.
+
+5. **`app.py`** (composition root) — The only place that legitimately imports concrete service and integration classes to wire them together. This is standard DI practice.
+
+6. **Shared data** — Constants, mappings, and policy data used by multiple layers belong in `interfaces/`. Examples: `EXT_TO_DOCUMENT_TYPE` in `interfaces/knowledge.py`, ACL policy defaults in `interfaces/acl.py`, role level constants in `interfaces/acl.py`.
+
+7. **Tests** — Tests are composition roots for test scenarios and may import concrete classes directly. Test fakes for services should satisfy the relevant `@runtime_checkable Protocol` (e.g., a fake config service should implement `get()`, `get_section()`, `get_section_safe()`, and `set()` to satisfy `ConfigurationReader`).
 
 ## Agent Memory System
 
@@ -179,7 +271,11 @@ gotchas, etc.
 - **Test-driven bug fixes.** When you find a bug, first write a unit test that exposes the bug, then fix it, then verify the test passes. This builds a robust regression suite over time.
 - **Interface first.** Define the ABC before writing the implementation. Implementations should be swappable without changing callers.
 - **Type hints everywhere.** All function signatures must have type annotations.
-- **No concrete dependencies in core.** Core code depends on interfaces, never on specific implementations. Use dependency injection.
+- **No concrete dependencies in core.** Core code depends on interfaces, never on specific implementations. Use dependency injection. See "Layer Dependency Rules" above for the full import policy.
+- **Use capability protocols, not concrete classes.** When accessing another service's methods, use the `@runtime_checkable Protocol` from `interfaces/` (e.g., `ConfigurationReader`, `SchedulerProvider`). Never `isinstance`-check against a concrete service class from `core/services/`.
+- **Use the backend registry, not direct imports.** Discover backends via `Backend.registered_backends()` after a side-effect import. Never directly import and instantiate a concrete backend class from `integrations/`.
+- **Keep business logic out of web routes.** Routes parse requests, call services, and format responses. Authorization checks, AI prompt construction, backend resolution, and third-party API URL building belong in services or backends.
+- **Shared data lives in `interfaces/`.** If two integrations or two layers need the same constant/mapping/policy data, put it in the appropriate `interfaces/` module. Never import across integration modules or from `web/` into `core/`.
 
 ## Commands
 

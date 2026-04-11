@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from gilbert.core.app import Gilbert
-from gilbert.interfaces.auth import UserContext
+from gilbert.interfaces.auth import AccessControlProvider, UserContext
 from gilbert.web.ws_protocol import WsConnection, WsConnectionManager, dispatch_frame
 
 logger = logging.getLogger(__name__)
@@ -39,8 +39,7 @@ async def event_stream(websocket: WebSocket) -> None:
     user_level = 200  # everyone
     acl_svc = gilbert.service_manager.get_by_capability("access_control")
     if acl_svc is not None:
-        from gilbert.core.services.access_control import AccessControlService
-        if isinstance(acl_svc, AccessControlService):
+        if isinstance(acl_svc, AccessControlProvider):
             user_level = acl_svc.get_effective_level(user_ctx)
 
     # Create connection

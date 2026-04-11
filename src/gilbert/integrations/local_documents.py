@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from gilbert.interfaces.knowledge import (
+    EXT_TO_DOCUMENT_TYPE,
     DocumentBackend,
     DocumentContent,
     DocumentMeta,
@@ -17,48 +18,7 @@ logger = logging.getLogger(__name__)
 
 _STREAM_CHUNK_SIZE = 65536  # 64KB
 
-_EXT_MAP: dict[str, DocumentType] = {
-    ".txt": DocumentType.TEXT,
-    ".md": DocumentType.MARKDOWN,
-    ".csv": DocumentType.CSV,
-    ".json": DocumentType.JSON,
-    ".yaml": DocumentType.YAML,
-    ".yml": DocumentType.YAML,
-    ".pdf": DocumentType.PDF,
-    ".docx": DocumentType.WORD,
-    ".doc": DocumentType.WORD,
-    ".xlsx": DocumentType.EXCEL,
-    ".xls": DocumentType.EXCEL,
-    ".pptx": DocumentType.POWERPOINT,
-    ".ppt": DocumentType.POWERPOINT,
-    # Images
-    ".png": DocumentType.IMAGE,
-    ".jpg": DocumentType.IMAGE,
-    ".jpeg": DocumentType.IMAGE,
-    ".gif": DocumentType.IMAGE,
-    ".webp": DocumentType.IMAGE,
-    ".svg": DocumentType.IMAGE,
-    ".bmp": DocumentType.IMAGE,
-    ".tiff": DocumentType.IMAGE,
-    ".tif": DocumentType.IMAGE,
-    ".ico": DocumentType.IMAGE,
-    # Video
-    ".mp4": DocumentType.VIDEO,
-    ".avi": DocumentType.VIDEO,
-    ".mov": DocumentType.VIDEO,
-    ".mkv": DocumentType.VIDEO,
-    ".webm": DocumentType.VIDEO,
-    ".wmv": DocumentType.VIDEO,
-    ".flv": DocumentType.VIDEO,
-    # Audio
-    ".mp3": DocumentType.AUDIO,
-    ".wav": DocumentType.AUDIO,
-    ".ogg": DocumentType.AUDIO,
-    ".flac": DocumentType.AUDIO,
-    ".aac": DocumentType.AUDIO,
-    ".m4a": DocumentType.AUDIO,
-    ".wma": DocumentType.AUDIO,
-}
+_EXT_MAP = EXT_TO_DOCUMENT_TYPE
 
 
 def _type_from_ext(path: Path) -> DocumentType:

@@ -78,9 +78,9 @@ class InboxAIChatService(Service):
         # Check enabled and load config
         config_svc = resolver.get_capability("configuration")
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section(self.config_namespace)
                 if not section.get("enabled", False):
                     logger.info("Inbox AI chat service disabled")

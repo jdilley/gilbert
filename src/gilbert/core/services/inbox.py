@@ -64,9 +64,9 @@ class InboxService(Service):
         config_svc = resolver.get_capability("configuration")
         section: dict[str, Any] = {}
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section(self.config_namespace)
                 self._email_address = section.get("email_address", self._email_address)
                 self._poll_interval = int(section.get("poll_interval", self._poll_interval))
@@ -125,11 +125,10 @@ class InboxService(Service):
             self._event_bus = getattr(event_bus_svc, "bus", event_bus_svc)
 
         # Schedule polling
-        from gilbert.core.services.scheduler import SchedulerService
-        from gilbert.interfaces.scheduler import Schedule
+        from gilbert.interfaces.scheduler import Schedule, SchedulerProvider
 
         scheduler_svc = resolver.require_capability("scheduler")
-        if isinstance(scheduler_svc, SchedulerService):
+        if isinstance(scheduler_svc, SchedulerProvider):
             scheduler_svc.add_job(
                 name="inbox-poll",
                 schedule=Schedule.every(self._poll_interval),

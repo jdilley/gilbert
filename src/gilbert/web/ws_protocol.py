@@ -13,66 +13,16 @@ import logging
 import time
 from typing import Any, Callable, Coroutine
 
+from gilbert.interfaces.acl import (
+    DEFAULT_EVENT_VISIBILITY as _EVENT_VISIBILITY,
+    DEFAULT_RPC_LEVEL as _DEFAULT_RPC_LEVEL,
+    DEFAULT_RPC_PERMISSIONS as _RPC_PERMISSIONS,
+    DEFAULT_VISIBILITY_LEVEL as _DEFAULT_VISIBILITY_LEVEL,
+)
 from gilbert.interfaces.auth import UserContext
-from gilbert.interfaces.events import Event
+from gilbert.interfaces.events import Event, EventBusProvider
 
 logger = logging.getLogger(__name__)
-
-# ── Event visibility defaults ──────────────────────────────────────────
-# Maps event_type prefix → minimum role level required.
-# Longest prefix match wins. System user (level -1) bypasses all.
-
-_EVENT_VISIBILITY: dict[str, int] = {
-    # everyone (200)
-    "doorbell.": 200,
-    "greeting.": 200,
-    "alarm.": 200,
-    "screen.": 200,
-    "chat.": 200,
-    "radio_dj.": 200,
-    # user (100)
-    "presence.": 100,
-    "timer.": 100,
-    "knowledge.": 100,
-    # admin (0)
-    "inbox.": 0,
-    "service.": 0,
-    "config.": 0,
-    "acl.": 0,
-}
-_DEFAULT_VISIBILITY_LEVEL = 100  # unlisted events → user role
-
-# ── RPC handler permission defaults ───────────────────────────────────
-# Maps frame type prefix → minimum role level required to call the handler.
-# Same resolution logic as event visibility: longest prefix match wins.
-
-_RPC_PERMISSIONS: dict[str, int] = {
-    # everyone (200)
-    "gilbert.ping": 200,
-    "gilbert.sub.": 200,
-    "chat.conversation.list": 200,
-    "chat.conversation.create": 200,
-    "chat.history.load": 200,
-    "chat.message.send": 200,
-    "chat.form.submit": 200,
-    "chat.user.list": 200,
-    "dashboard.get": 200,
-    "documents.": 200,
-    "screens.list": 200,
-    "skills.list": 200,
-    "skills.conversation.": 200,
-    "skills.workspace.": 200,
-    # user (100)
-    "chat.": 100,
-    # admin (0)
-    "config.": 0,
-    "roles.": 0,
-    "inbox.": 0,
-    "system.": 0,
-    "entities.": 0,
-    "gilbert.peer.publish": 0,
-}
-_DEFAULT_RPC_LEVEL = 100  # unlisted frame types → user role
 
 
 def get_rpc_permission_level(frame_type: str) -> int:
@@ -275,8 +225,7 @@ class WsConnectionManager:
         event_bus_svc = gilbert.service_manager.get_by_capability("event_bus")
         if event_bus_svc is None:
             return
-        from gilbert.core.services.event_bus import EventBusService
-        if isinstance(event_bus_svc, EventBusService):
+        if isinstance(event_bus_svc, EventBusProvider):
             self._unsubscribe = event_bus_svc.bus.subscribe_pattern("*", self._dispatch_event)
 
     def shutdown(self) -> None:
@@ -360,8 +309,7 @@ async def _handle_peer_publish(conn: WsConnection, frame: dict[str, Any]) -> dic
     if gilbert is not None:
         event_bus_svc = gilbert.service_manager.get_by_capability("event_bus")
         if event_bus_svc is not None:
-            from gilbert.core.services.event_bus import EventBusService
-            if isinstance(event_bus_svc, EventBusService):
+            if isinstance(event_bus_svc, EventBusProvider):
                 await event_bus_svc.bus.publish(Event(
                     event_type=event_type,
                     data=data,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Protocol, runtime_checkable
 
 
 class JobState(StrEnum):
@@ -74,3 +74,48 @@ class JobInfo:
 
 # Callback type for scheduled jobs
 JobCallback = Callable[[], Awaitable[Any]]
+
+
+@runtime_checkable
+class SchedulerProvider(Protocol):
+    """Protocol for scheduling and managing timed jobs.
+
+    Services resolve this via ``get_capability("scheduler")`` to register
+    jobs without depending on the concrete SchedulerService.
+    """
+
+    def add_job(
+        self,
+        name: str,
+        schedule: Schedule,
+        callback: JobCallback,
+        system: bool = False,
+        enabled: bool = True,
+        owner: str = "",
+    ) -> JobInfo:
+        """Register a job. System jobs are not user-editable."""
+        ...
+
+    def remove_job(self, name: str, requester_id: str = "") -> None:
+        """Remove a job."""
+        ...
+
+    def enable_job(self, name: str) -> None:
+        """Enable a disabled job."""
+        ...
+
+    def disable_job(self, name: str) -> None:
+        """Disable a running job."""
+        ...
+
+    def list_jobs(self, include_system: bool = True) -> list[JobInfo]:
+        """List all registered jobs."""
+        ...
+
+    def get_job(self, name: str) -> JobInfo | None:
+        """Get info about a specific job."""
+        ...
+
+    async def run_now(self, name: str) -> None:
+        """Execute a job immediately, outside its schedule."""
+        ...

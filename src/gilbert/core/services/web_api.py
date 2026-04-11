@@ -86,7 +86,7 @@ class WebApiService(Service):
         if gilbert is None:
             return {"type": "system.services.list.result", "ref": frame.get("id"), "services": []}
 
-        from gilbert.core.services.configuration import ConfigurationService
+        from gilbert.interfaces.configuration import ConfigurationReader
         from gilbert.interfaces.configuration import Configurable
         from gilbert.interfaces.tools import ToolProvider
 
@@ -123,7 +123,7 @@ class WebApiService(Service):
                     ]
                 except Exception:
                     pass
-                if isinstance(config_svc, ConfigurationService):
+                if isinstance(config_svc, ConfigurationReader):
                     try:
                         section = config_svc.get_section(svc.config_namespace)
                         # Ensure values are JSON-serializable

@@ -42,9 +42,9 @@ class TunnelService(Service):
         config_svc = resolver.get_capability("configuration")
         section: dict[str, Any] = {}
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section(self.config_namespace)
                 web_section = config_svc.get_section("web")
                 if web_section.get("port") is not None:

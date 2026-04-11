@@ -9,7 +9,7 @@ from typing import Any
 from gilbert.core.documents.chunking import chunk_text
 from gilbert.core.documents.extractors import extract_text
 from gilbert.core.output import get_output_dir
-from gilbert.interfaces.events import Event, EventBus
+from gilbert.interfaces.events import Event, EventBus, EventBusProvider
 from gilbert.interfaces.knowledge import (
     DocumentBackend,
     DocumentMeta,
@@ -67,13 +67,30 @@ class KnowledgeService(Service):
     def get_backend(self, source_id: str) -> DocumentBackend | None:
         return self._backends.get(source_id)
 
+    async def resolve_document(
+        self, full_path: str,
+    ) -> tuple[DocumentBackend, "DocumentMeta", str] | None:
+        """Resolve a ``source_id/doc_path`` string to a backend, metadata, and doc path.
+
+        Returns ``None`` if no matching backend or document is found.
+        """
+        for sid, backend in self._backends.items():
+            prefix = sid + "/"
+            if full_path.startswith(prefix):
+                doc_path = full_path[len(prefix):]
+                meta = await backend.get_metadata(doc_path)
+                if meta is not None:
+                    return backend, meta, doc_path
+                return None
+        return None
+
     async def start(self, resolver: ServiceResolver) -> None:
         # Check enabled
         config_svc = resolver.get_capability("configuration")
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section(self.config_namespace)
                 if not section.get("enabled", False):
                     logger.info("Knowledge service disabled")
@@ -84,9 +101,9 @@ class KnowledgeService(Service):
         # Load config
         backend_configs: list[dict[str, Any]] = []
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section("knowledge")
                 self._chunk_size = int(section.get("chunk_size", 1000))
                 self._chunk_overlap = int(section.get("chunk_overlap", 200))
@@ -125,9 +142,7 @@ class KnowledgeService(Service):
 
         event_bus_svc = resolver.get_capability("event_bus")
         if event_bus_svc is not None:
-            from gilbert.core.services.event_bus import EventBusService
-
-            if isinstance(event_bus_svc, EventBusService):
+            if isinstance(event_bus_svc, EventBusProvider):
                 self._event_bus = event_bus_svc.bus
 
         from gilbert.interfaces.knowledge import DocumentBackend
@@ -162,10 +177,9 @@ class KnowledgeService(Service):
         # Register sync job with scheduler
         scheduler = resolver.get_capability("scheduler")
         if scheduler is not None and self._backends:
-            from gilbert.core.services.scheduler import SchedulerService
-            from gilbert.interfaces.scheduler import Schedule
+            from gilbert.interfaces.scheduler import Schedule, SchedulerProvider
 
-            if isinstance(scheduler, SchedulerService):
+            if isinstance(scheduler, SchedulerProvider):
                 scheduler.add_job(
                     name="knowledge-sync",
                     schedule=Schedule.every(self._sync_interval),
@@ -176,10 +190,9 @@ class KnowledgeService(Service):
         # Schedule initial sync as a one-shot background job so it doesn't block startup.
         # ChromaDB may need to download the embedding model on first use.
         if scheduler is not None and self._backends and self._collection is not None:
-            from gilbert.core.services.scheduler import SchedulerService
-            from gilbert.interfaces.scheduler import Schedule
+            from gilbert.interfaces.scheduler import Schedule, SchedulerProvider
 
-            if isinstance(scheduler, SchedulerService):
+            if isinstance(scheduler, SchedulerProvider):
                 scheduler.add_job(
                     name="knowledge-initial-sync",
                     schedule=Schedule.once_after(2),

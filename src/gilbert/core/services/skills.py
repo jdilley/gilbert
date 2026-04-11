@@ -29,6 +29,7 @@ async def _to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
         return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
     return await loop.run_in_executor(None, func, *args)
 
+from gilbert.interfaces.auth import AccessControlProvider
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.skills import SkillCatalogEntry, SkillContent
 from gilbert.interfaces.storage import IndexDefinition, Query
@@ -91,9 +92,9 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         # Check enabled and load config
         config_svc = resolver.get_capability("configuration")
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section(self.config_namespace)
                 if not section.get("enabled", True):
                     logger.info("Skills service disabled")
@@ -361,9 +362,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
             result.append((key, e))
 
         if user_ctx is not None and self._acl_svc is not None:
-            from gilbert.core.services.access_control import AccessControlService
-
-            if isinstance(self._acl_svc, AccessControlService):
+            if isinstance(self._acl_svc, AccessControlProvider):
                 user_level = self._acl_svc.get_effective_level(user_ctx)
                 result = [
                     (k, e) for k, e in result
@@ -851,9 +850,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         """Check if a user has admin role."""
         if self._acl_svc is None:
             return False
-        from gilbert.core.services.access_control import AccessControlService
-
-        if not isinstance(self._acl_svc, AccessControlService):
+        if not isinstance(self._acl_svc, AccessControlProvider):
             return False
         # Admin level is 0
         return self._acl_svc.get_role_level("admin") >= 0
@@ -1175,9 +1172,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
             return True  # No ACL = no restrictions
         if not user_roles:
             return False
-        from gilbert.core.services.access_control import AccessControlService
-
-        if not isinstance(self._acl_svc, AccessControlService):
+        if not isinstance(self._acl_svc, AccessControlProvider):
             return True
         admin_level = self._acl_svc.get_role_level("admin")
         user_level = min(self._acl_svc.get_role_level(r) for r in user_roles)

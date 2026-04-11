@@ -23,7 +23,7 @@ from gilbert.config import (
     _deep_merge,
 )
 from gilbert.interfaces.configuration import ConfigParam, Configurable
-from gilbert.interfaces.events import Event
+from gilbert.interfaces.events import Event, EventBusProvider
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.storage import Query, StorageBackend
 from gilbert.interfaces.tools import (
@@ -583,9 +583,7 @@ class ConfigurationService(Service):
         bus_svc = self._resolver.get_capability("event_bus")
         if bus_svc is None:
             return
-        from gilbert.core.services.event_bus import EventBusService
-
-        if isinstance(bus_svc, EventBusService):
+        if isinstance(bus_svc, EventBusProvider):
             try:
                 await bus_svc.bus.publish(Event(
                     event_type="config.changed",

@@ -33,23 +33,11 @@ async def serve_document(
     gilbert: Gilbert = request.app.state.gilbert
     knowledge = _get_knowledge(gilbert)
 
-    # Find the matching backend by trying each source_id as a prefix
-    backend = None
-    document_path = ""
-    for sid in knowledge.backends:
-        prefix = sid + "/"
-        if full_path.startswith(prefix):
-            backend = knowledge.get_backend(sid)
-            document_path = full_path[len(prefix):]
-            break
+    result = await knowledge.resolve_document(full_path)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Document not found: {full_path}")
 
-    if backend is None:
-        raise HTTPException(status_code=404, detail=f"Source not found in path: {full_path}")
-
-    meta = await backend.get_metadata(document_path)
-    if meta is None:
-        raise HTTPException(status_code=404, detail="Document not found")
-
+    backend, meta, document_path = result
     return StreamingResponse(
         backend.stream_document(document_path),
         media_type=meta.mime_type or "application/octet-stream",

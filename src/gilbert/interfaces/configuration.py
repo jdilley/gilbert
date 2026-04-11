@@ -59,3 +59,28 @@ class Configurable(Protocol):
     async def on_config_changed(self, config: dict[str, Any]) -> None:
         """Called with the full config section when tunable params change."""
         ...
+
+
+@runtime_checkable
+class ConfigurationReader(Protocol):
+    """Protocol for reading and writing configuration values.
+
+    Services resolve this via ``get_capability("configuration")`` to access
+    config without depending on the concrete ConfigurationService.
+    """
+
+    def get(self, path: str) -> Any:
+        """Get a config value by dot-path (e.g., ``'ai.model'``)."""
+        ...
+
+    def get_section(self, namespace: str) -> dict[str, Any]:
+        """Get the full config section for a namespace."""
+        ...
+
+    def get_section_safe(self, namespace: str) -> dict[str, Any]:
+        """Get a config section, returning ``{}`` if missing."""
+        ...
+
+    async def set(self, path: str, value: Any) -> dict[str, Any]:
+        """Set a config value and return the updated section."""
+        ...

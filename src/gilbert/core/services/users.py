@@ -14,7 +14,6 @@ from gilbert.interfaces.tools import (
     ToolParameterType,
 )
 from gilbert.interfaces.users import ExternalUser, UserBackend, UserProviderBackend
-from gilbert.storage.user_storage import StorageUserBackend
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +66,8 @@ class UserService(Service):
         storage_svc = resolver.require_capability("entity_storage")
         storage: StorageBackend = storage_svc.backend  # type: ignore[attr-defined]
 
+        from gilbert.storage.user_storage import StorageUserBackend
+
         backend = StorageUserBackend(storage)
         await backend.ensure_indexes()
         self._backend = backend
@@ -75,9 +76,9 @@ class UserService(Service):
         # Load sync TTL from configuration if available
         config_svc = resolver.get_capability("configuration")
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section("users")
                 ttl = section.get("sync_ttl_seconds")
                 if ttl is not None:
@@ -91,18 +92,22 @@ class UserService(Service):
         # Initialize user provider backends from config
         self._provider_backends: list[UserProviderBackend] = []
         if config_svc is not None:
-            from gilbert.core.services.configuration import ConfigurationService
+            from gilbert.interfaces.configuration import ConfigurationReader
 
-            if isinstance(config_svc, ConfigurationService):
+            if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section("users")
                 gdir = section.get("google_directory", {})
                 if isinstance(gdir, dict) and gdir.get("enabled"):
-                    from gilbert.integrations.google_directory import GoogleDirectoryBackend
-
-                    backend = GoogleDirectoryBackend()
-                    await backend.initialize(gdir)
-                    self._provider_backends.append(backend)
-                    logger.info("Google Directory user provider initialized")
+                    try:
+                        import gilbert.integrations.google_directory  # noqa: F401
+                    except ImportError:
+                        pass
+                    provider_cls = UserProviderBackend.registered_backends().get("google_directory")
+                    if provider_cls:
+                        provider = provider_cls()
+                        await provider.initialize(gdir)
+                        self._provider_backends.append(provider)
+                        logger.info("Google Directory user provider initialized")
 
         await self._ensure_root_user()
 
