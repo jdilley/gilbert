@@ -152,6 +152,7 @@ class SonosSpeaker(SpeakerBackend):
     def __init__(self) -> None:
         self._devices: dict[str, SoCo] = {}
         self._spotify_sn: int = 0
+        self._snapshots: dict[str, Any] = {}
 
     async def initialize(self, config: dict[str, object]) -> None:
         await self._discover()
@@ -261,6 +262,33 @@ class SonosSpeaker(SpeakerBackend):
             device = self._devices.get(sid)
             if device:
                 await asyncio.to_thread(device.stop)
+
+    # --- Snapshot / Restore ---
+
+    async def snapshot(self, speaker_ids: list[str]) -> None:
+        """Save playback state of speakers so it can be restored after an announcement."""
+        from soco.snapshot import Snapshot
+
+        self._snapshots = {}
+        for sid in speaker_ids:
+            device = self._devices.get(sid)
+            if device:
+                try:
+                    snap = Snapshot(device)
+                    await asyncio.to_thread(snap.snapshot)
+                    self._snapshots[sid] = snap
+                except Exception:
+                    logger.debug("Failed to snapshot speaker %s", sid)
+
+    async def restore(self, speaker_ids: list[str]) -> None:
+        """Restore speakers to the state saved by snapshot()."""
+        for sid in speaker_ids:
+            snap = self._snapshots.pop(sid, None)
+            if snap:
+                try:
+                    await asyncio.to_thread(snap.restore)
+                except Exception:
+                    logger.debug("Failed to restore speaker %s", sid)
 
     # --- Volume ---
 

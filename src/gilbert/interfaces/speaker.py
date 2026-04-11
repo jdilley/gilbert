@@ -152,3 +152,18 @@ class SpeakerBackend(ABC):
     async def ungroup_speakers(self, speaker_ids: list[str]) -> None:
         """Remove speakers from their groups, returning them to standalone."""
         raise NotImplementedError("This backend does not support grouping")
+
+    # --- Snapshot / Restore (optional — for announce-and-resume) ---
+
+    async def snapshot(self, speaker_ids: list[str]) -> None:
+        """Save the current playback state of speakers for later restore.
+
+        Called before an announcement so playback can resume after.
+        Default is a no-op — backends that support it should override.
+        """
+
+    async def restore(self, speaker_ids: list[str]) -> None:
+        """Restore speakers to the state saved by the last ``snapshot()``.
+
+        Default is a no-op — backends that support it should override.
+        """

@@ -431,6 +431,8 @@ class SpeakerService(Service):
         if not isinstance(self._tts_svc, TTSProvider):
             raise TypeError("Expected TTSService for text_to_speech capability")
 
+        backend = self._require_backend()
+
         # Generate TTS audio
         request = SynthesisRequest(text=text, voice_id="", output_format=AudioFormat.MP3)
         result = await self._tts_svc.synthesize(request)
@@ -444,6 +446,10 @@ class SpeakerService(Service):
         # Determine volume
         effective_volume = volume or self._default_announce_volume
 
+        # Snapshot current playback state so we can resume after
+        target_ids = await self._resolve_target_ids(speaker_names)
+        await backend.snapshot(target_ids)
+
         # Play on speakers — topology handled by play_on_speakers
         audio_url = self._audio_url(str(file_path.resolve()))
         await self.play_on_speakers(
@@ -453,20 +459,19 @@ class SpeakerService(Service):
             title=f"Announcement: {text[:50]}",
         )
 
-        # Wait for playback to finish before releasing the lock.
+        # Wait for playback to finish before restoring.
         # Use audio duration if available, fall back to polling.
-        target_ids = await self._resolve_target_ids(speaker_names)
         duration = self._estimate_mp3_duration(result.audio)
         if duration > 0:
             await asyncio.sleep(duration + 0.5)
         else:
             await self._wait_for_playback(target_ids)
 
-        # Clear the queue so the announcement doesn't linger in history
+        # Restore previous playback state (resumes music if it was playing)
         try:
-            await self._require_backend().clear_queue(target_ids)
+            await backend.restore(target_ids)
         except Exception:
-            logger.debug("Failed to clear queue after announcement")
+            logger.debug("Failed to restore playback after announcement")
 
         return str(file_path)
 
