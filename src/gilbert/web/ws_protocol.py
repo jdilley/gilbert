@@ -175,13 +175,13 @@ class WsConnectionManager:
     def __init__(self) -> None:
         self._connections: set[WsConnection] = set()
         self._unsubscribe: Callable[[], None] | None = None
-        self._gilbert: Any = None
+        self.gilbert: Any = None
         # Combined handler registry: core + service-provided
         self._handlers: dict[str, RpcHandler] = {}
 
     def subscribe_to_bus(self, gilbert: Any) -> None:
         """Subscribe to the event bus and discover service handlers."""
-        self._gilbert = gilbert
+        self.gilbert = gilbert
 
         # Start with core handlers (gilbert.*)
         self._handlers = dict(_rpc_handlers)
@@ -289,7 +289,7 @@ async def _handle_peer_publish(conn: WsConnection, frame: dict[str, Any]) -> dic
     data = {**data, "_from_peer": True}
 
     # Publish to local bus
-    gilbert = conn.manager._gilbert
+    gilbert = conn.manager.gilbert
     if gilbert is not None:
         event_bus_svc = gilbert.service_manager.get_by_capability("event_bus")
         if event_bus_svc is not None:
@@ -345,7 +345,7 @@ def _resolve_rpc_level(conn: WsConnection, frame_type: str) -> int:
     Delegates to AccessControlService if available, otherwise falls back
     to hardcoded defaults.
     """
-    gilbert = conn.manager._gilbert
+    gilbert = conn.manager.gilbert
     if gilbert is not None:
         acl_svc = gilbert.service_manager.get_by_capability("access_control")
         if isinstance(acl_svc, AccessControlProvider):

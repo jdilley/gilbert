@@ -729,7 +729,7 @@ class AccessControlService(Service):
 
     async def _ws_tool_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
 
@@ -759,7 +759,7 @@ class AccessControlService(Service):
 
     async def _ws_profile_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
 
@@ -800,7 +800,7 @@ class AccessControlService(Service):
 
     async def _ws_profile_save(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
 
@@ -821,7 +821,7 @@ class AccessControlService(Service):
 
     async def _ws_profile_delete(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
 
@@ -834,7 +834,7 @@ class AccessControlService(Service):
 
     async def _ws_profile_assign(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
 
@@ -847,7 +847,7 @@ class AccessControlService(Service):
 
     async def _ws_user_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
 
@@ -866,7 +866,7 @@ class AccessControlService(Service):
                 "roles": u.get("roles", []),
             })
         role_names = sorted(self._role_levels.keys())
-        allow_creation = getattr(user_svc, "_allow_user_creation", False)
+        allow_creation = getattr(user_svc, "allow_user_creation", False)
         return {
             "type": "roles.user.list.result", "ref": frame.get("id"),
             "users": result, "role_names": role_names,
@@ -875,7 +875,7 @@ class AccessControlService(Service):
 
     async def _ws_user_set(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
 
@@ -890,7 +890,7 @@ class AccessControlService(Service):
 
     async def _ws_collection_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
 

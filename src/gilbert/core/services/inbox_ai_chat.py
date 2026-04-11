@@ -97,15 +97,19 @@ class InboxAIChatService(Service):
         self._inbox = resolver.require_capability("email")
         self._ai = resolver.require_capability("ai_chat")
 
+        from gilbert.interfaces.events import EventBusProvider
+        from gilbert.interfaces.storage import StorageProvider
+
         storage_svc = resolver.require_capability("entity_storage")
-        self._storage = getattr(storage_svc, "backend", storage_svc)
+        if isinstance(storage_svc, StorageProvider):
+            self._storage = storage_svc.backend
 
         self._user_svc = resolver.get_capability("users")
         self._knowledge = resolver.get_capability("knowledge")
 
         event_bus_svc = resolver.get_capability("event_bus")
-        if event_bus_svc:
-            self._event_bus = getattr(event_bus_svc, "bus", event_bus_svc)
+        if isinstance(event_bus_svc, EventBusProvider):
+            self._event_bus = event_bus_svc.bus
             self._unsubscribe = self._event_bus.subscribe(
                 "inbox.message.received", self._on_message_received,
             )
@@ -397,7 +401,7 @@ class InboxAIChatService(Service):
             return "Error: knowledge service is not available — cannot resolve documents."
 
         try:
-            backend, path = self._knowledge._resolve_backend(document_id)
+            backend, path = self._knowledge.resolve_backend(document_id)
         except KeyError:
             return f"Error: no backend found for document '{document_id}'."
 

@@ -425,7 +425,7 @@ class ConfigurationService(Service):
             svc = self._resolver.get_capability("doorbell")
             if svc is not None:
                 try:
-                    return list(svc._available_doorbells)
+                    return svc.available_doorbells
                 except Exception:
                     pass
         return None

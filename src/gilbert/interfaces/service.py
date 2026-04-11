@@ -54,6 +54,16 @@ class Service(ABC):
         """Called after all required dependencies are available.
         Use resolver to fetch them. Override if needed."""
 
+    @property
+    def enabled(self) -> bool:
+        """Whether this service is actively running.
+
+        Toggleable services set ``self._enabled`` during ``start()``;
+        this property exposes that flag publicly.  Non-toggleable services
+        that never set ``_enabled`` default to ``True``.
+        """
+        return getattr(self, "_enabled", True)
+
     async def stop(self) -> None:
         """Called during shutdown, in reverse-start order. Override if needed."""
 

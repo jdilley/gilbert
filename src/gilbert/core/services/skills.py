@@ -108,9 +108,11 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         self._enabled = True
         self._acl_svc = resolver.get_capability("access_control")
 
+        from gilbert.interfaces.storage import StorageProvider
+
         storage_svc = resolver.get_capability("entity_storage")
-        if storage_svc is not None:
-            self._storage = getattr(storage_svc, "backend", storage_svc)
+        if isinstance(storage_svc, StorageProvider):
+            self._storage = storage_svc.backend
             await self._storage.ensure_index(
                 IndexDefinition(collection=_SKILL_COLLECTION, fields=["owner_id"])
             )

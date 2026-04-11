@@ -53,14 +53,15 @@ class StubAuthBackend(AuthBackend):
 
 class StubStorageService(Service):
     def __init__(self, backend: StorageBackend) -> None:
-        self._backend = backend
+        self.backend = backend
+        self.raw_backend = backend
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(name="storage", capabilities=frozenset({"entity_storage"}))
 
-    @property
-    def backend(self) -> StorageBackend:
-        return self._backend
+    def create_namespaced(self, namespace: str) -> Any:
+        from gilbert.interfaces.storage import NamespacedStorageBackend
+        return NamespacedStorageBackend(self.backend, namespace)
 
 
 class StubResolver(ServiceResolver):

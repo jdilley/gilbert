@@ -7,7 +7,7 @@ import uuid
 from typing import Any
 
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
-from gilbert.interfaces.storage import StorageBackend
+from gilbert.interfaces.storage import StorageBackend, StorageProvider
 from gilbert.interfaces.tools import (
     ToolDefinition,
     ToolParameter,
@@ -57,6 +57,11 @@ class UserService(Service):
         )
 
     @property
+    def allow_user_creation(self) -> bool:
+        """Whether new user creation is allowed."""
+        return self._allow_user_creation
+
+    @property
     def backend(self) -> UserBackend:
         if self._backend is None:
             raise RuntimeError("UserService not started")
@@ -64,7 +69,9 @@ class UserService(Service):
 
     async def start(self, resolver: ServiceResolver) -> None:
         storage_svc = resolver.require_capability("entity_storage")
-        storage: StorageBackend = storage_svc.backend  # type: ignore[attr-defined]
+        if not isinstance(storage_svc, StorageProvider):
+            raise RuntimeError("entity_storage capability does not provide StorageProvider")
+        storage: StorageBackend = storage_svc.backend
 
         from gilbert.storage.user_storage import StorageUserBackend
 

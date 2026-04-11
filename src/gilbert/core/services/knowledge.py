@@ -137,8 +137,10 @@ class KnowledgeService(Service):
 
         # Event bus
         # Entity storage for document tracking metadata (required for change detection)
+        from gilbert.interfaces.storage import StorageProvider
         storage_svc = resolver.require_capability("entity_storage")
-        self._storage = getattr(storage_svc, "backend", storage_svc)
+        if isinstance(storage_svc, StorageProvider):
+            self._storage = storage_svc.backend
 
         event_bus_svc = resolver.get_capability("event_bus")
         if event_bus_svc is not None:
@@ -767,7 +769,7 @@ class KnowledgeService(Service):
 
     # --- Backend routing ---
 
-    def _resolve_backend(self, document_id: str) -> tuple[DocumentBackend, str]:
+    def resolve_backend(self, document_id: str) -> tuple[DocumentBackend, str]:
         """Parse 'source_id:path' and return (backend, path)."""
         for sid, backend in self._backends.items():
             prefix = sid + ":"
@@ -993,7 +995,7 @@ class KnowledgeService(Service):
     async def _tool_get_document(self, arguments: dict[str, Any]) -> str:
         document_id = arguments["document_id"]
         try:
-            backend, path = self._resolve_backend(document_id)
+            backend, path = self.resolve_backend(document_id)
         except KeyError as e:
             return json.dumps({"error": str(e)})
 
@@ -1017,7 +1019,7 @@ class KnowledgeService(Service):
             return json.dumps({"error": "Page number must be >= 1"})
 
         try:
-            backend, path = self._resolve_backend(document_id)
+            backend, path = self.resolve_backend(document_id)
         except KeyError as e:
             return json.dumps({"error": str(e)})
 
@@ -1211,7 +1213,7 @@ class KnowledgeService(Service):
     async def _tool_index(self, arguments: dict[str, Any]) -> str:
         document_id = arguments["document_id"]
         try:
-            backend, path = self._resolve_backend(document_id)
+            backend, path = self.resolve_backend(document_id)
         except KeyError as e:
             return json.dumps({"error": str(e)})
 

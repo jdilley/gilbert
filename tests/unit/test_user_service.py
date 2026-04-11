@@ -6,14 +6,15 @@ import pytest
 
 from gilbert.core.services.users import _ROOT_USER_ID, UserService
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
-from gilbert.interfaces.storage import StorageBackend
+from gilbert.interfaces.storage import NamespacedStorageBackend, StorageBackend
 
 # --- Stub resolver ---
 
 
 class StubStorageService(Service):
     def __init__(self, backend: StorageBackend) -> None:
-        self._backend = backend
+        self.backend = backend
+        self.raw_backend = backend
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
@@ -21,9 +22,9 @@ class StubStorageService(Service):
             capabilities=frozenset({"entity_storage"}),
         )
 
-    @property
-    def backend(self) -> StorageBackend:
-        return self._backend
+    def create_namespaced(self, namespace: str) -> Any:
+        from gilbert.interfaces.storage import NamespacedStorageBackend
+        return NamespacedStorageBackend(self.backend, namespace)
 
 
 class StubResolver(ServiceResolver):

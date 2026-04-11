@@ -192,7 +192,7 @@ class TestFrameDispatch:
         manager = MagicMock(spec=WsConnectionManager)
         from gilbert.web.ws_protocol import _rpc_handlers
         manager._handlers = dict(_rpc_handlers)
-        manager._gilbert = None  # no ACL service → fall through to defaults
+        manager.gilbert = None  # no ACL service → fall through to defaults
         return WsConnection(user, level, manager)
 
     async def test_subscribe(self) -> None:

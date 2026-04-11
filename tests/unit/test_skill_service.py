@@ -996,8 +996,10 @@ class TestCreateSkill:
         resolver.get_capability.side_effect = (
             lambda cap: storage if cap == "entity_storage" else None
         )
-        # Simulate storage_svc having backend attribute
+        # Simulate StorageProvider protocol for isinstance check
         storage.backend = storage
+        storage.raw_backend = storage
+        storage.create_namespaced = lambda ns: storage
         await svc.start(resolver)
 
         result = await svc.execute_tool("create_skill", {
@@ -1020,6 +1022,8 @@ class TestCreateSkill:
             lambda cap: storage if cap == "entity_storage" else None
         )
         storage.backend = storage
+        storage.raw_backend = storage
+        storage.create_namespaced = lambda ns: storage
         await svc.start(resolver)
 
         await svc.execute_tool("create_skill", {
@@ -1042,6 +1046,8 @@ class TestCreateSkill:
             lambda cap: storage if cap == "entity_storage" else None
         )
         storage.backend = storage
+        storage.raw_backend = storage
+        storage.create_namespaced = lambda ns: storage
         await svc.start(resolver)
 
         result = await svc.execute_tool("create_skill", {
@@ -1060,6 +1066,8 @@ class TestCreateSkill:
             lambda cap: storage if cap == "entity_storage" else None
         )
         storage.backend = storage
+        storage.raw_backend = storage
+        storage.create_namespaced = lambda ns: storage
         await svc.start(resolver)
 
         result = await svc.execute_tool("create_skill", {
@@ -1090,6 +1098,8 @@ class TestDeleteEntitySkill:
             lambda cap: storage if cap == "entity_storage" else None
         )
         storage.backend = storage
+        storage.raw_backend = storage
+        storage.create_namespaced = lambda ns: storage
         await svc.start(resolver)
 
         # Skill should be in catalog

@@ -44,6 +44,11 @@ class DoorbellService(Service):
         self._speakers: list[str] = []  # speaker names for announcements
         self._available_doorbells: list[str] = []  # cached from backend
 
+    @property
+    def available_doorbells(self) -> list[str]:
+        """Cached list of doorbell names from the backend."""
+        return list(self._available_doorbells)
+
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="doorbell",

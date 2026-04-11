@@ -8,7 +8,7 @@ service inspector, entity browser).
 import logging
 from typing import Any
 
-from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
+from gilbert.interfaces.service import Service, ServiceEnumerator, ServiceInfo, ServiceResolver
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class WebApiService(Service):
         }
 
     async def _ws_dashboard_get(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "dashboard.get.result", "ref": frame.get("id"), "cards": []}
 
@@ -70,7 +70,7 @@ class WebApiService(Service):
             cap = card.get("requires_capability")
             if cap:
                 svc = gilbert.service_manager.get_by_capability(cap)
-                if svc is None or not getattr(svc, "_enabled", True):
+                if svc is None or not svc.enabled:
                     continue
             if acl is not None:
                 required_level = acl.get_role_level(card["required_role"])
@@ -82,7 +82,7 @@ class WebApiService(Service):
 
     async def _ws_system_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "system.services.list.result", "ref": frame.get("id"), "services": []}
 
@@ -94,8 +94,10 @@ class WebApiService(Service):
         config_svc = sm.get_by_capability("configuration")
         services = []
 
-        for name in list(sm._registered.keys()):
-            svc = sm._registered[name]
+        if not isinstance(sm, ServiceEnumerator):
+            return {"type": "system.services.list.result", "ref": frame.get("id"), "services": []}
+
+        for name, svc in sm.list_services().items():
             info = svc.service_info()
             started = name in sm.started_services
             failed = name in sm.failed_services
@@ -146,7 +148,7 @@ class WebApiService(Service):
 
     async def _ws_entities_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "entities.collection.list.result", "ref": frame.get("id"), "groups": []}
 
@@ -177,7 +179,7 @@ class WebApiService(Service):
         if not collection:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "collection required", "code": 400}
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
 
@@ -246,7 +248,7 @@ class WebApiService(Service):
         if not collection or not entity_id:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "collection and entity_id required", "code": 400}
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
 

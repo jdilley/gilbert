@@ -14,7 +14,9 @@ from typing import Any, Callable
 
 from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.email import EmailAddress, EmailAttachment, EmailBackend, EmailMessage
+from gilbert.interfaces.events import EventBusProvider
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
+from gilbert.interfaces.storage import StorageProvider
 from gilbert.interfaces.tools import (
     ToolDefinition,
     ToolParameter,
@@ -104,7 +106,8 @@ class InboxService(Service):
 
         # Storage
         storage_svc = resolver.require_capability("entity_storage")
-        self._storage = getattr(storage_svc, "backend", storage_svc)
+        if isinstance(storage_svc, StorageProvider):
+            self._storage = storage_svc.backend
 
         await self._storage.ensure_index(IndexDefinition(
             collection=_COLLECTION, fields=["thread_id"],
@@ -121,8 +124,8 @@ class InboxService(Service):
 
         # Event bus (optional)
         event_bus_svc = resolver.get_capability("event_bus")
-        if event_bus_svc:
-            self._event_bus = getattr(event_bus_svc, "bus", event_bus_svc)
+        if isinstance(event_bus_svc, EventBusProvider):
+            self._event_bus = event_bus_svc.bus
 
         # Schedule polling
         from gilbert.interfaces.scheduler import Schedule, SchedulerProvider
@@ -845,7 +848,7 @@ class InboxService(Service):
 
     async def _ws_pending_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "inbox.pending.list.result", "ref": frame.get("id"), "pending": []}
 
@@ -889,7 +892,7 @@ class InboxService(Service):
         if not reply_id:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "reply_id required", "code": 400}
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
 

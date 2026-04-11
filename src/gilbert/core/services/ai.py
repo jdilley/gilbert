@@ -1950,7 +1950,7 @@ class AIService(Service):
                     await self._save_conversation(conv_id, messages, user_ctx=conn.user_ctx)
 
                 # Broadcast to room members
-                gilbert = conn.manager._gilbert
+                gilbert = conn.manager.gilbert
                 if gilbert:
                     await publish_event(gilbert, "chat.message.created", {
                         "conversation_id": conv_id,
@@ -2061,7 +2061,7 @@ class AIService(Service):
         # Broadcast to room members in shared rooms
         if is_shared:
             from gilbert.core.chat import publish_event
-            gilbert = conn.manager._gilbert
+            gilbert = conn.manager.gilbert
             if gilbert:
                 await publish_event(gilbert, "chat.message.created", {
                     "conversation_id": conv_id,
@@ -2171,7 +2171,7 @@ class AIService(Service):
         data["title"] = title
         await self._storage.put(_COLLECTION, conversation_id, data)
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is not None:
             await publish_event(gilbert, "chat.conversation.renamed", {"conversation_id": conversation_id, "title": title})
 
@@ -2231,7 +2231,7 @@ class AIService(Service):
         }
         await self._storage.put(_COLLECTION, conv_id, data)
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is not None:
             await publish_event(gilbert, "chat.conversation.created", {
                 "conversation_id": conv_id, "title": title, "shared": True,
@@ -2269,7 +2269,7 @@ class AIService(Service):
         data["members"] = members
         await self._storage.put(_COLLECTION, conversation_id, data)
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is not None:
             await publish_event(gilbert, "chat.member.joined", {
                 "conversation_id": conversation_id, "user_id": conn.user_id,
@@ -2294,7 +2294,7 @@ class AIService(Service):
         if data is None or not data.get("shared"):
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Room not found", "code": 404}
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
 
         # Owner leaving destroys the room
         if data.get("user_id") == conn.user_id:
@@ -2334,7 +2334,7 @@ class AIService(Service):
         data["members"] = members
         await self._storage.put(_COLLECTION, conversation_id, data)
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is not None:
             await publish_event(gilbert, "chat.member.kicked", {"conversation_id": conversation_id, "user_id": target_user})
 
@@ -2386,7 +2386,7 @@ class AIService(Service):
         data["invites"] = invites
         await self._storage.put(_COLLECTION, conversation_id, data)
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is not None:
             for inv in invited:
                 await publish_event(gilbert, "chat.invite.created", {
@@ -2461,7 +2461,7 @@ class AIService(Service):
         # Remove the invite
         data["invites"] = [inv for inv in invites if inv.get("user_id") != conn.user_id]
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
 
         if action == "accept":
             from datetime import datetime, timezone as tz
@@ -2497,7 +2497,7 @@ class AIService(Service):
         from gilbert.interfaces.ws import WsConnectionBase as WsConnection
         conn: WsConnection = conn
 
-        gilbert = conn.manager._gilbert
+        gilbert = conn.manager.gilbert
         if gilbert is None:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service unavailable", "code": 503}
 

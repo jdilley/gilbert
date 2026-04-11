@@ -52,9 +52,13 @@ class AuthService(Service):
         )
 
     async def start(self, resolver: ServiceResolver) -> None:
+        from gilbert.interfaces.storage import StorageProvider
+
         self._user_service = resolver.require_capability("users")
         storage_svc = resolver.require_capability("entity_storage")
-        self._storage = storage_svc.backend  # type: ignore[attr-defined]
+        if not isinstance(storage_svc, StorageProvider):
+            raise RuntimeError("entity_storage capability does not provide StorageProvider")
+        self._storage = storage_svc.backend
         self._resolver = resolver
 
         # Load config for auth backends

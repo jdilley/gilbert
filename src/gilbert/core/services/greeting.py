@@ -14,6 +14,7 @@ from typing import Any
 from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.events import Event, EventBus
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
+from gilbert.interfaces.storage import StorageProvider
 from gilbert.interfaces.tools import (
     ToolDefinition,
     ToolParameter,
@@ -82,7 +83,8 @@ class GreetingService(Service):
 
         # Entity storage for dedup tracking
         storage_svc = resolver.require_capability("entity_storage")
-        self._storage_backend = getattr(storage_svc, "backend", storage_svc)
+        if isinstance(storage_svc, StorageProvider):
+            self._storage_backend = storage_svc.backend
 
         # Load config
         if config_svc is not None:

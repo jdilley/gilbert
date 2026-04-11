@@ -127,6 +127,10 @@ class FakeStorageBackend:
 class FakeStorageService:
     def __init__(self) -> None:
         self.backend = FakeStorageBackend()
+        self.raw_backend = self.backend
+
+    def create_namespaced(self, namespace: str) -> Any:
+        return self.backend
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
@@ -252,11 +256,15 @@ async def inbox_service(
     # Skip start() entirely — call only the parts we need (storage, scheduler, etc.)
     from gilbert.interfaces.storage import IndexDefinition
 
+    from gilbert.interfaces.events import EventBusProvider
+    from gilbert.interfaces.storage import StorageProvider
+
     storage_svc = resolver.require_capability("entity_storage")
-    svc._storage = getattr(storage_svc, "backend", storage_svc)
+    if isinstance(storage_svc, StorageProvider):
+        svc._storage = storage_svc.backend
     event_bus_svc = resolver.get_capability("event_bus")
-    if event_bus_svc:
-        svc._event_bus = getattr(event_bus_svc, "bus", event_bus_svc)
+    if isinstance(event_bus_svc, EventBusProvider):
+        svc._event_bus = event_bus_svc.bus
     svc._knowledge = resolver.get_capability("knowledge")
     return svc
 

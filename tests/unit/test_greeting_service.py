@@ -24,12 +24,12 @@ class FakeStorage:
 
 
 class FakeStorageService:
-    @property
-    def backend(self) -> FakeStorage:
-        return self._backend
-
     def __init__(self) -> None:
-        self._backend = FakeStorage()
+        self.backend = FakeStorage()
+        self.raw_backend = self.backend
+
+    def create_namespaced(self, namespace: str) -> Any:
+        return self.backend
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo

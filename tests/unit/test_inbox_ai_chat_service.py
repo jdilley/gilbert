@@ -96,6 +96,10 @@ class FakeStorageBackend:
 class FakeStorageService:
     def __init__(self) -> None:
         self.backend = FakeStorageBackend()
+        self.raw_backend = self.backend
+
+    def create_namespaced(self, namespace: str) -> Any:
+        return self.backend
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
@@ -183,7 +187,7 @@ class FakeKnowledgeService:
     def backends(self) -> dict[str, FakeDocumentBackend]:
         return dict(self._backends)
 
-    def _resolve_backend(self, document_id: str) -> tuple[FakeDocumentBackend, str]:
+    def resolve_backend(self, document_id: str) -> tuple[FakeDocumentBackend, str]:
         for sid, backend in self._backends.items():
             prefix = sid + ":"
             if document_id.startswith(prefix):
