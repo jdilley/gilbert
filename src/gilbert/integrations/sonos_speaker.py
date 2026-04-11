@@ -65,6 +65,24 @@ def _find_device(devices: dict[str, SoCo], speaker_id: str) -> SoCo:
     return device
 
 
+def _spotify_url_to_uri(url: str) -> str:
+    """Convert a Spotify web URL to a ``spotify:`` URI.
+
+    ``https://open.spotify.com/track/abc123?si=xyz`` → ``spotify:track:abc123``
+    ``https://open.spotify.com/playlist/def456`` → ``spotify:playlist:def456``
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    # Path is like /track/abc123 or /playlist/def456
+    parts = parsed.path.strip("/").split("/")
+    if len(parts) >= 2:
+        resource_type = parts[0]  # track, playlist, album, etc.
+        resource_id = parts[1]
+        return f"spotify:{resource_type}:{resource_id}"
+    return url  # Return original if we can't parse it
+
+
 def _detect_spotify_sn(devices: dict[str, SoCo]) -> int:
     """Detect the Spotify account serial number from the Sonos system.
 
@@ -201,6 +219,11 @@ class SonosSpeaker(SpeakerBackend):
         title = request.title or ""
         uri = request.uri
         meta = ""
+
+        # Convert Spotify web URLs to spotify: URIs
+        # e.g. https://open.spotify.com/track/abc123 → spotify:track:abc123
+        if "open.spotify.com/" in uri:
+            uri = _spotify_url_to_uri(uri)
 
         if uri.startswith("spotify:"):
             uri, meta = await asyncio.to_thread(_to_sonos_spotify_uri_and_meta, uri, title, self._spotify_sn)
