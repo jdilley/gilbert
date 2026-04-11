@@ -31,6 +31,33 @@ _EXT_MAP: dict[str, DocumentType] = {
     ".xls": DocumentType.EXCEL,
     ".pptx": DocumentType.POWERPOINT,
     ".ppt": DocumentType.POWERPOINT,
+    # Images
+    ".png": DocumentType.IMAGE,
+    ".jpg": DocumentType.IMAGE,
+    ".jpeg": DocumentType.IMAGE,
+    ".gif": DocumentType.IMAGE,
+    ".webp": DocumentType.IMAGE,
+    ".svg": DocumentType.IMAGE,
+    ".bmp": DocumentType.IMAGE,
+    ".tiff": DocumentType.IMAGE,
+    ".tif": DocumentType.IMAGE,
+    ".ico": DocumentType.IMAGE,
+    # Video
+    ".mp4": DocumentType.VIDEO,
+    ".avi": DocumentType.VIDEO,
+    ".mov": DocumentType.VIDEO,
+    ".mkv": DocumentType.VIDEO,
+    ".webm": DocumentType.VIDEO,
+    ".wmv": DocumentType.VIDEO,
+    ".flv": DocumentType.VIDEO,
+    # Audio
+    ".mp3": DocumentType.AUDIO,
+    ".wav": DocumentType.AUDIO,
+    ".ogg": DocumentType.AUDIO,
+    ".flac": DocumentType.AUDIO,
+    ".aac": DocumentType.AUDIO,
+    ".m4a": DocumentType.AUDIO,
+    ".wma": DocumentType.AUDIO,
 }
 
 

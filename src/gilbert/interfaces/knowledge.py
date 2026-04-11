@@ -20,6 +20,9 @@ class DocumentType(StrEnum):
     WORD = "word"
     EXCEL = "excel"
     POWERPOINT = "powerpoint"
+    IMAGE = "image"
+    VIDEO = "video"
+    AUDIO = "audio"
     UNKNOWN = "unknown"
 
 

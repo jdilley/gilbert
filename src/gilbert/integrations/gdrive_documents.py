@@ -44,6 +44,31 @@ _EXT_TYPE_MAP: dict[str, DocumentType] = {
     "application/vnd.ms-excel": DocumentType.EXCEL,
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": DocumentType.POWERPOINT,
     "application/vnd.ms-powerpoint": DocumentType.POWERPOINT,
+    # Images
+    "image/png": DocumentType.IMAGE,
+    "image/jpeg": DocumentType.IMAGE,
+    "image/gif": DocumentType.IMAGE,
+    "image/webp": DocumentType.IMAGE,
+    "image/svg+xml": DocumentType.IMAGE,
+    "image/bmp": DocumentType.IMAGE,
+    "image/tiff": DocumentType.IMAGE,
+    "image/x-icon": DocumentType.IMAGE,
+    # Video
+    "video/mp4": DocumentType.VIDEO,
+    "video/x-msvideo": DocumentType.VIDEO,
+    "video/quicktime": DocumentType.VIDEO,
+    "video/x-matroska": DocumentType.VIDEO,
+    "video/webm": DocumentType.VIDEO,
+    "video/x-ms-wmv": DocumentType.VIDEO,
+    "video/x-flv": DocumentType.VIDEO,
+    # Audio
+    "audio/mpeg": DocumentType.AUDIO,
+    "audio/wav": DocumentType.AUDIO,
+    "audio/ogg": DocumentType.AUDIO,
+    "audio/flac": DocumentType.AUDIO,
+    "audio/aac": DocumentType.AUDIO,
+    "audio/mp4": DocumentType.AUDIO,
+    "audio/x-ms-wma": DocumentType.AUDIO,
 }
 
 

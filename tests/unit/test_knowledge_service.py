@@ -288,3 +288,172 @@ class TestRenderDocumentPage:
         data = json.loads(result)
         assert "error" in data
         assert "not found" in data["error"].lower()
+
+
+# --- find_files tool ---
+
+
+class TestFindFiles:
+    @pytest.fixture
+    def knowledge_service(self) -> KnowledgeService:
+        svc = KnowledgeService()
+        svc._enabled = True
+        return svc
+
+    @pytest.fixture
+    def mixed_files(self) -> list[DocumentMeta]:
+        return [
+            DocumentMeta(
+                source_id="local:docs", path="photo.jpg", name="photo.jpg",
+                document_type=DocumentType.IMAGE, size_bytes=50000,
+                mime_type="image/jpeg",
+            ),
+            DocumentMeta(
+                source_id="local:docs", path="logo.png", name="logo.png",
+                document_type=DocumentType.IMAGE, size_bytes=12000,
+                mime_type="image/png",
+            ),
+            DocumentMeta(
+                source_id="local:docs", path="report.pdf", name="report.pdf",
+                document_type=DocumentType.PDF, size_bytes=200000,
+                mime_type="application/pdf",
+            ),
+            DocumentMeta(
+                source_id="local:docs", path="clip.mp4", name="clip.mp4",
+                document_type=DocumentType.VIDEO, size_bytes=5000000,
+                mime_type="video/mp4",
+            ),
+            DocumentMeta(
+                source_id="local:docs", path="notes.txt", name="notes.txt",
+                document_type=DocumentType.TEXT, size_bytes=500,
+                mime_type="text/plain",
+            ),
+        ]
+
+    @pytest.fixture
+    def stub_backend(self, mixed_files: list[DocumentMeta]) -> AsyncMock:
+        backend = AsyncMock(spec=DocumentBackend)
+        backend.list_documents.return_value = mixed_files
+        return backend
+
+    @pytest.mark.asyncio
+    async def test_find_all_files(
+        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+    ) -> None:
+        knowledge_service._backends = {"local:docs": stub_backend}
+        result = await knowledge_service._tool_find_files({})
+        data = json.loads(result)
+        assert data["total_found"] == 5
+
+    @pytest.mark.asyncio
+    async def test_find_by_type_image(
+        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+    ) -> None:
+        knowledge_service._backends = {"local:docs": stub_backend}
+        result = await knowledge_service._tool_find_files({"type": "image"})
+        data = json.loads(result)
+        assert data["total_found"] == 2
+        for f in data["files"]:
+            assert f["type"] == "image"
+            assert "markdown" in f  # Images get markdown tags
+            assert f["url"].startswith("/documents/serve/")
+
+    @pytest.mark.asyncio
+    async def test_find_by_type_video(
+        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+    ) -> None:
+        knowledge_service._backends = {"local:docs": stub_backend}
+        result = await knowledge_service._tool_find_files({"type": "video"})
+        data = json.loads(result)
+        assert data["total_found"] == 1
+        assert data["files"][0]["name"] == "clip.mp4"
+
+    @pytest.mark.asyncio
+    async def test_find_by_name(
+        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+    ) -> None:
+        knowledge_service._backends = {"local:docs": stub_backend}
+        result = await knowledge_service._tool_find_files({"name": "logo"})
+        data = json.loads(result)
+        assert data["total_found"] == 1
+        assert data["files"][0]["name"] == "logo.png"
+
+    @pytest.mark.asyncio
+    async def test_find_by_type_and_name(
+        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+    ) -> None:
+        knowledge_service._backends = {"local:docs": stub_backend}
+        result = await knowledge_service._tool_find_files(
+            {"type": "image", "name": "photo"},
+        )
+        data = json.loads(result)
+        assert data["total_found"] == 1
+        assert data["files"][0]["name"] == "photo.jpg"
+
+    @pytest.mark.asyncio
+    async def test_find_no_matches(
+        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+    ) -> None:
+        knowledge_service._backends = {"local:docs": stub_backend}
+        result = await knowledge_service._tool_find_files(
+            {"type": "audio"},
+        )
+        data = json.loads(result)
+        assert data["total_found"] == 0
+
+    @pytest.mark.asyncio
+    async def test_find_invalid_type(
+        self, knowledge_service: KnowledgeService,
+    ) -> None:
+        knowledge_service._backends = {}
+        result = await knowledge_service._tool_find_files(
+            {"type": "spreadsheet"},
+        )
+        data = json.loads(result)
+        assert "error" in data
+
+    @pytest.mark.asyncio
+    async def test_find_respects_max_results(
+        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+    ) -> None:
+        knowledge_service._backends = {"local:docs": stub_backend}
+        result = await knowledge_service._tool_find_files({"max_results": 2})
+        data = json.loads(result)
+        assert data["total_found"] == 2
+
+    @pytest.mark.asyncio
+    async def test_find_filters_by_source(
+        self, knowledge_service: KnowledgeService,
+    ) -> None:
+        backend1 = AsyncMock(spec=DocumentBackend)
+        backend1.list_documents.return_value = [
+            DocumentMeta(
+                source_id="local:a", path="a.png", name="a.png",
+                document_type=DocumentType.IMAGE,
+            ),
+        ]
+        backend2 = AsyncMock(spec=DocumentBackend)
+        backend2.list_documents.return_value = [
+            DocumentMeta(
+                source_id="local:b", path="b.png", name="b.png",
+                document_type=DocumentType.IMAGE,
+            ),
+        ]
+        knowledge_service._backends = {"local:a": backend1, "local:b": backend2}
+
+        result = await knowledge_service._tool_find_files({"source": "local:a"})
+        data = json.loads(result)
+        assert data["total_found"] == 1
+        assert data["files"][0]["source_id"] == "local:a"
+        # backend2 should not have been queried
+        backend2.list_documents.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_image_markdown_contains_serve_url(
+        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+    ) -> None:
+        knowledge_service._backends = {"local:docs": stub_backend}
+        result = await knowledge_service._tool_find_files({"type": "image"})
+        data = json.loads(result)
+        for f in data["files"]:
+            assert f["markdown"] == f"![{f['name']}]({f['url']})"

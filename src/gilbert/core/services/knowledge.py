@@ -851,6 +851,47 @@ class KnowledgeService(Service):
                 required_role="user",
             ),
             ToolDefinition(
+                name="find_files",
+                description=(
+                    "Search for files across all document sources by type and/or "
+                    "name. Use this to find images, videos, PDFs, or other files "
+                    "available in the knowledge base. Returns file metadata and "
+                    "URLs that can be displayed in chat. For images, include the "
+                    "returned markdown image tags in your response to show them."
+                ),
+                parameters=[
+                    ToolParameter(
+                        name="type", type=ToolParameterType.STRING,
+                        description=(
+                            "File type category to filter by: "
+                            "'image', 'video', 'audio', 'pdf', 'document' "
+                            "(Word/Excel/PowerPoint), 'text' (txt/md/csv/json/yaml), "
+                            "or omit to search all types."
+                        ),
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="name", type=ToolParameterType.STRING,
+                        description=(
+                            "Name or partial name to search for "
+                            "(case-insensitive substring match)."
+                        ),
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="source", type=ToolParameterType.STRING,
+                        description="Filter by source_id. Omit to search all sources.",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="max_results", type=ToolParameterType.INTEGER,
+                        description="Maximum results to return (default 20).",
+                        required=False,
+                    ),
+                ],
+                required_role="user",
+            ),
+            ToolDefinition(
                 name="upload_document",
                 description="Upload a new document to a writable source and index it.",
                 parameters=[
@@ -902,6 +943,8 @@ class KnowledgeService(Service):
                 return self._tool_list_sources()
             case "render_document_page":
                 return await self._tool_render_page(arguments)
+            case "find_files":
+                return await self._tool_find_files(arguments)
             case "upload_document":
                 return await self._tool_upload(arguments)
             case "index_document":
@@ -1019,6 +1062,85 @@ class KnowledgeService(Service):
                 "Include the markdown image tag in your response "
                 "to display the page in the chat."
             ),
+        })
+
+    # Type category → DocumentType members
+    _TYPE_CATEGORIES: dict[str, set[DocumentType]] = {
+        "image": {DocumentType.IMAGE},
+        "video": {DocumentType.VIDEO},
+        "audio": {DocumentType.AUDIO},
+        "pdf": {DocumentType.PDF},
+        "document": {DocumentType.WORD, DocumentType.EXCEL, DocumentType.POWERPOINT},
+        "text": {
+            DocumentType.TEXT, DocumentType.MARKDOWN,
+            DocumentType.CSV, DocumentType.JSON, DocumentType.YAML,
+        },
+    }
+
+    async def _tool_find_files(self, arguments: dict[str, Any]) -> str:
+        type_filter = arguments.get("type", "").lower().strip()
+        name_filter = arguments.get("name", "").lower().strip()
+        source_filter = arguments.get("source")
+        max_results = min(int(arguments.get("max_results", 20)), 50)
+
+        # Resolve type category to DocumentType set
+        allowed_types: set[DocumentType] | None = None
+        if type_filter:
+            allowed_types = self._TYPE_CATEGORIES.get(type_filter)
+            if allowed_types is None:
+                # Try matching a single DocumentType value directly
+                try:
+                    allowed_types = {DocumentType(type_filter)}
+                except ValueError:
+                    return json.dumps({
+                        "error": f"Unknown type category: {type_filter}. "
+                                 f"Valid categories: {', '.join(sorted(self._TYPE_CATEGORIES))}",
+                    })
+
+        # Query backends directly
+        matches: list[dict[str, Any]] = []
+        backends = self._backends
+        for source_id, backend in backends.items():
+            if source_filter and source_id != source_filter:
+                continue
+            try:
+                docs = await backend.list_documents()
+            except Exception as exc:
+                logger.warning("Failed to list documents from %s: %s", source_id, exc)
+                continue
+
+            for meta in docs:
+                if allowed_types and meta.document_type not in allowed_types:
+                    continue
+                if name_filter and name_filter not in meta.name.lower():
+                    continue
+
+                serve_url = f"/documents/serve/{meta.source_id}/{meta.path}"
+                entry: dict[str, Any] = {
+                    "document_id": meta.document_id,
+                    "name": meta.name,
+                    "path": meta.path,
+                    "source_id": meta.source_id,
+                    "type": meta.document_type.value,
+                    "size_bytes": meta.size_bytes,
+                    "url": serve_url,
+                }
+                if meta.document_type == DocumentType.IMAGE:
+                    entry["markdown"] = f"![{meta.name}]({serve_url})"
+                matches.append(entry)
+                if len(matches) >= max_results:
+                    break
+            if len(matches) >= max_results:
+                break
+
+        return json.dumps({
+            "total_found": len(matches),
+            "files": matches,
+            "instructions": (
+                "For images, include the 'markdown' field value in your response "
+                "to display them in chat. For PDFs, use render_document_page to "
+                "show specific pages."
+            ) if matches else "No files found matching the criteria.",
         })
 
     async def _tool_list_documents(self, arguments: dict[str, Any]) -> str:
