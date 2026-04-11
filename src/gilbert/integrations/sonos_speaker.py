@@ -86,28 +86,44 @@ def _spotify_url_to_uri(url: str) -> str:
 def _detect_spotify_sn(devices: dict[str, SoCo]) -> int:
     """Detect the Spotify account serial number from the Sonos system.
 
-    The SoCo accounts API doesn't always expose the Spotify account, so
-    we also inspect the currently-playing track URI on discovered speakers
-    to extract the ``sn`` parameter.
+    Tries multiple sources: the accounts API, currently-playing tracks,
+    and Sonos favorites.
     """
     import re
 
     from soco.music_services.accounts import Account
 
-    # Method 1: check the accounts API
+    def _extract_sn(uri: str) -> int | None:
+        if "spotify" in uri:
+            m = re.search(r"sn=(\d+)", uri)
+            if m:
+                return int(m.group(1))
+        return None
+
+    # Method 1: accounts API
     for acct in Account.get_accounts().values():
         if acct.service_type == 3079:
             return int(acct.serial_number)
 
-    # Method 2: inspect speakers' current track for sn=
     for speaker in devices.values():
+        # Method 2: currently-playing track
         try:
             track = speaker.get_current_track_info()
-            uri = track.get("uri", "")
-            if "spotify" in uri:
-                m = re.search(r"sn=(\d+)", uri)
-                if m:
-                    return int(m.group(1))
+            sn = _extract_sn(track.get("uri", ""))
+            if sn is not None:
+                return sn
+        except Exception:
+            pass
+
+        # Method 3: Sonos favorites
+        try:
+            favs = speaker.music_library.get_sonos_favorites()
+            for fav in favs:
+                res = fav.resources[0] if fav.resources else None
+                if res:
+                    sn = _extract_sn(res.uri)
+                    if sn is not None:
+                        return sn
         except Exception:
             pass
 
