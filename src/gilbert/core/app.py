@@ -29,7 +29,6 @@ from gilbert.core.services import (
 )
 from gilbert.core.services.ai import AIService
 from gilbert.core.services.configuration import ConfigurationService
-from gilbert.core.services.credentials import CredentialService
 from gilbert.interfaces.ai import AIBackend
 from gilbert.interfaces.events import EventBus
 from gilbert.interfaces.music import MusicBackend
@@ -130,8 +129,11 @@ class Gilbert:
         config_svc = ConfigurationService(self.config)
         self.service_manager.register(config_svc)
 
-        # 4. CredentialService
-        self.service_manager.register(CredentialService(self.config.credentials))
+        # 3b. Seed entity storage from YAML on first run, then load config
+        await config_svc.seed_storage(storage)
+        await config_svc.load_from_storage(storage)
+        self.config = config_svc.config
+
 
         # 4b. Access control (early — other services declare required_role)
         from gilbert.core.services.access_control import AccessControlService
@@ -156,75 +158,37 @@ class Gilbert:
 
         self.service_manager.register(SchedulerService())
 
-        # 6c. OCR service (always — gracefully degrades if tesseract not installed)
+        # 6c. OCR service (always — gracefully degrades if backend not available)
         from gilbert.core.services.ocr import OCRService
 
-        self.service_manager.register(OCRService())
+        ocr_backend = self._create_ocr_backend("tesseract")
+        self.service_manager.register(OCRService(ocr_backend))
 
         # 6d. Vision service (if knowledge + vision enabled)
         if self.config.knowledge.enabled and self.config.knowledge.vision_enabled:
             from gilbert.core.services.vision import VisionService
 
-            self.service_manager.register(VisionService())
+            vision_backend = self._create_vision_backend("anthropic")
+            self.service_manager.register(VisionService(vision_backend))
 
         # 6. Tunnel service (if enabled — before auth, as Google OAuth uses it)
         if self.config.tunnel.enabled:
             from gilbert.core.services.tunnel import TunnelService
 
+            tunnel_backend = self._create_tunnel_backend(
+                getattr(self.config.tunnel, "backend", "ngrok")
+            )
             self.service_manager.register(
-                TunnelService(self.config.tunnel, self.config.web.port)
+                TunnelService(tunnel_backend, local_port=self.config.web.port)
             )
 
-        # 7. Google API service (if enabled — before auth, as auth may need it)
-        if self.config.google.enabled:
-            from gilbert.core.services.google import GoogleService
-
-            self.service_manager.register(GoogleService(self.config.google))
-
-            # Register Google Directory as a user provider if "directory" account exists.
-            if "directory" in self.config.google.accounts:
-                from gilbert.integrations.google_directory import GoogleDirectoryService
-
-                domain = ""
-                for prov in self.config.auth.providers:
-                    if prov.type == "google" and prov.domain:
-                        domain = prov.domain
-                        break
-                self.service_manager.register(
-                    GoogleDirectoryService(account="directory", domain=domain)
-                )
-
-        # 8. Authentication providers
-        if self.config.auth.enabled:
-            self.service_manager.register(AuthService(self.config.auth))
-
-            for prov_cfg in self.config.auth.providers:
-                if not prov_cfg.enabled:
-                    continue
-                if prov_cfg.type == "local":
-                    from gilbert.integrations.local_auth import (
-                        LocalAuthenticationService,
-                    )
-
-                    self.service_manager.register(LocalAuthenticationService())
-                elif prov_cfg.type == "google":
-                    from gilbert.integrations.google_auth import (
-                        GoogleAuthenticationService,
-                    )
-
-                    self.service_manager.register(
-                        GoogleAuthenticationService(
-                            domain=prov_cfg.domain,
-                            use_tunnel=prov_cfg.settings.get("use_tunnel", True),
-                        )
-                    )
+        # 7. Authentication (always enabled, backends created internally)
+        self.service_manager.register(AuthService(self.config.auth))
 
         # 9. Register optional services (structural deps via constructor)
         if self.config.tts.enabled:
             tts_backend = self._create_tts_backend(self.config.tts.backend)
-            self.service_manager.register(
-                TTSService(tts_backend, self.config.tts.credential)
-            )
+            self.service_manager.register(TTSService(tts_backend))
 
         if self.config.speaker.enabled:
             speaker_backend = self._create_speaker_backend(self.config.speaker.backend)
@@ -232,15 +196,12 @@ class Gilbert:
 
         if self.config.music.enabled:
             music_backend = self._create_music_backend(self.config.music.backend)
-            self.service_manager.register(
-                MusicService(music_backend, self.config.music.credential)
-            )
+            self.service_manager.register(MusicService(music_backend))
 
         if self.config.knowledge.enabled:
             from gilbert.core.services.knowledge import KnowledgeService
 
-            has_gdrive = any(s.type == "gdrive" for s in self.config.knowledge.sources if s.enabled)
-            self.service_manager.register(KnowledgeService(has_gdrive=has_gdrive))
+            self.service_manager.register(KnowledgeService())
 
         if self.config.presence.enabled:
             from gilbert.core.services.presence import PresenceService
@@ -280,21 +241,8 @@ class Gilbert:
             self.service_manager.register(RoastService())
 
         if self.config.inbox.enabled:
-            email_backend = self._create_email_backend(
-                self.config.inbox.backend,
-                email_address=self.config.inbox.email_address,
-            )
-            # Determine the Google account name for Gmail.
-            # Convention: credential name doubles as the google.accounts key.
-            google_account = self.config.inbox.credential if self.config.inbox.backend == "gmail" else ""
-            self.service_manager.register(InboxService(
-                backend=email_backend,
-                credential_name=self.config.inbox.credential,
-                email_address=self.config.inbox.email_address,
-                poll_interval=self.config.inbox.poll_interval,
-                max_body_length=self.config.inbox.max_body_length,
-                google_account=google_account,
-            ))
+            email_backend = self._create_email_backend(self.config.inbox.backend)
+            self.service_manager.register(InboxService(backend=email_backend))
 
         if self.config.inbox_ai_chat.enabled:
             from gilbert.core.services.inbox_ai_chat import InboxAIChatService
@@ -304,10 +252,7 @@ class Gilbert:
         if self.config.slack.enabled:
             from gilbert.integrations.slack import SlackService
 
-            self.service_manager.register(SlackService(
-                bot_credential=self.config.slack.bot_credential,
-                app_credential=self.config.slack.app_credential,
-            ))
+            self.service_manager.register(SlackService())
 
         # Memory service (always — uses entity storage)
         from gilbert.core.services.memory import MemoryService
@@ -324,13 +269,7 @@ class Gilbert:
             from gilbert.core.services.websearch import WebSearchService
 
             ws_backend = self._create_websearch_backend(self.config.websearch.backend)
-            self.service_manager.register(
-                WebSearchService(
-                    ws_backend,
-                    self.config.websearch.credential,
-                    self.config.websearch.settings,
-                )
-            )
+            self.service_manager.register(WebSearchService(ws_backend))
 
         # Skills service
         if self.config.skills.enabled:
@@ -345,9 +284,7 @@ class Gilbert:
 
         if self.config.ai.enabled:
             ai_backend = self._create_ai_backend(self.config.ai.backend)
-            self.service_manager.register(
-                AIService(ai_backend, self.config.ai.credential)
-            )
+            self.service_manager.register(AIService(ai_backend))
 
         # 8. Register factories for hot-swap support
         config_svc.register_factory("tts", self._factory_tts)
@@ -460,12 +397,12 @@ class Gilbert:
     # --- Backend factories ---
 
     @staticmethod
-    def _create_email_backend(backend_name: str, email_address: str = "") -> "EmailBackend":
+    def _create_email_backend(backend_name: str) -> "EmailBackend":
         """Create an email backend by name."""
         if backend_name == "gmail":
             from gilbert.integrations.gmail import GmailBackend
 
-            return GmailBackend(email_address=email_address)
+            return GmailBackend()
         raise ValueError(f"Unknown email backend: {backend_name}")
 
     @staticmethod
@@ -531,17 +468,44 @@ class Gilbert:
             return ElevenLabsTTS()
         raise ValueError(f"Unknown TTS backend: {backend_name}")
 
+    @staticmethod
+    def _create_vision_backend(backend_name: str) -> "VisionBackend":
+        """Create a vision backend by name."""
+        if backend_name == "anthropic":
+            from gilbert.integrations.anthropic_vision import AnthropicVision
+
+            return AnthropicVision()
+        raise ValueError(f"Unknown vision backend: {backend_name}")
+
+    @staticmethod
+    def _create_ocr_backend(backend_name: str) -> "OCRBackend":
+        """Create an OCR backend by name."""
+        if backend_name == "tesseract":
+            from gilbert.integrations.tesseract_ocr import TesseractOCR
+
+            return TesseractOCR()
+        raise ValueError(f"Unknown OCR backend: {backend_name}")
+
+    @staticmethod
+    def _create_tunnel_backend(backend_name: str) -> "TunnelBackend":
+        """Create a tunnel backend by name."""
+        if backend_name == "ngrok":
+            from gilbert.integrations.ngrok_tunnel import NgrokTunnel
+
+            return NgrokTunnel()
+        raise ValueError(f"Unknown tunnel backend: {backend_name}")
+
     # --- Service factories (for hot-swap via ConfigurationService) ---
 
     def _factory_ai(self, config: dict[str, Any]) -> Service:
         """Create an AIService from a config section."""
         backend = self._create_ai_backend(config.get("backend", "anthropic"))
-        return AIService(backend=backend, credential_name=config.get("credential", ""))
+        return AIService(backend=backend)
 
     def _factory_tts(self, config: dict[str, Any]) -> Service:
         """Create a TTSService from a config section."""
         backend = self._create_tts_backend(config.get("backend", "elevenlabs"))
-        return TTSService(backend=backend, credential_name=config.get("credential", ""))
+        return TTSService(backend=backend)
 
     def _factory_speaker(self, config: dict[str, Any]) -> Service:
         """Create a SpeakerService from a config section."""
@@ -551,7 +515,7 @@ class Gilbert:
     def _factory_music(self, config: dict[str, Any]) -> Service:
         """Create a MusicService from a config section."""
         backend = self._create_music_backend(config.get("backend", "spotify"))
-        return MusicService(backend=backend, credential_name=config.get("credential", ""))
+        return MusicService(backend=backend)
 
     def _factory_presence(self, config: dict[str, Any]) -> Service:
         """Create a PresenceService from a config section."""

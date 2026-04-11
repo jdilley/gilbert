@@ -1,56 +1,103 @@
-"""OCR service — text extraction from images via Tesseract.
+"""OCR service — text extraction from images via a pluggable backend.
 
-Provides optical character recognition for document indexing. Gracefully
-degrades if Tesseract or Pillow are not installed.
+Provides optical character recognition for document indexing.
+Backend-agnostic — the Tesseract implementation is one option.
 """
 
-import asyncio
-import io
 import logging
+from typing import Any
 
+from gilbert.interfaces.configuration import ConfigParam
+from gilbert.interfaces.ocr import OCRBackend
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
+from gilbert.interfaces.tools import ToolParameterType
 
 logger = logging.getLogger(__name__)
 
 
 class OCRService(Service):
-    """Text extraction from images via Tesseract OCR.
+    """Text extraction from images via a pluggable OCR backend.
 
     Capabilities: ocr
-
-    Gracefully degrades if pytesseract or Pillow are not installed —
-    check the ``available`` property before calling ``extract_text``.
     """
 
-    def __init__(self) -> None:
-        self._available = False
+    def __init__(self, backend: OCRBackend) -> None:
+        self._backend = backend
+        self._settings: dict[str, Any] = {}
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="ocr",
             capabilities=frozenset({"ocr"}),
             requires=frozenset(),
-            optional=frozenset(),
+            optional=frozenset({"configuration"}),
         )
 
     async def start(self, resolver: ServiceResolver) -> None:
-        try:
-            import pytesseract  # noqa: F401
-            from PIL import Image  # noqa: F401
+        config_svc = resolver.get_capability("configuration")
+        if config_svc is not None:
+            from gilbert.core.services.configuration import ConfigurationService
 
-            self._available = True
-            logger.info("OCR service started (tesseract available)")
-        except ImportError:
-            self._available = False
-            logger.info("OCR service started (tesseract not available — OCR disabled)")
+            if isinstance(config_svc, ConfigurationService):
+                section = config_svc.get_section("ocr")
+                self._settings = section.get("settings", {})
+
+        await self._backend.initialize(self._settings)
+
+        if self._backend.available:
+            logger.info("OCR service started")
+        else:
+            logger.info("OCR service started (backend not available — OCR disabled)")
+
+    async def stop(self) -> None:
+        await self._backend.close()
+
+    # --- Configurable protocol ---
+
+    @property
+    def config_namespace(self) -> str:
+        return "ocr"
+
+    @property
+    def config_category(self) -> str:
+        return "Intelligence"
+
+    def config_params(self) -> list[ConfigParam]:
+        params = [
+            ConfigParam(
+                key="enabled", type=ToolParameterType.BOOLEAN,
+                description="Whether OCR text extraction is enabled.",
+                default=True, restart_required=True,
+            ),
+            ConfigParam(
+                key="backend", type=ToolParameterType.STRING,
+                description="OCR backend provider.",
+                default="tesseract", restart_required=True,
+                choices=tuple(OCRBackend.registered_backends().keys()) or ("tesseract",),
+            ),
+        ]
+        for bp in self._backend.backend_config_params():
+            params.append(ConfigParam(
+                key=f"settings.{bp.key}", type=bp.type,
+                description=bp.description, default=bp.default,
+                restart_required=bp.restart_required, sensitive=bp.sensitive,
+                choices=bp.choices, choices_from=bp.choices_from,
+                multiline=bp.multiline, backend_param=True,
+            ))
+        return params
+
+    async def on_config_changed(self, config: dict[str, Any]) -> None:
+        pass  # All OCR params are restart_required
+
+    # --- Public API ---
 
     @property
     def available(self) -> bool:
-        """Whether OCR dependencies are installed and working."""
-        return self._available
+        """Whether the OCR backend is ready."""
+        return self._backend.available
 
     async def extract_text(self, image_bytes: bytes) -> str:
-        """Extract text from an image using Tesseract OCR.
+        """Extract text from an image.
 
         Args:
             image_bytes: Raw image data (PNG, JPEG, TIFF, etc.)
@@ -58,20 +105,4 @@ class OCRService(Service):
         Returns:
             Extracted text, or empty string if OCR is unavailable or fails.
         """
-        if not self._available:
-            return ""
-
-        try:
-            import pytesseract
-            from PIL import Image
-
-            def _ocr() -> str:
-                img = Image.open(io.BytesIO(image_bytes))
-                return pytesseract.image_to_string(img)
-
-            result = await asyncio.to_thread(_ocr)
-            return result.strip()
-
-        except Exception:
-            logger.warning("OCR extraction failed", exc_info=True)
-            return ""
+        return await self._backend.extract_text(image_bytes)
