@@ -65,18 +65,42 @@ def _find_device(devices: dict[str, SoCo], speaker_id: str) -> SoCo:
     return device
 
 
-def _to_sonos_spotify_uri(spotify_uri: str) -> str:
-    """Convert a ``spotify:track:ID`` URI to Sonos ``x-sonos-spotify:`` format.
+def _to_sonos_spotify_uri_and_meta(spotify_uri: str, title: str = "") -> tuple[str, str]:
+    """Convert a ``spotify:track:ID`` URI to Sonos-compatible URI and DIDL metadata.
 
-    Sonos cannot play raw ``spotify:`` URIs via ``play_uri``. Wrapping in
-    ``x-sonos-spotify:`` with the Spotify service ID lets Sonos resolve
-    the track through its own Spotify account.
+    Uses SoCo's ``MusicService`` to build the correct URI with the proper
+    service ID and serial number for the local Sonos system's Spotify
+    account linkage.  Returns ``(uri, didl_meta)`` — the metadata tells
+    Sonos to resolve the track through its linked Spotify account.
     """
+    from xml.sax.saxutils import escape
+
     from soco.music_services import MusicService
 
-    sid = MusicService("Spotify").service_id
-    encoded = spotify_uri.replace(":", "%3a")
-    return f"x-sonos-spotify:{encoded}?sid={sid}&flags=8224&sn=1"
+    svc = MusicService("Spotify")
+    sonos_uri = str(svc.sonos_uri_from_id(spotify_uri))
+
+    # Build DIDL-Lite metadata with Spotify service descriptor so Sonos
+    # resolves the track via its linked Spotify account instead of
+    # treating it as a generic stream (which causes MIME-type errors).
+    didl = (
+        '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" '
+        'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" '
+        'xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" '
+        'xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">'
+        '<item id="{item_id}" parentID="-1" restricted="true">'
+        "<dc:title>{title}</dc:title>"
+        '<upnp:class>object.item.audioItem.musicTrack</upnp:class>'
+        "<desc id=\"cdudn\" nameSpace=\"urn:schemas-rinconnetworks-com:"
+        'metadata-1-0/">{service}</desc>'
+        "</item></DIDL-Lite>"
+    ).format(
+        item_id=escape(spotify_uri.replace(":", "%3a")),
+        title=escape(title or "Spotify"),
+        service=svc.desc,
+    )
+
+    return sonos_uri, didl
 
 
 class SonosSpeaker(SpeakerBackend):
@@ -141,10 +165,11 @@ class SonosSpeaker(SpeakerBackend):
         # Play — Spotify URIs need conversion to Sonos format
         title = request.title or ""
         uri = request.uri
+        meta = ""
 
         if uri.startswith("spotify:"):
-            uri = await asyncio.to_thread(_to_sonos_spotify_uri, uri)
-        await asyncio.to_thread(coordinator.play_uri, uri, title=title)
+            uri, meta = await asyncio.to_thread(_to_sonos_spotify_uri_and_meta, uri, title)
+        await asyncio.to_thread(coordinator.play_uri, uri, meta=meta, title=title)
 
         # Seek to position if requested
         if request.position_seconds is not None and request.position_seconds > 0:
