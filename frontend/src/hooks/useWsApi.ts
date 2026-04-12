@@ -19,6 +19,7 @@ import type { UIBlock } from "@/types/ui";
 import type { SkillInfo } from "@/types/skills";
 import type { ConfigDescribeResponse, ConfigSectionResponse, ConfigSetResult } from "@/types/config";
 import type { Job } from "@/types/scheduler";
+import type { SlashCommand } from "@/types/slash";
 
 export function useWsApi() {
   const { rpc } = useWebSocket();
@@ -86,6 +87,10 @@ export function useWsApi() {
     listChatUsers: () =>
       rpc<{ users: { user_id: string; display_name: string }[] }>({ type: "chat.user.list" })
         .then((r) => r.users),
+
+    listSlashCommands: () =>
+      rpc<{ commands: SlashCommand[] }>({ type: "slash.commands.list" })
+        .then((r) => r.commands),
 
     // ── Roles ─────────────────────────────────────────────────────
 

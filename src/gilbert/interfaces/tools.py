@@ -38,6 +38,12 @@ class ToolDefinition:
     description: str
     parameters: list[ToolParameter] = field(default_factory=list)
     required_role: str = "user"
+    # Optional slash-command exposure. When set, this tool becomes callable
+    # directly from the chat input as ``/<slash_command> <args>`` and shows
+    # up in the slash-command autocomplete. Opt-in because not every tool
+    # has a sensible shell-style form.
+    slash_command: str | None = None
+    slash_help: str = ""  # short help text; falls back to ``description``
 
     def to_json_schema(self) -> dict[str, Any]:
         """Convert parameters to JSON Schema format (used by most AI providers)."""

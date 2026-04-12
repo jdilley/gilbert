@@ -53,6 +53,9 @@ DEFAULT_RPC_PERMISSIONS: dict[str, int] = {
     "chat.message.send": 200,
     "chat.form.submit": 200,
     "chat.user.list": 200,
+    # Slash-command discovery — response is already RBAC-filtered per
+    # caller, so the listing endpoint itself is open to everyone.
+    "slash.commands.list": 200,
     "dashboard.get": 200,
     "documents.": 200,
     "screens.list": 200,

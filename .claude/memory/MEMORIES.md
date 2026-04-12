@@ -26,3 +26,4 @@
 - [WebSocket Protocol](memory-websocket-protocol.md) — bidirectional WS with typed frames, role-filtered events, chat RPC, peer publishing
 - [Skills System](memory-skills-system.md) — Agent Skills standard support, per-conversation skill activation via SKILL.md files
 - [Web Search Service](memory-websearch-service.md) — web search AI tool with Tavily backend
+- [Slash Commands](memory-slash-commands.md) — direct tool invocation from chat via /command syntax, bypassing the AI

@@ -73,6 +73,13 @@ class AudioOutputService(Service):
         return [
             ToolDefinition(
                 name="audio_output",
+                slash_command="announce",
+                slash_help=(
+                    "Announce text over the shop speakers (or as a "
+                    "playable audio link in chat). Positional form: "
+                    "/announce <text> [destination]. Use "
+                    "speaker_names=... to target specific speakers."
+                ),
                 description=(
                     "Synthesize text to speech and deliver the audio. "
                     "Use whenever the user wants to HEAR something "

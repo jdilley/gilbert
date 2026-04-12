@@ -14,6 +14,12 @@ from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from gilbert.core.context import get_current_user
+from gilbert.core.slash_commands import (
+    SlashCommandError,
+    extract_command_name,
+    format_usage,
+    parse_slash_command,
+)
 from gilbert.interfaces.ai import (
     AIBackend,
     AIContextProfile,
@@ -784,6 +790,47 @@ class AIService(Service):
 
         self._current_conversation_id = conversation_id
 
+        # ── Slash-command short-circuit ─────────────────────────────
+        # If the user typed ``/<name> ...`` and ``<name>`` matches a tool
+        # that opted in via ``ToolDefinition.slash_command``, bypass the
+        # AI entirely and invoke the tool directly. Unknown commands are
+        # rejected with a helpful error rather than leaked to the AI.
+        cmd_name = extract_command_name(user_message)
+        if cmd_name is not None:
+            slash_cmds = self._slash_commands_for_user(user_ctx)
+            if cmd_name in slash_cmds:
+                return await self._execute_slash_command(
+                    user_message,
+                    cmd_name,
+                    slash_cmds[cmd_name],
+                    messages,
+                    conversation_id,
+                    user_ctx,
+                )
+            # Unknown slash command — store the attempt and return an
+            # actionable error without invoking the AI.
+            available = sorted(slash_cmds.keys())
+            if available:
+                hint = "Available: " + ", ".join(f"/{c}" for c in available)
+            else:
+                hint = "No slash commands are available to you."
+            error_text = f"Unknown slash command '/{cmd_name}'. {hint}"
+            messages.append(Message(
+                role=MessageRole.USER,
+                content=user_message,
+                author_id=user_ctx.user_id if user_ctx else "",
+                author_name=user_ctx.display_name if user_ctx else "",
+            ))
+            messages.append(Message(
+                role=MessageRole.ASSISTANT, content=error_text,
+            ))
+            await self._save_conversation(
+                conversation_id, messages, user_ctx=user_ctx,
+            )
+            return error_text, conversation_id, [], [
+                {"tool_name": f"/{cmd_name}", "is_error": True}
+            ]
+
         # Append user message
         messages.append(Message(role=MessageRole.USER, content=user_message))
 
@@ -1210,6 +1257,177 @@ class AIService(Service):
                     "result_preview": str(exc)[:200],
                 })
         return results, ui_blocks
+
+    # --- Slash-command execution ---
+
+    def _slash_commands_for_user(
+        self, user_ctx: UserContext | None,
+    ) -> dict[str, tuple[ToolProvider, ToolDefinition]]:
+        """Return slash-enabled tools the user may invoke, keyed by command name.
+
+        Respects RBAC (via ``_discover_tools``) but ignores AI profile
+        filtering — slash commands are user-initiated, not AI calls.
+        """
+        all_tools = self._discover_tools(user_ctx=user_ctx)
+        result: dict[str, tuple[ToolProvider, ToolDefinition]] = {}
+        for _tool_name, (provider, tool_def) in all_tools.items():
+            cmd = tool_def.slash_command
+            if not cmd:
+                continue
+            if cmd in result:
+                logger.warning(
+                    "Duplicate slash command %r from tool %r "
+                    "(already registered by %r)",
+                    cmd, tool_def.name, result[cmd][1].name,
+                )
+                continue
+            result[cmd] = (provider, tool_def)
+        return result
+
+    async def _execute_slash_command(
+        self,
+        raw_text: str,
+        cmd_name: str,
+        entry: tuple[ToolProvider, ToolDefinition],
+        messages: list[Message],
+        conversation_id: str,
+        user_ctx: UserContext | None,
+    ) -> tuple[str, str, list[dict[str, Any]], list[dict[str, Any]]]:
+        """Parse, execute, and persist a slash command.
+
+        Returns the same tuple shape as ``chat()`` so callers can't tell
+        the difference between a slash command and an AI turn.
+        """
+        from gilbert.interfaces.ui import ToolOutput, UIBlock
+
+        provider, tool_def = entry
+
+        # Record the user's command as a user message (with author fields
+        # so shared-room history renders the actor correctly).
+        messages.append(Message(
+            role=MessageRole.USER,
+            content=raw_text,
+            author_id=user_ctx.user_id if user_ctx else "",
+            author_name=user_ctx.display_name if user_ctx else "",
+        ))
+
+        # Parse — errors are shown to the user as the assistant reply.
+        try:
+            arguments = parse_slash_command(raw_text, tool_def)
+        except SlashCommandError as exc:
+            error_text = str(exc)
+            messages.append(Message(
+                role=MessageRole.ASSISTANT, content=error_text,
+            ))
+            await self._save_conversation(
+                conversation_id, messages, user_ctx=user_ctx,
+            )
+            return (
+                error_text,
+                conversation_id,
+                [],
+                [{"tool_name": tool_def.name, "is_error": True}],
+            )
+
+        # Inject caller identity so tools can see who invoked them,
+        # matching the AI-driven path in ``_execute_tool_calls``.
+        if user_ctx is not None:
+            arguments["_user_id"] = user_ctx.user_id
+            arguments["_user_name"] = user_ctx.display_name
+            arguments["_user_roles"] = list(user_ctx.roles)
+
+        # Inject shared-room members if this is a room conversation.
+        if self._storage is not None:
+            conv_data = await self._storage.get(_COLLECTION, conversation_id)
+            if conv_data and conv_data.get("shared"):
+                arguments["_room_members"] = [
+                    {
+                        "user_id": m.get("user_id", ""),
+                        "display_name": m.get("display_name", ""),
+                    }
+                    for m in conv_data.get("members", [])
+                ]
+
+        tool_call_id = f"slash-{uuid.uuid4().hex[:12]}"
+        sanitized_args = self._sanitize_tool_args(arguments)
+
+        await self._publish_tool_event("chat.tool.started", {
+            "conversation_id": conversation_id,
+            "tool_name": tool_def.name,
+            "tool_call_id": tool_call_id,
+            "arguments": sanitized_args,
+        })
+
+        ui_blocks: list[UIBlock] = []
+        is_error = False
+        try:
+            raw_result = await provider.execute_tool(tool_def.name, arguments)
+            if isinstance(raw_result, ToolOutput):
+                result_text = raw_result.text
+                import dataclasses as _dc
+
+                for block in raw_result.ui_blocks:
+                    if not block.block_id:
+                        block = _dc.replace(block, block_id=str(uuid.uuid4()))
+                    if not block.tool_name:
+                        block = _dc.replace(block, tool_name=tool_def.name)
+                    ui_blocks.append(block)
+            else:
+                result_text = raw_result
+        except Exception as exc:
+            logger.exception(
+                "Slash command execution failed: /%s -> %s",
+                cmd_name, tool_def.name,
+            )
+            result_text = f"Error executing /{cmd_name}: {exc}"
+            is_error = True
+
+        await self._publish_tool_event("chat.tool.completed", {
+            "conversation_id": conversation_id,
+            "tool_name": tool_def.name,
+            "tool_call_id": tool_call_id,
+            "is_error": is_error,
+            "result_preview": result_text[:200] if result_text else "",
+        })
+
+        # Store the assistant turn with ToolCall/ToolResult metadata so
+        # the frontend renders it identically to an AI-driven tool use.
+        messages.append(Message(
+            role=MessageRole.ASSISTANT,
+            content=result_text,
+            tool_calls=[ToolCall(
+                tool_call_id=tool_call_id,
+                tool_name=tool_def.name,
+                arguments=sanitized_args,
+            )],
+            tool_results=[ToolResult(
+                tool_call_id=tool_call_id,
+                content=result_text,
+                is_error=is_error,
+            )],
+        ))
+
+        # Serialize UI blocks with position + submission state, matching
+        # the chat() agentic loop so downstream rendering is uniform.
+        assistant_count = sum(
+            1 for m in messages if m.role == MessageRole.ASSISTANT
+        )
+        response_index = max(0, assistant_count - 1)
+        ui_block_dicts: list[dict[str, Any]] = []
+        for block in ui_blocks:
+            d = block.to_dict()
+            d["response_index"] = response_index
+            d["submitted"] = False
+            d["submission"] = None
+            ui_block_dicts.append(d)
+
+        await self._save_conversation(
+            conversation_id, messages, user_ctx=user_ctx,
+            ui_blocks=ui_block_dicts,
+        )
+
+        tool_usage = [{"tool_name": tool_def.name, "is_error": is_error}]
+        return result_text, conversation_id, ui_block_dicts, tool_usage
 
     # --- Tool Event Publishing ---
 
@@ -1897,6 +2115,48 @@ class AIService(Service):
             "chat.room.invite_revoke": self._ws_room_invite_revoke,
             "chat.room.invite_respond": self._ws_room_invite_respond,
             "chat.user.list": self._ws_chat_list_users,
+            "slash.commands.list": self._ws_slash_commands_list,
+        }
+
+    async def _ws_slash_commands_list(
+        self, conn: Any, frame: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Return the slash commands the caller can invoke.
+
+        Drives chat-input autocomplete. Results are filtered by RBAC so
+        users only see commands they're actually allowed to run.
+        """
+        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
+        conn: WsConnection = conn
+
+        slash_cmds = self._slash_commands_for_user(conn.user_ctx)
+        commands: list[dict[str, Any]] = []
+        for cmd_name, (provider, tool_def) in sorted(slash_cmds.items()):
+            commands.append({
+                "command": cmd_name,
+                "tool_name": tool_def.name,
+                "provider": provider.tool_provider_name,
+                "description": tool_def.description,
+                "help": tool_def.slash_help or tool_def.description,
+                "usage": format_usage(tool_def),
+                "required_role": tool_def.required_role,
+                "parameters": [
+                    {
+                        "name": p.name,
+                        "type": p.type.value,
+                        "description": p.description,
+                        "required": p.required,
+                        "default": p.default,
+                        "enum": p.enum,
+                    }
+                    for p in tool_def.parameters
+                    if not p.name.startswith("_")
+                ],
+            })
+        return {
+            "type": "slash.commands.list.result",
+            "ref": frame.get("id"),
+            "commands": commands,
         }
 
     async def _ws_chat_send(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
@@ -1917,11 +2177,20 @@ class AIService(Service):
             if conv_data:
                 is_shared = conv_data.get("shared", False)
 
+        # Slash commands bypass the AI entirely and are handled inside
+        # chat(). In shared rooms they also bypass the mentions_gilbert
+        # check — invoking a tool is always intentional.
+        slash_cmd_name = extract_command_name(message)
+        is_slash_command = (
+            slash_cmd_name is not None
+            and slash_cmd_name in self._slash_commands_for_user(conn.user_ctx)
+        )
+
         try:
             if is_shared:
                 from gilbert.core.chat import mentions_gilbert, build_room_context, publish_event
 
-                addressed = mentions_gilbert(message)
+                addressed = mentions_gilbert(message) or is_slash_command
                 tagged_message = f"[{conn.user_ctx.display_name}]: {message}"
 
                 response_text = ""
@@ -1929,8 +2198,12 @@ class AIService(Service):
                 tool_usage: list[dict[str, Any]] = []
 
                 if addressed:
+                    # Slash commands need the raw "/cmd ..." text so the
+                    # parser recognizes them; the AI-chat path uses the
+                    # tagged form so Gilbert knows who said what.
+                    chat_message = message if is_slash_command else tagged_message
                     response_text, conv_id, ui_blocks, tool_usage = await self.chat(
-                        user_message=tagged_message,
+                        user_message=chat_message,
                         conversation_id=conversation_id,
                         user_ctx=conn.user_ctx,
                         system_prompt=build_room_context(conv_data, conn.user_ctx),
