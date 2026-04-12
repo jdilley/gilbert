@@ -20,6 +20,7 @@ import {
   SettingsIcon,
   DatabaseIcon,
   MonitorIcon,
+  ClockIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -35,6 +36,7 @@ const NAV_CONFIG: Record<string, NavItemConfig> = {
   "/documents": { label: "Documents", icon: FileTextIcon, color: "text-amber-500" },
   "/inbox": { label: "Inbox", icon: InboxIcon, color: "text-green-500" },
   "/roles": { label: "Roles", icon: ShieldIcon, color: "text-purple-500" },
+  "/scheduler": { label: "Scheduler", icon: ClockIcon, color: "text-teal-500" },
   "/settings": { label: "Settings", icon: SlidersHorizontalIcon, color: "text-orange-500" },
   "/system": { label: "System", icon: SettingsIcon, color: "text-slate-500" },
   "/entities": { label: "Entities", icon: DatabaseIcon, color: "text-cyan-500" },

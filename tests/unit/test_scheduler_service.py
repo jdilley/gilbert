@@ -836,3 +836,257 @@ async def test_on_config_changed_updates_rate_limiter() -> None:
         {"alarm_ai_max_calls": 0, "alarm_ai_window_seconds": 60}
     )
     assert svc._ai_rate_limiter.try_acquire() is False
+
+
+# --- WebSocket RPC handler tests ---
+
+
+class _FakeConn:
+    """Minimal WsConnection stand-in for handler tests.
+
+    Exposes the attributes scheduler handlers actually read: user_ctx,
+    user_level, and roles (via user_ctx).
+    """
+
+    def __init__(
+        self,
+        user_id: str = "alice",
+        roles: frozenset[str] = frozenset({"user"}),
+        user_level: int = 100,
+    ) -> None:
+        class _Ctx:
+            def __init__(self, uid: str, r: frozenset[str]) -> None:
+                self.user_id = uid
+                self.roles = r
+
+        self.user_ctx = _Ctx(user_id, roles)
+        self.user_level = user_level
+
+
+@pytest.mark.asyncio
+async def test_ws_service_info_includes_ws_handlers_capability() -> None:
+    svc = SchedulerService()
+    info = svc.service_info()
+    assert "ws_handlers" in info.capabilities
+
+
+@pytest.mark.asyncio
+async def test_ws_get_ws_handlers_returns_expected_keys() -> None:
+    svc = SchedulerService()
+    handlers = svc.get_ws_handlers()
+    expected = {
+        "scheduler.job.list",
+        "scheduler.job.get",
+        "scheduler.job.enable",
+        "scheduler.job.disable",
+        "scheduler.job.remove",
+        "scheduler.job.run_now",
+    }
+    assert set(handlers.keys()) == expected
+
+
+@pytest.mark.asyncio
+async def test_ws_job_list_returns_serialized_jobs(service: SchedulerService) -> None:
+    service.add_job(
+        "sys-poll", Schedule.every(5), AsyncMock(), system=True
+    )
+    service.add_job(
+        "user-beep", Schedule.every(10), AsyncMock(), system=False, owner="alice"
+    )
+    conn = _FakeConn()
+    response = await service._ws_job_list(conn, {"id": "req-1"})
+    assert response is not None
+    assert response["type"] == "scheduler.job.list.result"
+    assert response["ref"] == "req-1"
+    assert len(response["jobs"]) == 2
+    names = {j["name"] for j in response["jobs"]}
+    assert names == {"sys-poll", "user-beep"}
+    # Each serialized job has schedule + action + type
+    for j in response["jobs"]:
+        assert "schedule" in j
+        assert "action" in j
+        assert j["type"] in ("system", "user")
+        assert "enabled" in j
+        assert "state" in j
+
+
+@pytest.mark.asyncio
+async def test_ws_job_list_can_exclude_system(service: SchedulerService) -> None:
+    service.add_job("sys1", Schedule.every(5), AsyncMock(), system=True)
+    service.add_job("usr1", Schedule.every(5), AsyncMock(), system=False, owner="alice")
+    conn = _FakeConn()
+    response = await service._ws_job_list(conn, {"id": "r", "include_system": False})
+    assert response is not None
+    names = {j["name"] for j in response["jobs"]}
+    assert names == {"usr1"}
+
+
+@pytest.mark.asyncio
+async def test_ws_job_list_surfaces_action(service: SchedulerService) -> None:
+    action = ScheduledAction(
+        type=ScheduledActionType.TOOL,
+        tool="audio_output",
+        tool_arguments={"text": "hi"},
+    )
+    service.add_job(
+        "with-action",
+        Schedule.every(99),
+        AsyncMock(),
+        system=False,
+        owner="alice",
+        action=action,
+    )
+    conn = _FakeConn()
+    response = await service._ws_job_list(conn, {"id": "r"})
+    assert response is not None
+    job = next(j for j in response["jobs"] if j["name"] == "with-action")
+    assert job["action"]["type"] == "tool"
+    assert job["action"]["tool"] == "audio_output"
+    assert job["action"]["tool_arguments"] == {"text": "hi"}
+
+
+@pytest.mark.asyncio
+async def test_ws_job_get_returns_single_job(service: SchedulerService) -> None:
+    service.add_job("only-one", Schedule.every(5), AsyncMock(), system=False, owner="alice")
+    conn = _FakeConn()
+    response = await service._ws_job_get(conn, {"id": "r", "name": "only-one"})
+    assert response is not None
+    assert response["type"] == "scheduler.job.get.result"
+    assert response["job"]["name"] == "only-one"
+
+
+@pytest.mark.asyncio
+async def test_ws_job_get_unknown_returns_404(service: SchedulerService) -> None:
+    conn = _FakeConn()
+    response = await service._ws_job_get(conn, {"id": "r", "name": "nope"})
+    assert response is not None
+    assert response["type"] == "gilbert.error"
+    assert response["code"] == 404
+
+
+@pytest.mark.asyncio
+async def test_ws_job_get_missing_name_returns_400(service: SchedulerService) -> None:
+    conn = _FakeConn()
+    response = await service._ws_job_get(conn, {"id": "r"})
+    assert response is not None
+    assert response["type"] == "gilbert.error"
+    assert response["code"] == 400
+
+
+@pytest.mark.asyncio
+async def test_ws_job_enable_disable_toggle(service: SchedulerService) -> None:
+    service.add_job(
+        "toggleable", Schedule.every(5), AsyncMock(), system=False, owner="alice"
+    )
+    conn = _FakeConn()
+
+    # Disable
+    response = await service._ws_job_disable(conn, {"id": "r", "name": "toggleable"})
+    assert response is not None
+    assert response["status"] == "disabled"
+    assert service.get_job("toggleable").enabled is False
+
+    # Enable
+    response = await service._ws_job_enable(conn, {"id": "r", "name": "toggleable"})
+    assert response is not None
+    assert response["status"] == "enabled"
+    assert service.get_job("toggleable").enabled is True
+
+
+@pytest.mark.asyncio
+async def test_ws_job_enable_unknown_returns_404(service: SchedulerService) -> None:
+    conn = _FakeConn()
+    response = await service._ws_job_enable(conn, {"id": "r", "name": "nope"})
+    assert response is not None
+    assert response["type"] == "gilbert.error"
+    assert response["code"] == 404
+
+
+@pytest.mark.asyncio
+async def test_ws_job_remove_admin_can_remove_any(service: SchedulerService) -> None:
+    service.add_job(
+        "others-job", Schedule.every(5), AsyncMock(), system=False, owner="bob"
+    )
+    # Admin connection
+    admin_conn = _FakeConn(user_id="alice", roles=frozenset({"admin"}), user_level=0)
+    response = await service._ws_job_remove(admin_conn, {"id": "r", "name": "others-job"})
+    assert response is not None
+    assert response["status"] == "removed"
+    assert service.get_job("others-job") is None
+
+
+@pytest.mark.asyncio
+async def test_ws_job_remove_user_blocked_from_others(service: SchedulerService) -> None:
+    service.add_job(
+        "bobs-job", Schedule.every(5), AsyncMock(), system=False, owner="bob"
+    )
+    user_conn = _FakeConn(user_id="alice", roles=frozenset({"user"}), user_level=100)
+    response = await service._ws_job_remove(user_conn, {"id": "r", "name": "bobs-job"})
+    assert response is not None
+    assert response["type"] == "gilbert.error"
+    assert response["code"] == 403
+    # Job is still there
+    assert service.get_job("bobs-job") is not None
+
+
+@pytest.mark.asyncio
+async def test_ws_job_remove_user_can_remove_own(service: SchedulerService) -> None:
+    service.add_job(
+        "alices-job", Schedule.every(5), AsyncMock(), system=False, owner="alice"
+    )
+    user_conn = _FakeConn(user_id="alice", roles=frozenset({"user"}), user_level=100)
+    response = await service._ws_job_remove(user_conn, {"id": "r", "name": "alices-job"})
+    assert response is not None
+    assert response["status"] == "removed"
+
+
+@pytest.mark.asyncio
+async def test_ws_job_remove_system_job_blocked(service: SchedulerService) -> None:
+    service.add_job("sys", Schedule.every(5), AsyncMock(), system=True)
+    admin_conn = _FakeConn(user_id="alice", roles=frozenset({"admin"}), user_level=0)
+    response = await service._ws_job_remove(admin_conn, {"id": "r", "name": "sys"})
+    assert response is not None
+    assert response["type"] == "gilbert.error"
+    # System job → ValueError → 400
+    assert response["code"] == 400
+    assert "system" in response["error"].lower()
+    # Still registered
+    assert service.get_job("sys") is not None
+
+
+@pytest.mark.asyncio
+async def test_ws_job_run_now_fires_callback(service: SchedulerService) -> None:
+    fired = asyncio.Event()
+
+    async def _fire() -> None:
+        fired.set()
+
+    service.add_job("run-now-test", Schedule.every(99999), _fire, system=False, owner="alice")
+    conn = _FakeConn()
+    response = await service._ws_job_run_now(conn, {"id": "r", "name": "run-now-test"})
+    assert response is not None
+    assert response["status"] == "fired"
+    assert fired.is_set()
+
+
+@pytest.mark.asyncio
+async def test_ws_job_run_now_unknown_returns_404(service: SchedulerService) -> None:
+    conn = _FakeConn()
+    response = await service._ws_job_run_now(conn, {"id": "r", "name": "nope"})
+    assert response is not None
+    assert response["type"] == "gilbert.error"
+    assert response["code"] == 404
+
+
+def test_acl_scheduler_rpc_defaults() -> None:
+    """The scheduler frame types must resolve to the documented role levels."""
+    from gilbert.interfaces.acl import resolve_default_rpc_level
+
+    # User-level
+    assert resolve_default_rpc_level("scheduler.job.list") == 100
+    assert resolve_default_rpc_level("scheduler.job.get") == 100
+    assert resolve_default_rpc_level("scheduler.job.remove") == 100
+    # Admin-only state-changing operations
+    assert resolve_default_rpc_level("scheduler.job.enable") == 0
+    assert resolve_default_rpc_level("scheduler.job.disable") == 0
+    assert resolve_default_rpc_level("scheduler.job.run_now") == 0

@@ -18,6 +18,7 @@ import type { InboxStats, InboxMessage, MessageDetail, PendingReply } from "@/ty
 import type { UIBlock } from "@/types/ui";
 import type { SkillInfo } from "@/types/skills";
 import type { ConfigDescribeResponse, ConfigSectionResponse, ConfigSetResult } from "@/types/config";
+import type { Job } from "@/types/scheduler";
 
 export function useWsApi() {
   const { rpc } = useWebSocket();
@@ -277,6 +278,28 @@ export function useWsApi() {
 
     resetConfigSection: (namespace: string) =>
       rpc<{ status: string }>({ type: "config.section.reset", namespace }),
+
+    // ── Scheduler ─────────────────────────────────────────────────
+
+    listJobs: (includeSystem = true) =>
+      rpc<{ jobs: Job[] }>({ type: "scheduler.job.list", include_system: includeSystem })
+        .then((r) => r.jobs),
+
+    getJob: (name: string) =>
+      rpc<{ job: Job }>({ type: "scheduler.job.get", name })
+        .then((r) => r.job),
+
+    enableJob: (name: string) =>
+      rpc<{ status: string; name: string }>({ type: "scheduler.job.enable", name }),
+
+    disableJob: (name: string) =>
+      rpc<{ status: string; name: string }>({ type: "scheduler.job.disable", name }),
+
+    removeJob: (name: string) =>
+      rpc<{ status: string; name: string }>({ type: "scheduler.job.remove", name }),
+
+    runJobNow: (name: string) =>
+      rpc<{ status: string; name: string }>({ type: "scheduler.job.run_now", name }),
 
   }), [rpc]);
 }

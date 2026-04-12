@@ -58,6 +58,7 @@ class WebApiService(Service):
             {"title": "Documents", "description": "Knowledge base", "url": "/documents", "icon": "file-text", "required_role": "user", "requires_capability": "knowledge"},
             {"title": "Inbox", "description": "Email management", "url": "/inbox", "icon": "inbox", "required_role": "admin", "requires_capability": "email"},
             {"title": "Roles", "description": "Roles & access control", "url": "/roles", "icon": "shield", "required_role": "admin"},
+            {"title": "Scheduler", "description": "Timers & alarms", "url": "/scheduler", "icon": "clock", "required_role": "user"},
             {"title": "Entities", "description": "Entity browser", "url": "/entities", "icon": "database", "required_role": "admin"},
             {"title": "Settings", "description": "Service configuration", "url": "/settings", "icon": "sliders", "required_role": "admin"},
             {"title": "System", "description": "Service inspector", "url": "/system", "icon": "settings", "required_role": "admin"},

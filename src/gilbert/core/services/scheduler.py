@@ -145,7 +145,7 @@ class SchedulerService(Service):
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="scheduler",
-            capabilities=frozenset({"scheduler", "ai_tools"}),
+            capabilities=frozenset({"scheduler", "ai_tools", "ws_handlers"}),
             optional=frozenset(
                 {"entity_storage", "event_bus", "configuration", "ai_chat", "access_control"}
             ),
@@ -1200,3 +1200,184 @@ class SchedulerService(Service):
         except KeyError as e:
             return json.dumps({"error": str(e)})
         return json.dumps({"status": "resumed", "name": timer_name})
+
+    # --- WebSocket RPC handlers ---
+
+    def get_ws_handlers(self) -> dict[str, Any]:
+        """Expose scheduler operations to the web UI over WebSocket.
+
+        Frame type namespace: ``scheduler.job.*``. Default permission
+        levels are declared in ``gilbert.interfaces.acl`` — listing and
+        deletion are user-level (ownership is enforced per-handler for
+        non-admins), while enable/disable/run_now are admin-only.
+        """
+        return {
+            "scheduler.job.list": self._ws_job_list,
+            "scheduler.job.get": self._ws_job_get,
+            "scheduler.job.enable": self._ws_job_enable,
+            "scheduler.job.disable": self._ws_job_disable,
+            "scheduler.job.remove": self._ws_job_remove,
+            "scheduler.job.run_now": self._ws_job_run_now,
+        }
+
+    @staticmethod
+    def _serialize_job(info: JobInfo) -> dict[str, Any]:
+        """Convert a JobInfo to a plain dict for JSON transmission."""
+        return {
+            "name": info.name,
+            "type": "system" if info.system else "user",
+            "state": info.state.value,
+            "enabled": info.enabled,
+            "owner": info.owner,
+            "run_count": info.run_count,
+            "last_run": info.last_run,
+            "last_duration_seconds": info.last_duration_seconds,
+            "last_error": info.last_error,
+            "schedule": {
+                "type": info.schedule.type.value,
+                "interval_seconds": info.schedule.interval_seconds,
+                "hour": info.schedule.hour,
+                "minute": info.schedule.minute,
+            },
+            "action": info.action.to_dict(),
+        }
+
+    @staticmethod
+    def _ws_error(
+        frame: dict[str, Any],
+        *,
+        error: str,
+        code: int = 400,
+    ) -> dict[str, Any]:
+        """Build a standard error response frame."""
+        return {
+            "type": "gilbert.error",
+            "ref": frame.get("id"),
+            "error": error,
+            "code": code,
+        }
+
+    async def _ws_job_list(
+        self, conn: Any, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """List all jobs (system + user) with their current state and action."""
+        include_system = bool(frame.get("include_system", True))
+        jobs = self.list_jobs(include_system=include_system)
+        return {
+            "type": "scheduler.job.list.result",
+            "ref": frame.get("id"),
+            "jobs": [self._serialize_job(j) for j in jobs],
+        }
+
+    async def _ws_job_get(
+        self, conn: Any, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Get detailed info about a single job by name."""
+        name = str(frame.get("name") or "").strip()
+        if not name:
+            return self._ws_error(frame, error="Missing 'name'")
+        info = self.get_job(name)
+        if info is None:
+            return self._ws_error(frame, error=f"Job not found: {name}", code=404)
+        return {
+            "type": "scheduler.job.get.result",
+            "ref": frame.get("id"),
+            "job": self._serialize_job(info),
+        }
+
+    async def _ws_job_enable(
+        self, conn: Any, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Enable a disabled job. Admin-level via RPC permissions."""
+        name = str(frame.get("name") or "").strip()
+        if not name:
+            return self._ws_error(frame, error="Missing 'name'")
+        try:
+            self.enable_job(name)
+        except KeyError:
+            return self._ws_error(frame, error=f"Job not found: {name}", code=404)
+        return {
+            "type": "scheduler.job.enable.result",
+            "ref": frame.get("id"),
+            "name": name,
+            "status": "enabled",
+        }
+
+    async def _ws_job_disable(
+        self, conn: Any, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Disable (pause) a running job. Admin-level via RPC permissions."""
+        name = str(frame.get("name") or "").strip()
+        if not name:
+            return self._ws_error(frame, error="Missing 'name'")
+        try:
+            self.disable_job(name)
+        except KeyError:
+            return self._ws_error(frame, error=f"Job not found: {name}", code=404)
+        return {
+            "type": "scheduler.job.disable.result",
+            "ref": frame.get("id"),
+            "name": name,
+            "status": "disabled",
+        }
+
+    async def _ws_job_remove(
+        self, conn: Any, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Cancel and delete a job.
+
+        Non-admins can only remove jobs they own. System jobs cannot be
+        removed by anyone (the service layer enforces this and raises
+        ValueError).
+        """
+        name = str(frame.get("name") or "").strip()
+        if not name:
+            return self._ws_error(frame, error="Missing 'name'")
+
+        # Ownership check: non-admins can only cancel their own jobs.
+        user = getattr(conn, "user_ctx", None)
+        user_id = getattr(user, "user_id", "") if user else ""
+        roles = getattr(user, "roles", frozenset()) if user else frozenset()
+        is_admin = "admin" in roles or getattr(conn, "user_level", 999) < 0
+        requester_id = "" if is_admin else user_id
+
+        try:
+            self.remove_job(name, requester_id=requester_id)
+        except KeyError:
+            return self._ws_error(frame, error=f"Job not found: {name}", code=404)
+        except ValueError as e:
+            return self._ws_error(frame, error=str(e), code=400)
+        except PermissionError as e:
+            return self._ws_error(frame, error=str(e), code=403)
+
+        # Best-effort persistence cleanup. The in-memory job is already
+        # gone, so a stale storage record will be dropped on next start.
+        import contextlib
+
+        with contextlib.suppress(RuntimeError):
+            asyncio.create_task(self._unpersist_job(name))
+
+        return {
+            "type": "scheduler.job.remove.result",
+            "ref": frame.get("id"),
+            "name": name,
+            "status": "removed",
+        }
+
+    async def _ws_job_run_now(
+        self, conn: Any, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Fire a job immediately, outside its schedule. Admin-level."""
+        name = str(frame.get("name") or "").strip()
+        if not name:
+            return self._ws_error(frame, error="Missing 'name'")
+        try:
+            await self.run_now(name)
+        except KeyError:
+            return self._ws_error(frame, error=f"Job not found: {name}", code=404)
+        return {
+            "type": "scheduler.job.run_now.result",
+            "ref": frame.get("id"),
+            "name": name,
+            "status": "fired",
+        }

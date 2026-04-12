@@ -61,6 +61,15 @@ DEFAULT_RPC_PERMISSIONS: dict[str, int] = {
     "skills.workspace.": 200,
     # user (100)
     "chat.": 100,
+    # Scheduler: listing is user-level; state-changing operations on
+    # system jobs require admin. Handlers enforce ownership checks on
+    # user jobs so a non-admin user can only touch their own.
+    "scheduler.job.list": 100,
+    "scheduler.job.get": 100,
+    "scheduler.job.remove": 100,
+    "scheduler.job.enable": 0,
+    "scheduler.job.disable": 0,
+    "scheduler.job.run_now": 0,
     # admin (0)
     "config.": 0,
     "roles.": 0,
