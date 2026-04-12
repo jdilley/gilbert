@@ -48,15 +48,15 @@ export function DocumentsPage() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-center">Documents</h1>
-        <form onSubmit={handleSearch} className="flex gap-2">
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-4xl mx-auto">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-xl sm:text-2xl font-semibold">Documents</h1>
+        <form onSubmit={handleSearch} className="flex gap-2 sm:shrink-0">
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search documents..."
-            className="w-64"
+            className="flex-1 sm:w-64 sm:flex-none"
           />
           <Button type="submit" disabled={isSearching}>
             Search

@@ -19,31 +19,31 @@ export function EntityDetail() {
   });
 
   if (isLoading) {
-    return <div className="p-6 text-muted-foreground">Loading...</div>;
+    return <div className="p-4 sm:p-6 text-muted-foreground">Loading...</div>;
   }
 
   if (!data) return null;
 
   return (
-    <div className="p-6 space-y-4 max-w-4xl mx-auto">
-      <div className="flex items-center gap-2 text-sm">
+    <div className="p-4 sm:p-6 space-y-4 max-w-4xl mx-auto">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
         <Link to="/entities" className="text-muted-foreground hover:text-foreground">
           Entities
         </Link>
         <span className="text-muted-foreground">/</span>
         <Link
           to={`/entities/${encodeURIComponent(data.collection)}`}
-          className="text-muted-foreground hover:text-foreground"
+          className="text-muted-foreground hover:text-foreground break-all"
         >
           {data.collection}
         </Link>
         <span className="text-muted-foreground">/</span>
-        <span className="font-medium">{data.entity_id}</span>
+        <span className="font-medium break-all">{data.entity_id}</span>
       </div>
 
       <Card>
         <CardContent className="pt-6">
-          <pre className="text-sm overflow-x-auto whitespace-pre-wrap">
+          <pre className="text-xs sm:text-sm overflow-x-auto whitespace-pre-wrap break-words">
             {JSON.stringify(data.entity, null, 2)}
           </pre>
         </CardContent>

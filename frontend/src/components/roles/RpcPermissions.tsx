@@ -45,6 +45,7 @@ export function RpcPermissions() {
         <p className="px-3 py-2 text-xs text-muted-foreground border-b">
           Controls which WebSocket RPC operations each role can call. Longest prefix match wins.
         </p>
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b">
@@ -95,6 +96,7 @@ export function RpcPermissions() {
             ))}
           </tbody>
         </table>
+        </div>
       </CardContent>
     </Card>
   );

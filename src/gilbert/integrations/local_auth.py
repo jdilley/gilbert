@@ -51,7 +51,15 @@ class LocalAuthBackend(AuthBackend):
         if self._users is None:
             return None
 
-        identifier = credentials.get("email", "")
+        # Accept any of "identifier" (preferred), "username", or "email" so
+        # callers can use whichever wording fits their UI. The lookup is the
+        # same either way: try username, fall back to email.
+        identifier = (
+            credentials.get("identifier")
+            or credentials.get("username")
+            or credentials.get("email")
+            or ""
+        )
         password = credentials.get("password", "")
         if not identifier or not password:
             return None

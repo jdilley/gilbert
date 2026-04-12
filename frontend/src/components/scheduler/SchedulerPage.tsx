@@ -146,10 +146,10 @@ export function SchedulerPage() {
   const systemCount = (jobs ?? []).filter((j) => j.type === "system").length;
 
   return (
-    <div className="p-4 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
-          <h1 className="text-2xl font-semibold">Scheduler</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Scheduler</h1>
           <p className="text-sm text-muted-foreground">
             {userCount} user {userCount === 1 ? "job" : "jobs"} · {systemCount}{" "}
             system {systemCount === 1 ? "job" : "jobs"}
@@ -183,17 +183,18 @@ export function SchedulerPage() {
       ) : (
         <Card>
           <CardContent className="p-0">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b">
                   <th className="w-8"></th>
                   <th className="px-3 py-2 text-left font-medium">Name</th>
-                  <th className="px-3 py-2 text-left font-medium">Type</th>
-                  <th className="px-3 py-2 text-left font-medium">Schedule</th>
-                  <th className="px-3 py-2 text-left font-medium">Action</th>
+                  <th className="hidden sm:table-cell px-3 py-2 text-left font-medium">Type</th>
+                  <th className="hidden md:table-cell px-3 py-2 text-left font-medium">Schedule</th>
+                  <th className="hidden lg:table-cell px-3 py-2 text-left font-medium">Action</th>
                   <th className="px-3 py-2 text-left font-medium">State</th>
-                  <th className="px-3 py-2 text-left font-medium">Last run</th>
-                  <th className="px-3 py-2 text-left font-medium">Runs</th>
+                  <th className="hidden md:table-cell px-3 py-2 text-left font-medium">Last run</th>
+                  <th className="hidden lg:table-cell px-3 py-2 text-left font-medium">Runs</th>
                   <th className="px-3 py-2 w-32"></th>
                 </tr>
               </thead>
@@ -218,6 +219,7 @@ export function SchedulerPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -261,8 +263,8 @@ function JobRow({
             <ChevronRightIcon className="size-4 text-muted-foreground" />
           )}
         </td>
-        <td className="px-3 py-2 font-medium">{job.name}</td>
-        <td className="px-3 py-2">
+        <td className="px-3 py-2 font-medium break-words">{job.name}</td>
+        <td className="hidden sm:table-cell px-3 py-2">
           <Badge
             variant={isSystem ? "secondary" : "outline"}
             className="text-xs"
@@ -270,10 +272,10 @@ function JobRow({
             {job.type}
           </Badge>
         </td>
-        <td className="px-3 py-2 text-muted-foreground">
+        <td className="hidden md:table-cell px-3 py-2 text-muted-foreground whitespace-nowrap">
           {formatSchedule(job.schedule)}
         </td>
-        <td className="px-3 py-2">
+        <td className="hidden lg:table-cell px-3 py-2">
           <Badge
             variant={actionBadgeVariant(job.action.type)}
             className="text-xs"
@@ -287,10 +289,10 @@ function JobRow({
         <td className="px-3 py-2">
           <JobStateBadge state={job.state} enabled={job.enabled} error={job.last_error} />
         </td>
-        <td className="px-3 py-2 text-muted-foreground tabular-nums">
+        <td className="hidden md:table-cell px-3 py-2 text-muted-foreground tabular-nums whitespace-nowrap">
           {formatLastRun(job.last_run)}
         </td>
-        <td className="px-3 py-2 text-muted-foreground tabular-nums">
+        <td className="hidden lg:table-cell px-3 py-2 text-muted-foreground tabular-nums">
           {job.run_count}
         </td>
         <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>

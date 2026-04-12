@@ -91,9 +91,9 @@ export function InboxPage() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-4xl mx-auto">
-      <div className="flex items-center gap-4">
-        <h1 className="text-2xl font-semibold text-center">Inbox</h1>
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-4xl mx-auto">
+      <div className="flex items-center gap-3 sm:gap-4">
+        <h1 className="text-xl sm:text-2xl font-semibold">Inbox</h1>
         {stats && (
           <Badge variant="secondary">
             {stats.total} messages
@@ -113,15 +113,17 @@ export function InboxPage() {
               {pending.map((p) => (
                 <div
                   key={p.id}
-                  className="flex items-center gap-3 text-sm border-b pb-2 last:border-0"
+                  className="flex flex-wrap items-center gap-2 text-sm border-b pb-2 last:border-0 sm:gap-3"
                 >
                   <Badge variant="outline">{p.status}</Badge>
-                  <span className="text-muted-foreground">{p.send_at}</span>
-                  <span className="truncate flex-1">{p.customer_email} — {p.subject}</span>
+                  <span className="text-muted-foreground text-xs sm:text-sm">{p.send_at}</span>
+                  <span className="min-w-0 flex-1 basis-full truncate sm:basis-auto">
+                    {p.customer_email} — {p.subject}
+                  </span>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-destructive"
+                    className="ml-auto text-destructive"
                     onClick={() => cancelMutation.mutate(p.id)}
                   >
                     Cancel
@@ -133,58 +135,60 @@ export function InboxPage() {
         </Card>
       )}
 
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <Input
           value={sender}
           onChange={(e) => setSender(e.target.value)}
           placeholder="Filter by sender..."
-          className="w-48"
+          className="sm:w-48"
         />
         <Input
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
           placeholder="Filter by subject..."
-          className="w-48"
+          className="sm:flex-1 sm:max-w-xs"
         />
-        <Button variant="outline" onClick={() => refetch()}>
+        <Button variant="outline" onClick={() => refetch()} className="sm:w-auto">
           Search
         </Button>
       </div>
 
       <Card>
         <CardContent className="p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b">
-                <th className="px-3 py-2 text-left font-medium w-8"></th>
-                <th className="px-3 py-2 text-left font-medium">Date</th>
-                <th className="px-3 py-2 text-left font-medium">From</th>
-                <th className="px-3 py-2 text-left font-medium">Subject</th>
-                <th className="px-3 py-2 text-left font-medium">Preview</th>
-              </tr>
-            </thead>
-            <tbody>
-              {messages.map((msg) => (
-                <tr
-                  key={msg.message_id}
-                  className={`border-b hover:bg-accent/50 cursor-pointer ${msg.message_id === messageId ? "bg-accent/30" : ""}`}
-                  onClick={() => handleRowClick(msg)}
-                >
-                  <td className="px-3 py-2">
-                    {msg.is_inbound ? "\u2192" : "\u2190"}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    {new Date(msg.date).toLocaleDateString()}
-                  </td>
-                  <td className="px-3 py-2 truncate max-w-32">{msg.sender_name || msg.sender_email}</td>
-                  <td className="px-3 py-2 truncate max-w-48">{msg.subject}</td>
-                  <td className="px-3 py-2 truncate max-w-64 text-muted-foreground">
-                    {msg.snippet}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="px-3 py-2 text-left font-medium w-8"></th>
+                  <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Date</th>
+                  <th className="px-3 py-2 text-left font-medium">From</th>
+                  <th className="px-3 py-2 text-left font-medium">Subject</th>
+                  <th className="hidden md:table-cell px-3 py-2 text-left font-medium">Preview</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {messages.map((msg) => (
+                  <tr
+                    key={msg.message_id}
+                    className={`border-b hover:bg-accent/50 cursor-pointer ${msg.message_id === messageId ? "bg-accent/30" : ""}`}
+                    onClick={() => handleRowClick(msg)}
+                  >
+                    <td className="px-3 py-2">
+                      {msg.is_inbound ? "\u2192" : "\u2190"}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {new Date(msg.date).toLocaleDateString()}
+                    </td>
+                    <td className="px-3 py-2 truncate max-w-32">{msg.sender_name || msg.sender_email}</td>
+                    <td className="px-3 py-2 truncate max-w-48">{msg.subject}</td>
+                    <td className="hidden md:table-cell px-3 py-2 truncate max-w-64 text-muted-foreground">
+                      {msg.snippet}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
 
@@ -197,15 +201,15 @@ export function InboxPage() {
 
       {/* Message detail modal */}
       <Dialog open={!!selectedMsg && !loadingDetail} onOpenChange={() => closeDetail()}>
-        <DialogContent className="overflow-y-auto" style={{ maxWidth: "95vw", width: "95vw", height: "95vh", maxHeight: "95vh" }}>
+        <DialogContent className="flex max-h-[95vh] w-[calc(100%-1rem)] flex-col overflow-hidden sm:!max-w-3xl lg:!max-w-5xl">
           <DialogHeader>
-            <DialogTitle>{selectedMsg?.subject}</DialogTitle>
+            <DialogTitle className="pr-8 break-words">{selectedMsg?.subject}</DialogTitle>
           </DialogHeader>
           {selectedMsg && (
-            <div className="text-sm space-y-0">
+            <div className="flex-1 overflow-y-auto text-sm space-y-0 -mx-4 px-4">
               {threadMsgs.map((msg, i) => (
                 <div key={msg.message_id || i} className={i > 0 ? "border-t pt-4 mt-4" : ""}>
-                  <div className="text-muted-foreground pb-3">
+                  <div className="text-muted-foreground pb-3 break-words">
                     <div>From: {msg.sender_name || msg.sender_email}</div>
                     {msg.to?.length > 0 && (
                       <div>To: {msg.to.map((a: any) => a.name || a.email).join(", ")}</div>
@@ -218,7 +222,7 @@ export function InboxPage() {
                   {msg.body_html ? (
                     <EmailFrame html={msg.body_html} />
                   ) : (
-                    <pre className="whitespace-pre-wrap">{msg.body_text}</pre>
+                    <pre className="whitespace-pre-wrap break-words">{msg.body_text}</pre>
                   )}
                 </div>
               ))}

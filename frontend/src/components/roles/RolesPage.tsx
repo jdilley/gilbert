@@ -24,17 +24,19 @@ export function RolesPage() {
     TABS.find((t) => t.path === location.pathname)?.value || "roles";
 
   return (
-    <div className="p-6 space-y-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-semibold text-center">Roles & Access</h1>
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-4xl mx-auto">
+      <h1 className="text-xl sm:text-2xl font-semibold text-center">Roles & Access</h1>
 
       <Tabs value={currentTab}>
-        <TabsList>
-          {TABS.map((tab) => (
-            <Link key={tab.value} to={tab.path}>
-              <TabsTrigger value={tab.value}>{tab.label}</TabsTrigger>
-            </Link>
-          ))}
-        </TabsList>
+        <div className="-mx-4 overflow-x-auto sm:mx-0">
+          <TabsList className="mx-4 w-max sm:mx-0">
+            {TABS.map((tab) => (
+              <Link key={tab.value} to={tab.path}>
+                <TabsTrigger value={tab.value}>{tab.label}</TabsTrigger>
+              </Link>
+            ))}
+          </TabsList>
+        </div>
       </Tabs>
 
       <Routes>

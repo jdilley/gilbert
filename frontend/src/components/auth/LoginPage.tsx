@@ -19,7 +19,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const { refresh } = useAuth();
   const [searchParams] = useSearchParams();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(searchParams.get("error") || "");
   const [loading, setLoading] = useState(false);
@@ -37,7 +37,7 @@ export function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      await loginLocal(email, password);
+      await loginLocal(identifier, password);
       await refresh();
       navigate("/");
     } catch (err) {
@@ -64,13 +64,14 @@ export function LoginPage() {
           {formMethods.length > 0 && (
             <form onSubmit={handleLocalLogin} className="space-y-3">
               <div className="space-y-1.5">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="identifier">Email or username</Label>
                 <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
+                  id="identifier"
+                  type="text"
+                  autoComplete="username"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder="you@example.com or username"
                   required
                 />
               </div>

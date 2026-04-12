@@ -43,6 +43,7 @@ export function CollectionACLs() {
   return (
     <Card>
       <CardContent className="p-0">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b">
@@ -120,6 +121,7 @@ export function CollectionACLs() {
             ))}
           </tbody>
         </table>
+        </div>
       </CardContent>
     </Card>
   );

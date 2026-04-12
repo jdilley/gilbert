@@ -69,12 +69,13 @@ export function UserRoles() {
 
       <Card>
         <CardContent className="p-0">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b">
                 <th className="px-3 py-2 text-left font-medium">User</th>
-                <th className="px-3 py-2 text-left font-medium">Username</th>
-                <th className="px-3 py-2 text-left font-medium">Email</th>
+                <th className="hidden md:table-cell px-3 py-2 text-left font-medium">Username</th>
+                <th className="hidden lg:table-cell px-3 py-2 text-left font-medium">Email</th>
                 {data?.role_names.map((r) => (
                   <th key={r} className="px-3 py-2 text-center font-medium">
                     {r}
@@ -86,9 +87,9 @@ export function UserRoles() {
             <tbody>
               {data?.users.map((u) => (
                 <tr key={u.user_id} className="border-b">
-                  <td className="px-3 py-2">{u.display_name}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{u.username}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{u.email}</td>
+                  <td className="px-3 py-2 break-words">{u.display_name}</td>
+                  <td className="hidden md:table-cell px-3 py-2 text-muted-foreground break-words">{u.username}</td>
+                  <td className="hidden lg:table-cell px-3 py-2 text-muted-foreground break-words">{u.email}</td>
                   {data.role_names.map((r) => (
                     <td key={r} className="px-3 py-2 text-center">
                       <input
@@ -130,6 +131,7 @@ export function UserRoles() {
               ))}
             </tbody>
           </table>
+          </div>
         </CardContent>
       </Card>
     </div>

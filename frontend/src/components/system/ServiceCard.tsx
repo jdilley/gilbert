@@ -90,32 +90,34 @@ export function ServiceCard({ service }: ServiceCardProps) {
           {service.config_params.length > 0 && (
             <div>
               <span className="text-xs text-muted-foreground">Configuration:</span>
-              <table className="w-full mt-1 text-xs">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-1 pr-2">Key</th>
-                    <th className="text-left py-1 pr-2">Type</th>
-                    <th className="text-left py-1 pr-2">Value</th>
-                    <th className="text-left py-1">Default</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {service.config_params.map((p) => (
-                    <tr key={p.key} className="border-b">
-                      <td className="py-1 pr-2">{p.key}</td>
-                      <td className="py-1 pr-2 text-muted-foreground">{p.type}</td>
-                      <td className="py-1 pr-2">
-                        {String(
-                          service.config_values[p.key] ?? "",
-                        )}
-                      </td>
-                      <td className="py-1 text-muted-foreground">
-                        {String(p.default ?? "")}
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full mt-1 text-xs">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left py-1 pr-2">Key</th>
+                      <th className="hidden sm:table-cell text-left py-1 pr-2">Type</th>
+                      <th className="text-left py-1 pr-2">Value</th>
+                      <th className="hidden md:table-cell text-left py-1">Default</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {service.config_params.map((p) => (
+                      <tr key={p.key} className="border-b">
+                        <td className="py-1 pr-2 break-words">{p.key}</td>
+                        <td className="hidden sm:table-cell py-1 pr-2 text-muted-foreground">{p.type}</td>
+                        <td className="py-1 pr-2 break-words">
+                          {String(
+                            service.config_values[p.key] ?? "",
+                          )}
+                        </td>
+                        <td className="hidden md:table-cell py-1 text-muted-foreground break-words">
+                          {String(p.default ?? "")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 

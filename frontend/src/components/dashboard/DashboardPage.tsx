@@ -53,14 +53,14 @@ export function DashboardPage() {
 
   if (isLoading) {
     return (
-      <div className="p-6 text-muted-foreground">Loading dashboard...</div>
+      <div className="p-4 sm:p-6 text-muted-foreground">Loading dashboard...</div>
     );
   }
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-semibold mb-6 text-center">Gilbert</h1>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+    <div className="p-4 sm:p-6">
+      <h1 className="text-xl sm:text-2xl font-semibold mb-4 sm:mb-6 text-center">Gilbert</h1>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
         {data?.cards.map((card) => {
           const style = CARD_STYLES[card.url] ?? DEFAULT_STYLE;
           const Icon = style.icon;

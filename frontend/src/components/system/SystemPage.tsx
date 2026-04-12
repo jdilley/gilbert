@@ -13,12 +13,12 @@ export function SystemPage() {
   });
 
   if (isLoading) {
-    return <div className="p-6 text-muted-foreground">Loading...</div>;
+    return <div className="p-4 sm:p-6 text-muted-foreground">Loading...</div>;
   }
 
   return (
-    <div className="p-6 space-y-4 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-semibold text-center">System Browser</h1>
+    <div className="p-4 sm:p-6 space-y-4 max-w-4xl mx-auto">
+      <h1 className="text-xl sm:text-2xl font-semibold text-center">System Browser</h1>
       <div className="space-y-3">
         {data?.services.map((svc) => (
           <ServiceCard key={svc.name} service={svc} />

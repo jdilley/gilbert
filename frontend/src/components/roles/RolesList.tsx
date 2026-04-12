@@ -61,48 +61,50 @@ export function RolesList() {
 
       <Card>
         <CardContent className="p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b">
-                <th className="px-3 py-2 text-left font-medium">Role</th>
-                <th className="px-3 py-2 text-left font-medium">Level</th>
-                <th className="px-3 py-2 text-left font-medium">Type</th>
-                <th className="px-3 py-2 text-left font-medium">Description</th>
-                <th className="px-3 py-2 w-16"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {data?.roles.map((role) => (
-                <tr key={role.name} className="border-b">
-                  <td className="px-3 py-2 font-medium">{role.name}</td>
-                  <td className="px-3 py-2">{role.level}</td>
-                  <td className="px-3 py-2">
-                    <Badge
-                      variant={role.builtin ? "secondary" : "outline"}
-                      className="text-xs"
-                    >
-                      {role.builtin ? "Built-in" : "Custom"}
-                    </Badge>
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    {role.description}
-                  </td>
-                  <td className="px-3 py-2">
-                    {!role.builtin && (
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        className="text-destructive"
-                        onClick={() => deleteMutation.mutate(role.name)}
-                      >
-                        <Trash2Icon className="size-3" />
-                      </Button>
-                    )}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="px-3 py-2 text-left font-medium">Role</th>
+                  <th className="px-3 py-2 text-left font-medium">Level</th>
+                  <th className="hidden sm:table-cell px-3 py-2 text-left font-medium">Type</th>
+                  <th className="hidden md:table-cell px-3 py-2 text-left font-medium">Description</th>
+                  <th className="px-3 py-2 w-16"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data?.roles.map((role) => (
+                  <tr key={role.name} className="border-b">
+                    <td className="px-3 py-2 font-medium break-words">{role.name}</td>
+                    <td className="px-3 py-2">{role.level}</td>
+                    <td className="hidden sm:table-cell px-3 py-2">
+                      <Badge
+                        variant={role.builtin ? "secondary" : "outline"}
+                        className="text-xs"
+                      >
+                        {role.builtin ? "Built-in" : "Custom"}
+                      </Badge>
+                    </td>
+                    <td className="hidden md:table-cell px-3 py-2 text-muted-foreground">
+                      {role.description}
+                    </td>
+                    <td className="px-3 py-2">
+                      {!role.builtin && (
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          className="text-destructive"
+                          onClick={() => deleteMutation.mutate(role.name)}
+                        >
+                          <Trash2Icon className="size-3" />
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
 

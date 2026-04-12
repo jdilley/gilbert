@@ -10,12 +10,12 @@ export async function fetchLoginMethods(): Promise<LoginMethod[]> {
 }
 
 export async function loginLocal(
-  email: string,
+  identifier: string,
   password: string,
 ): Promise<User> {
   return apiFetch<User>("/auth/login/local", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ identifier, password }),
   });
 }
 

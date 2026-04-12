@@ -226,7 +226,7 @@ export function ConfigSection({ section }: ConfigSectionProps) {
           </>}
 
           {/* Save / Reset bar */}
-          <div className="flex items-center gap-2 mt-6 pt-4 border-t">
+          <div className="flex flex-wrap items-center gap-2 mt-6 pt-4 border-t">
             <Button size="sm" disabled={!hasChanges || saveMutation.isPending} onClick={() => saveMutation.mutate()}>
               <SaveIcon className="size-3.5 mr-1.5" />
               {saveMutation.isPending ? "Saving..." : "Save"}
@@ -236,12 +236,12 @@ export function ConfigSection({ section }: ConfigSectionProps) {
               Reset to Defaults
             </Button>
             {saveStatus && (
-              <span className={`text-xs ml-2 ${saveStatus.includes("fail") ? "text-red-400" : "text-green-400"}`}>
+              <span className={`text-xs ${saveStatus.includes("fail") ? "text-red-400" : "text-green-400"}`}>
                 {saveStatus}
               </span>
             )}
             {hasChanges && !saveStatus && (
-              <span className="text-xs text-amber-400 ml-2">Unsaved changes</span>
+              <span className="text-xs text-amber-400">Unsaved changes</span>
             )}
           </div>
         </CardContent>

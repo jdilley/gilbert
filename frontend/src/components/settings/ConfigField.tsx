@@ -346,7 +346,7 @@ function KeyValueField({
           value={newKey}
           onChange={(e) => setNewKey(e.target.value)}
           placeholder="Key"
-          className="text-sm w-1/3"
+          className="text-sm w-24 sm:w-1/3"
         />
         <Input
           type="text"

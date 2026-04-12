@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
@@ -10,6 +11,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   MessageSquareIcon,
@@ -21,6 +28,7 @@ import {
   DatabaseIcon,
   MonitorIcon,
   ClockIcon,
+  MenuIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -43,19 +51,15 @@ const NAV_CONFIG: Record<string, NavItemConfig> = {
   "/screens": { label: "Screens", icon: MonitorIcon, color: "text-rose-500" },
 };
 
-/** Map dashboard card URLs to short nav labels. */
-const NAV_LABELS: Record<string, string> = Object.fromEntries(
-  Object.entries(NAV_CONFIG).map(([url, cfg]) => [url, cfg.label]),
-);
-
 /** URLs that should appear in the top nav (skip dashboard itself). */
-const NAV_URLS = new Set(Object.keys(NAV_LABELS));
+const NAV_URLS = new Set(Object.keys(NAV_CONFIG));
 
 export function NavBar() {
   const { user, logout } = useAuth();
   const { connected } = useWebSocket();
   const api = useWsApi();
   const location = useLocation();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const { data } = useQuery({
     queryKey: ["dashboard"],
@@ -75,33 +79,44 @@ export function NavBar() {
 
   return (
     <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex h-14 items-center px-4 gap-4">
-        <Link to="/" className="font-semibold text-lg mr-2">
+      <div className="flex h-14 items-center gap-2 px-3 sm:gap-4 sm:px-4">
+        {/* Mobile hamburger */}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="md:hidden"
+          onClick={() => setMobileOpen(true)}
+          aria-label="Open navigation"
+        >
+          <MenuIcon className="size-5" />
+        </Button>
+
+        <Link to="/" className="font-semibold text-lg sm:mr-2">
           Gilbert
         </Link>
 
-        <nav className="flex items-center gap-1">
+        {/* Desktop horizontal nav */}
+        <nav className="hidden md:flex items-center gap-1 overflow-x-auto">
           {navItems.map((card) => {
             const cfg = NAV_CONFIG[card.url];
             const Icon = cfg?.icon;
+            const active = location.pathname.startsWith(card.url);
             return (
-              <Link key={card.url} to={card.url}>
+              <Link key={card.url} to={card.url} title={cfg?.label ?? card.title}>
                 <Button
-                  variant={
-                    location.pathname.startsWith(card.url) ? "secondary" : "ghost"
-                  }
+                  variant={active ? "secondary" : "ghost"}
                   size="sm"
                   className="gap-1.5"
                 >
                   {Icon && <Icon className={`h-4 w-4 ${cfg.color}`} />}
-                  {cfg?.label ?? card.title}
+                  <span className="hidden lg:inline">{cfg?.label ?? card.title}</span>
                 </Button>
               </Link>
             );
           })}
         </nav>
 
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-2 sm:gap-3">
           <div
             className={`h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`}
             title={connected ? "Connected" : "Disconnected"}
@@ -132,6 +147,37 @@ export function NavBar() {
           </DropdownMenu>
         </div>
       </div>
+
+      {/* Mobile drawer navigation */}
+      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+        <SheetContent side="left" className="w-72 p-0">
+          <SheetHeader>
+            <SheetTitle>Gilbert</SheetTitle>
+          </SheetHeader>
+          <nav className="flex flex-col px-2 pb-4">
+            {navItems.map((card) => {
+              const cfg = NAV_CONFIG[card.url];
+              const Icon = cfg?.icon;
+              const active = location.pathname.startsWith(card.url);
+              return (
+                <Link
+                  key={card.url}
+                  to={card.url}
+                  onClick={() => setMobileOpen(false)}
+                  className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors ${
+                    active
+                      ? "bg-secondary text-foreground"
+                      : "text-foreground/80 hover:bg-accent hover:text-foreground"
+                  }`}
+                >
+                  {Icon && <Icon className={`size-4 ${cfg.color}`} />}
+                  <span>{cfg?.label ?? card.title}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        </SheetContent>
+      </Sheet>
     </header>
   );
 }

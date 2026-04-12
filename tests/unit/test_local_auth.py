@@ -132,6 +132,7 @@ async def local_auth() -> LocalAuthBackend:
     # Create a test user with a hashed password.
     pw_hash = svc.hash_password("secret123")
     await backend.create_user("u1", {
+        "username": "testuser",
         "email": "test@example.com",
         "display_name": "Test",
         "password_hash": pw_hash,
@@ -157,6 +158,32 @@ async def test_authenticate_success(local_auth: LocalAuthBackend) -> None:
     assert info.provider_user_id == "u1"
 
 
+async def test_authenticate_with_username(local_auth: LocalAuthBackend) -> None:
+    info = await local_auth.authenticate({"identifier": "testuser", "password": "secret123"})
+    assert info is not None
+    assert info.provider_user_id == "u1"
+
+
+async def test_authenticate_with_username_field(local_auth: LocalAuthBackend) -> None:
+    info = await local_auth.authenticate({"username": "testuser", "password": "secret123"})
+    assert info is not None
+    assert info.provider_user_id == "u1"
+
+
+async def test_authenticate_with_email_via_identifier(local_auth: LocalAuthBackend) -> None:
+    info = await local_auth.authenticate(
+        {"identifier": "test@example.com", "password": "secret123"}
+    )
+    assert info is not None
+    assert info.provider_user_id == "u1"
+
+
+async def test_authenticate_username_case_insensitive(local_auth: LocalAuthBackend) -> None:
+    info = await local_auth.authenticate({"identifier": "TestUser", "password": "secret123"})
+    assert info is not None
+    assert info.provider_user_id == "u1"
+
+
 async def test_authenticate_wrong_password(local_auth: LocalAuthBackend) -> None:
     info = await local_auth.authenticate({"email": "test@example.com", "password": "wrong"})
     assert info is None
@@ -167,9 +194,15 @@ async def test_authenticate_unknown_email(local_auth: LocalAuthBackend) -> None:
     assert info is None
 
 
+async def test_authenticate_unknown_username(local_auth: LocalAuthBackend) -> None:
+    info = await local_auth.authenticate({"identifier": "ghost", "password": "secret123"})
+    assert info is None
+
+
 async def test_authenticate_empty_credentials(local_auth: LocalAuthBackend) -> None:
     assert await local_auth.authenticate({}) is None
     assert await local_auth.authenticate({"email": "", "password": ""}) is None
+    assert await local_auth.authenticate({"identifier": "", "password": "x"}) is None
 
 
 async def test_hash_password_produces_valid_hash(local_auth: LocalAuthBackend) -> None:

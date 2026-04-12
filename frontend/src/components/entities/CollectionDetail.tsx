@@ -22,7 +22,7 @@ export function CollectionDetail() {
   });
 
   if (isLoading) {
-    return <div className="p-6 text-muted-foreground">Loading...</div>;
+    return <div className="p-4 sm:p-6 text-muted-foreground">Loading...</div>;
   }
 
   if (!data) return null;
@@ -56,13 +56,13 @@ export function CollectionDetail() {
   const currentDir = searchParams.get("dir");
 
   return (
-    <div className="p-6 space-y-4 max-w-4xl mx-auto">
-      <div className="flex items-center gap-2">
+    <div className="p-4 sm:p-6 space-y-4 max-w-4xl mx-auto">
+      <div className="flex flex-wrap items-center gap-2">
         <Link to="/entities" className="text-muted-foreground hover:text-foreground text-sm">
           Entities
         </Link>
         <span className="text-muted-foreground">/</span>
-        <h1 className="text-lg font-semibold">{data.collection}</h1>
+        <h1 className="text-lg font-semibold break-all">{data.collection}</h1>
         <span className="text-sm text-muted-foreground">
           ({data.total} entities)
         </span>
