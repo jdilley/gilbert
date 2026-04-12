@@ -384,6 +384,8 @@ class InboxService(Service):
         body_text: str = "",
         cc: list[EmailAddress] | None = None,
         attachments: list[EmailAttachment] | None = None,
+        reply_to: EmailAddress | None = None,
+        from_name: str = "",
     ) -> str:
         """Reply to an existing message. Returns the sent message's ID."""
         if self._backend is None:
@@ -406,6 +408,8 @@ class InboxService(Service):
             in_reply_to=in_reply_to,
             thread_id=thread_id,
             attachments=attachments,
+            reply_to=reply_to,
+            from_name=from_name,
         )
 
         # Persist outbound
@@ -448,6 +452,8 @@ class InboxService(Service):
         body_text: str = "",
         cc: list[EmailAddress] | None = None,
         attachments: list[EmailAttachment] | None = None,
+        reply_to: EmailAddress | None = None,
+        from_name: str = "",
     ) -> str:
         """Compose and send a new email. Returns the sent message's ID."""
         if self._backend is None:
@@ -459,6 +465,8 @@ class InboxService(Service):
             body_text=body_text,
             cc=cc,
             attachments=attachments,
+            reply_to=reply_to,
+            from_name=from_name,
         )
 
         now = datetime.now(timezone.utc)

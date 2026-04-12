@@ -178,6 +178,8 @@ class GmailBackend(EmailBackend):
         in_reply_to: str = "",
         thread_id: str = "",
         attachments: list[EmailAttachment] | None = None,
+        reply_to: EmailAddress | None = None,
+        from_name: str = "",
     ) -> str:
         svc = self._ensure_service()
 
@@ -205,7 +207,12 @@ class GmailBackend(EmailBackend):
 
         msg["To"] = ", ".join(str(a) for a in to)
         msg["Subject"] = subject
-        msg["From"] = self._email_address
+        if from_name:
+            msg["From"] = str(EmailAddress(email=self._email_address, name=from_name))
+        else:
+            msg["From"] = self._email_address
+        if reply_to:
+            msg["Reply-To"] = str(reply_to)
         if cc:
             msg["Cc"] = ", ".join(str(a) for a in cc)
         if in_reply_to:

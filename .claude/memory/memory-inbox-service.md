@@ -75,8 +75,8 @@ inbox:
 - `get_message(message_id)` — single message from entity store
 - `get_thread(thread_id)` — all messages in a thread, date ascending
 - `get_stats()` — returns `{total, inbound}` counts
-- `reply_to_message(message_id, body_html, body_text)` — reply via backend, persist outbound
-- `send_message(to, subject, body_html, body_text, cc)` — send via backend, persist outbound
+- `reply_to_message(message_id, body_html, body_text, cc, attachments, reply_to, from_name)` — reply via backend, persist outbound. `reply_to` sets the Reply-To header (e.g., route replies to a shared group alias); `from_name` sets a friendly display name on the From header.
+- `send_message(to, subject, body_html, body_text, cc, attachments, reply_to, from_name)` — send via backend, persist outbound. Same `reply_to` / `from_name` semantics as above.
 
 ### InboxAIChatService (`core/services/inbox_ai_chat.py`)
 - Subscribes to `inbox.message.received`, checks sender allowlist, runs AI chat, replies via email
@@ -99,6 +99,12 @@ inbox:
 - AI tools accept `attach_documents` array of knowledge store document IDs (e.g., `local:docs/report.pdf`)
 - Documents resolved via KnowledgeService backends at send time
 
+### Reply-To and From Display Name
+- `EmailBackend.send()` accepts `reply_to: EmailAddress | None` and `from_name: str`
+- When `from_name` is set, the Gmail backend formats the From header as `"Name" <email>` via `str(EmailAddress(...))`
+- When `reply_to` is set, the Gmail backend adds a `Reply-To` header. Useful for routing customer replies to a shared group alias (e.g. `sales@company.com`) so the whole team sees the thread even though the mailbox sender is a single assistant account.
+- These parameters are pass-through only — InboxService does not persist them on the stored outbound record (the stored record still uses `sender_email` = the configured inbox address)
+
 ## Related
 - [Event System](memory-event-system.md) — events published by inbox
 - [Scheduler Service](memory-scheduler-service.md) — polling job
@@ -108,4 +114,5 @@ inbox:
 - `src/gilbert/integrations/gmail.py` — GmailBackend (self-contained, owns service_account_json)
 - `src/gilbert/web/routes/inbox.py` — Web routes (admin only)
 - `src/gilbert/web/templates/inbox.html` — Inbox UI template
-- `tests/unit/test_inbox_service.py` — unit tests
+- `tests/unit/test_inbox_service.py` — InboxService unit tests
+- `tests/unit/test_gmail_backend.py` — Gmail backend MIME construction (From, Reply-To, etc.)

@@ -47,12 +47,15 @@ class FakeEmailBackend(EmailBackend):
         in_reply_to: str = "",
         thread_id: str = "",
         attachments: Any = None,
+        reply_to: EmailAddress | None = None,
+        from_name: str = "",
     ) -> str:
         self.sent.append({
             "to": to, "subject": subject, "body_html": body_html,
             "body_text": body_text, "cc": cc,
             "in_reply_to": in_reply_to, "thread_id": thread_id,
             "attachments": attachments,
+            "reply_to": reply_to, "from_name": from_name,
         })
         return self._next_send_id
 
@@ -511,6 +514,42 @@ class TestPublicAPI:
         ]
         assert len(sent_events) == 1
         assert sent_events[0].data["subject"] == "Hello"
+
+    @pytest.mark.asyncio
+    async def test_send_passes_reply_to_and_from_name(
+        self, inbox_service: InboxService, backend: FakeEmailBackend,
+    ) -> None:
+        """Reply-To and From display name should reach the backend."""
+        await inbox_service.send_message(
+            to=[EmailAddress(email="customer@example.com")],
+            subject="Hello",
+            body_html="<p>Hi</p>",
+            reply_to=EmailAddress(email="sales@example.com"),
+            from_name="Example Co",
+        )
+        assert len(backend.sent) == 1
+        sent = backend.sent[0]
+        assert sent["reply_to"] == EmailAddress(email="sales@example.com")
+        assert sent["from_name"] == "Example Co"
+
+    @pytest.mark.asyncio
+    async def test_reply_passes_reply_to_and_from_name(
+        self, inbox_service: InboxService, backend: FakeEmailBackend,
+    ) -> None:
+        """Reply-To and From display name should reach the backend on replies."""
+        backend.messages = [_make_message()]
+        await inbox_service._poll()
+
+        await inbox_service.reply_to_message(
+            message_id="msg_001",
+            body_html="<p>Reply</p>",
+            reply_to=EmailAddress(email="sales@example.com"),
+            from_name="Example Co",
+        )
+        # First entry was a synthetic send (if any); the reply is the last.
+        sent = backend.sent[-1]
+        assert sent["reply_to"] == EmailAddress(email="sales@example.com")
+        assert sent["from_name"] == "Example Co"
 
     @pytest.mark.asyncio
     async def test_reply_publishes_event(

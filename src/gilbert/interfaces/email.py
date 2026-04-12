@@ -116,6 +116,14 @@ class EmailBackend(ABC):
         in_reply_to: str = "",
         thread_id: str = "",
         attachments: list[EmailAttachment] | None = None,
+        reply_to: EmailAddress | None = None,
+        from_name: str = "",
     ) -> str:
-        """Send an email. Returns the sent message's ID."""
+        """Send an email. Returns the sent message's ID.
+
+        If ``reply_to`` is set, the Reply-To header is added so replies
+        route to a different address than the sender. If ``from_name`` is
+        set, the From header is formatted as ``"<from_name>" <sender>``
+        so mail clients display the friendly name.
+        """
         ...
