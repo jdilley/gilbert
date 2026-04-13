@@ -1,8 +1,23 @@
 # Gilbert installation data (per-instance config, database, logs, plugin cache)
 .gilbert/
 
-# Plugins directory (local plugin development)
-plugins/
+# Plugin directories
+#
+# std-plugins/ — the first-party gilbert-plugins repository. Users
+#   clone briandilley/gilbert-plugins into this directory; it has its
+#   own git history and isn't tracked by the main gilbert repo.
+# local-plugins/ — plugins the user writes locally. Never tracked.
+# installed-plugins/ — plugins fetched at runtime from external sources
+#   (GitHub URLs, etc.). Managed by the plugin loader.
+#
+# We keep the empty directory scaffolds around (via .gitkeep) so
+# gilbert.yaml's ``plugins.directories`` works out of the box on a
+# fresh clone without the user having to mkdir anything.
+std-plugins/
+local-plugins/*
+!local-plugins/README.md
+installed-plugins/*
+!installed-plugins/README.md
 
 # Python
 __pycache__/

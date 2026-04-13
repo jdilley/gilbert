@@ -163,28 +163,38 @@ Vector database for the knowledge base. Documents from local files and Google Dr
 Plugins extend Gilbert without modifying core code. A plugin is a Python package that implements the `Plugin` interface and exposes a `create_plugin()` factory function.
 
 ```
-plugins/
+std-plugins/
   my-plugin/
-    plugin.yaml      # metadata and default config
-    __init__.py       # create_plugin() entry point
-    service.py        # your service implementation
+    plugin.yaml       # metadata and default config
+    __init__.py        # makes the directory a Python package
+    plugin.py          # create_plugin() entry point
+    service.py         # your service implementation
 ```
 
 Plugins receive a `PluginContext` with access to the service manager, configuration, a data directory, and namespaced storage (automatically prefixed to avoid collisions). They can register new services, subscribe to events, expose AI tools, and add web routes.
 
-Plugins are loaded from:
-- **Local directories** — for development or private plugins
-- **GitHub URLs** — fetched and cached at runtime
+### Plugin directories
 
-Configuration follows the same layering as core: plugin defaults in `plugin.yaml`, overrides in `.gilbert/config.yaml` under `plugins.config.<name>`.
+Gilbert scans three directories at startup, each with a distinct role:
+
+| Directory | Purpose | Tracked in git? |
+|---|---|---|
+| `std-plugins/` | First-party plugins from [`briandilley/gilbert-plugins`](https://github.com/briandilley/gilbert-plugins). Cloned into place. | Separate repo |
+| `local-plugins/` | Plugins you write yourself for this installation. | No (gitignored) |
+| `installed-plugins/` | Plugins installed at runtime from external sources (GitHub URLs, etc.). | No (gitignored) |
+
+Every subdirectory of each of these that contains a `plugin.yaml` is loaded at startup. Configuration follows the same layering as core: plugin defaults in `plugin.yaml`, overrides in `.gilbert/config.yaml` under `plugins.config.<name>`.
 
 ### Community plugins
 
 A collection of first-party and community plugins lives in a separate
 repository: **[briandilley/gilbert-plugins](https://github.com/briandilley/gilbert-plugins)**.
-Clone it into your `plugins/` directory and restart Gilbert to pick
-them up — each plugin is self-contained and opt-in from the Settings
-UI.
+Clone it into `std-plugins/` and restart Gilbert to pick them up —
+each plugin is self-contained and opt-in from the Settings UI:
+
+```bash
+git clone git@github.com:briandilley/gilbert-plugins.git std-plugins
+```
 
 New integrations belong there rather than in this repo. If you've
 built a plugin for a service, device, or workflow that might be

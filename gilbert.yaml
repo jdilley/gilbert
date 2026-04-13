@@ -22,8 +22,20 @@ web:
   port: 8000
 
 plugins:
-  # Directories scanned for local plugins at startup. Each subdirectory
-  # with a plugin.yaml is loaded. The path is relative to the repo root
-  # (the working directory when gilbert is launched).
+  # Directories scanned for plugins at startup. Each subdirectory with
+  # a ``plugin.yaml`` is loaded. Paths are relative to the working
+  # directory Gilbert is launched from (the repo root by default).
+  #
+  # The three standard directories have distinct roles:
+  #
+  # - ``std-plugins``  — the first-party ``briandilley/gilbert-plugins``
+  #   repository, cloned into place. Shared, reviewed, version-controlled
+  #   upstream.
+  # - ``local-plugins`` — plugins you write yourself for this
+  #   installation. Gitignored so your work stays local.
+  # - ``installed-plugins`` — plugins installed at runtime from
+  #   external sources (e.g. fetched from a GitHub URL).
   directories:
-    - plugins
+    - std-plugins
+    - local-plugins
+    - installed-plugins
