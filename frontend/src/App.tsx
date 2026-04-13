@@ -14,6 +14,7 @@ import { SettingsPage } from "@/components/settings/SettingsPage";
 import { SystemPage } from "@/components/system/SystemPage";
 import { ScreensPage } from "@/components/screens/ScreensPage";
 import { SchedulerPage } from "@/components/scheduler/SchedulerPage";
+import { PluginsPage } from "@/components/plugins/PluginsPage";
 
 export default function App() {
   return (
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="/roles/*" element={<RolesPage />} />
           <Route path="/scheduler" element={<SchedulerPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/plugins" element={<PluginsPage />} />
           <Route path="/system" element={<SystemPage />} />
           <Route path="/screens" element={<ScreensPage />} />
         </Route>

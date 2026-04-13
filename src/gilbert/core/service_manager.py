@@ -221,6 +221,68 @@ class ServiceManager(ServiceResolver):
             self._failed.add(svc_info.name)
             await self._publish_event("service.failed", svc_info.name, svc_info)
 
+    async def start_service(self, name: str) -> None:
+        """Start a single already-registered service.
+
+        Used by hot-load paths (e.g. plugin install) where a service was
+        registered after ``start_all()`` ran — typically inside a plugin's
+        ``setup()`` callback — and now needs its lifecycle ``start()``
+        invoked.  No-op if already started.
+        """
+        if name in self._started:
+            return
+        svc = self._registered.get(name)
+        if svc is None:
+            raise LookupError(f"Service not found: {name}")
+        info = svc.service_info()
+        try:
+            await svc.start(self)
+            self._started.append(name)
+            self._failed.discard(name)
+            logger.info("Service started: %s", name)
+            await self._publish_event("service.started", name, info)
+        except Exception:
+            logger.exception("Service %s failed to start", name)
+            self._failed.add(name)
+            await self._publish_event("service.failed", name, info)
+            raise
+
+    async def stop_and_unregister(self, name: str) -> None:
+        """Stop a service and remove it from the manager entirely.
+
+        Used by hot-unload paths (e.g. plugin uninstall).  Stops the
+        service if running, removes its capability index entries, and
+        drops it from the registered set.  Publishes ``service.stopped``.
+        Safe to call on an already-stopped service.
+        """
+        svc = self._registered.get(name)
+        if svc is None:
+            raise LookupError(f"Service not found: {name}")
+
+        info = svc.service_info()
+
+        # Stop if running
+        if name in self._started:
+            try:
+                await svc.stop()
+                logger.info("Service stopped: %s", name)
+            except Exception:
+                logger.exception("Error stopping service: %s", name)
+            self._started.remove(name)
+
+        # Unindex capabilities
+        for cap in info.capabilities:
+            names = self._capabilities.get(cap, [])
+            if name in names:
+                names.remove(name)
+            if not names:
+                self._capabilities.pop(cap, None)
+
+        self._registered.pop(name, None)
+        self._failed.discard(name)
+
+        await self._publish_event("service.stopped", name, info)
+
     # --- Internal ---
 
     async def _publish_event(self, event_type: str, name: str, info: ServiceInfo) -> None:

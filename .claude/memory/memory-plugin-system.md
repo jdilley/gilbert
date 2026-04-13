@@ -58,6 +58,29 @@ plugins:
   2. Loads each plugin, creates its data dir, passes `PluginContext`
   3. Also loads legacy explicit sources (path/URL)
   4. Then `service_manager.start_all()` resolves service dependencies
+- Each successfully-loaded plugin is tracked in `Gilbert._plugins` as a `LoadedPlugin` dataclass holding the plugin instance, the install path on disk, and the set of service names registered during `setup()` (snapshotted by diffing `service_manager.list_services()` before/after).
+- `Gilbert.make_plugin_context(name)` is the shared context builder used by both the boot-time loader and the runtime `PluginManagerService`.
+
+### Runtime Install / Uninstall (`src/gilbert/core/services/plugin_manager.py`)
+The `PluginManagerService` allows admins to install plugins at runtime from the web UI (`/plugins`) or chat (`/plugin install <url>` / `/plugin uninstall <name>` / `/plugin list`). Capabilities: `plugin_manager`, `ai_tools`, `ws_handlers`. WS frames: `plugins.list` / `plugins.install` / `plugins.uninstall` (admin-level via `interfaces/acl.py`).
+
+**Install flow** (`PluginLoader.install_from_url` then service-side):
+1. `_fetch_to(url)` routes by URL shape — archive suffix wins (`.zip`, `.tar.gz`, `.tgz`, `.tar.bz2`); GitHub URLs (with optional `/tree/<ref>/<subpath>` or `/blob/...`) are shallow-cloned. Anything else is rejected.
+2. Archives are downloaded with `httpx.stream` (in `asyncio.to_thread`), extracted with safe-extract helpers that reject `..` and absolute paths, and unwrapped if there's a single top-level dir (the GitHub source-zip convention).
+3. `_validate_plugin_dir` checks for `plugin.yaml` + `plugin.py` at the root, valid name (`[a-zA-Z][a-zA-Z0-9_-]*`), and required version.
+4. `_test_load` imports the plugin under a throwaway `gilbert_plugin_test_<uuid>` package name (cleaned up afterward) so `create_plugin()` is verified before we commit anything to disk.
+5. The directory is moved into `installed-plugins/<name>/`. Existing installs raise unless `force=True`.
+6. `PluginManagerService.install` snapshots the registered-service set, calls `loader.load_from_manifest()` + `plugin.setup(ctx)`, diffs to learn which services the plugin added, then `service_manager.start_service(name)` for each new one.
+7. The plugin is appended to `Gilbert._plugins` (so it's torn down on shutdown) and a row is persisted in the `gilbert.plugin_installs` entity collection (`{_id, name, version, source_url, install_path, installed_at, registered_services}`).
+8. **Rollback on failure**: any service registered between snapshots is `stop_and_unregister`'d, the install dir is removed, and the registry stays clean.
+
+**Uninstall flow**: `plugin.teardown()`, `service_manager.stop_and_unregister(name)` for each registered service (capabilities are unindexed and the service is dropped from `_registered`/`_started`), `Gilbert.remove_loaded_plugin`, registry row deleted, install dir removed, and any cached `gilbert_plugin_<sanitized>.*` entries are purged from `sys.modules` so a future re-install gets a fresh import.
+
+**ServiceManager helpers** (`src/gilbert/core/service_manager.py`):
+- `start_service(name)` — start a service that was registered after `start_all()` (e.g. inside a plugin `setup()` that ran post-boot). No-op if already started.
+- `stop_and_unregister(name)` — stop + remove a service entirely, with capability index cleanup. Publishes `service.stopped`. Used by uninstall.
+
+**Source buckets**: `list_installed()` classifies each plugin as `std` / `local` / `installed` / `unknown` by which configured `plugins.directories` entry contains its install path. Only `installed`-bucket plugins are uninstallable through this service — std-plugins and local-plugins are managed outside the runtime.
 
 ### Plugin Data Directory
 Plugins store persistent data in `.gilbert/plugin-data/<plugin-name>/`. Plugins never write to their own source directory. The data dir is created automatically during plugin setup.
@@ -67,8 +90,11 @@ There is no CredentialService. Plugins store credentials inline in their configu
 
 ## Related
 - `src/gilbert/interfaces/plugin.py` — Plugin, PluginMeta, PluginContext
-- `src/gilbert/plugins/loader.py` — PluginLoader, PluginManifest
+- `src/gilbert/plugins/loader.py` — PluginLoader, PluginManifest, install_from_url, archive helpers
 - `src/gilbert/config.py` — PluginsConfig, load_config()
-- `src/gilbert/core/app.py` — Gilbert.create(), _load_plugins()
+- `src/gilbert/core/app.py` — Gilbert.create(), _load_plugins(), make_plugin_context(), LoadedPlugin
+- `src/gilbert/core/service_manager.py` — start_service(), stop_and_unregister() for hot load/unload
+- `src/gilbert/core/services/plugin_manager.py` — PluginManagerService (install/uninstall/list_installed, /plugin tools, plugins.* WS handlers)
+- `frontend/src/components/plugins/PluginsPage.tsx` — admin UI for the install registry
 - [Service System](memory-service-system.md) — how services work
 - [Configuration and Data Directory](memory-config-and-data-dir.md) — config layering

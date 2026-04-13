@@ -25,6 +25,7 @@ import type {
 } from "@/types/config";
 import type { Job } from "@/types/scheduler";
 import type { SlashCommand } from "@/types/slash";
+import type { InstalledPlugin, InstallPluginResponse } from "@/types/plugins";
 
 export function useWsApi() {
   const { rpc } = useWebSocket();
@@ -300,6 +301,18 @@ export function useWsApi() {
         key,
         payload,
       }),
+
+    // ── Plugins ───────────────────────────────────────────────────
+
+    listPlugins: () =>
+      rpc<{ plugins: InstalledPlugin[] }>({ type: "plugins.list" })
+        .then((r) => r.plugins),
+
+    installPlugin: (url: string, force = false) =>
+      rpc<InstallPluginResponse>({ type: "plugins.install", url, force }),
+
+    uninstallPlugin: (name: string) =>
+      rpc<{ status: string; name: string }>({ type: "plugins.uninstall", name }),
 
     // ── Scheduler ─────────────────────────────────────────────────
 

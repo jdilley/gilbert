@@ -61,6 +61,7 @@ class WebApiService(Service):
             {"title": "Scheduler", "description": "Timers & alarms", "url": "/scheduler", "icon": "clock", "required_role": "user"},
             {"title": "Entities", "description": "Entity browser", "url": "/entities", "icon": "database", "required_role": "admin"},
             {"title": "Settings", "description": "Service configuration", "url": "/settings", "icon": "sliders", "required_role": "admin"},
+            {"title": "Plugins", "description": "Install & manage plugins", "url": "/plugins", "icon": "package", "required_role": "admin"},
             {"title": "System", "description": "Service inspector", "url": "/system", "icon": "settings", "required_role": "admin"},
         ]
 

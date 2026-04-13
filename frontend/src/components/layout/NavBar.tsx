@@ -28,6 +28,7 @@ import {
   DatabaseIcon,
   MonitorIcon,
   ClockIcon,
+  PackageIcon,
   MenuIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -46,6 +47,7 @@ const NAV_CONFIG: Record<string, NavItemConfig> = {
   "/roles": { label: "Roles", icon: ShieldIcon, color: "text-purple-500" },
   "/scheduler": { label: "Scheduler", icon: ClockIcon, color: "text-teal-500" },
   "/settings": { label: "Settings", icon: SlidersHorizontalIcon, color: "text-orange-500" },
+  "/plugins": { label: "Plugins", icon: PackageIcon, color: "text-indigo-500" },
   "/system": { label: "System", icon: SettingsIcon, color: "text-slate-500" },
   "/entities": { label: "Entities", icon: DatabaseIcon, color: "text-cyan-500" },
   "/screens": { label: "Screens", icon: MonitorIcon, color: "text-rose-500" },

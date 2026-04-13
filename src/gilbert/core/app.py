@@ -1,6 +1,7 @@
 """Application bootstrap — wires everything together and manages lifecycle."""
 
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,20 @@ logger = logging.getLogger(__name__)
 PLUGIN_DATA_DIR = DATA_DIR / "plugin-data"
 
 
+@dataclass
+class LoadedPlugin:
+    """A plugin that has been successfully loaded into the running app.
+
+    Tracks both the plugin instance and the directory it was loaded
+    from, so the runtime PluginManagerService can attribute it to a
+    source bucket (std/local/installed) and find it for uninstall.
+    """
+
+    plugin: Plugin
+    install_path: Path
+    registered_services: list[str] = field(default_factory=list)
+
+
 class Gilbert:
     """Main application. Boots the system, loads plugins, starts services."""
 
@@ -48,7 +63,7 @@ class Gilbert:
         self.config = config
         self.registry = ServiceRegistry()
         self.service_manager = ServiceManager()
-        self._plugins: list[Plugin] = []
+        self._plugins: list[LoadedPlugin] = []
 
     @classmethod
     def create(cls, config_path: str | Path | None = None) -> "Gilbert":
@@ -233,6 +248,13 @@ class Gilbert:
 
         self.service_manager.register(WebApiService())
 
+        # Plugin manager — runtime install/uninstall of plugins
+        from gilbert.core.services.plugin_manager import PluginManagerService
+
+        plugin_mgr = PluginManagerService()
+        plugin_mgr.bind_gilbert(self)
+        self.service_manager.register(plugin_mgr)
+
         self.service_manager.register(AIService())
 
         # 8. Register factories for hot-swap support
@@ -262,33 +284,68 @@ class Gilbert:
             len(self._plugins),
         )
 
-    async def _load_plugins(self) -> None:
-        """Load plugins from discovered manifests and explicit sources."""
-        loader = PluginLoader(cache_dir=self.config.plugins.cache_dir)
+    def make_plugin_context(self, name: str) -> PluginContext:
+        """Build a ``PluginContext`` for a plugin by name.
+
+        Used both by the boot-time loader and the runtime
+        ``PluginManagerService`` so that plugins installed at runtime
+        receive the same kind of context (data dir, namespaced storage,
+        config slot) as boot-loaded ones.
+        """
         plugin_config = self.config.plugins.config
 
         # Get the raw storage backend for creating namespaced wrappers.
-        # Use list_services() since services haven't started yet.
+        # Use list_services() since this may run before start_all().
         storage_svc = self.service_manager.list_services().get("storage")
-        raw_backend = storage_svc.raw_backend if storage_svc is not None and isinstance(storage_svc, StorageProvider) else None
+        raw_backend = (
+            storage_svc.raw_backend
+            if storage_svc is not None and isinstance(storage_svc, StorageProvider)
+            else None
+        )
 
-        def _make_context(name: str) -> PluginContext:
-            data_dir = PLUGIN_DATA_DIR / name
-            data_dir.mkdir(parents=True, exist_ok=True)
+        data_dir = PLUGIN_DATA_DIR / name
+        data_dir.mkdir(parents=True, exist_ok=True)
 
-            plugin_storage = None
-            if raw_backend is not None:
-                from gilbert.interfaces.storage import NamespacedStorageBackend
-                plugin_storage = NamespacedStorageBackend(
-                    raw_backend, f"gilbert.plugin.{name}",
-                )
+        plugin_storage = None
+        if raw_backend is not None:
+            from gilbert.interfaces.storage import NamespacedStorageBackend
 
-            return PluginContext(
-                services=self.service_manager,
-                config=plugin_config.get(name, {}),
-                data_dir=data_dir,
-                storage=plugin_storage,
+            plugin_storage = NamespacedStorageBackend(
+                raw_backend, f"gilbert.plugin.{name}",
             )
+
+        return PluginContext(
+            services=self.service_manager,
+            config=plugin_config.get(name, {}),
+            data_dir=data_dir,
+            storage=plugin_storage,
+        )
+
+    def list_loaded_plugins(self) -> list[LoadedPlugin]:
+        """Return all plugins currently loaded into the app (boot-time + runtime)."""
+        return list(self._plugins)
+
+    def find_loaded_plugin(self, name: str) -> LoadedPlugin | None:
+        """Look up a loaded plugin by name."""
+        for entry in self._plugins:
+            if entry.plugin.metadata().name == name:
+                return entry
+        return None
+
+    def add_loaded_plugin(self, entry: LoadedPlugin) -> None:
+        """Record a plugin loaded at runtime so the manager can track it."""
+        self._plugins.append(entry)
+
+    def remove_loaded_plugin(self, name: str) -> LoadedPlugin | None:
+        """Drop a runtime-installed plugin from the loaded list."""
+        for i, entry in enumerate(self._plugins):
+            if entry.plugin.metadata().name == name:
+                return self._plugins.pop(i)
+        return None
+
+    async def _load_plugins(self) -> None:
+        """Load plugins from discovered manifests and explicit sources."""
+        loader = PluginLoader(cache_dir=self.config.plugins.cache_dir)
 
         # Phase 1: Load plugins from scanned directories (already discovered)
         manifests: list[PluginManifest] = getattr(self, "_discovered_manifests", [])
@@ -296,10 +353,18 @@ class Gilbert:
 
         for manifest in sorted_manifests:
             try:
+                # Snapshot the registered services so we can attribute
+                # any new ones to this plugin (used later for uninstall).
+                before = set(self.service_manager.list_services().keys())
                 plugin = loader.load_from_manifest(manifest)
-                context = _make_context(manifest.name)
+                context = self.make_plugin_context(manifest.name)
                 await plugin.setup(context)
-                self._plugins.append(plugin)
+                after = set(self.service_manager.list_services().keys())
+                self._plugins.append(LoadedPlugin(
+                    plugin=plugin,
+                    install_path=manifest.path,
+                    registered_services=sorted(after - before),
+                ))
             except Exception:
                 logger.exception("Failed to load plugin: %s", manifest.name)
 
@@ -308,11 +373,17 @@ class Gilbert:
             if not source.enabled:
                 continue
             try:
+                before = set(self.service_manager.list_services().keys())
                 plugin = await loader.load(source.source)
                 meta = plugin.metadata()
-                context = _make_context(meta.name)
+                context = self.make_plugin_context(meta.name)
                 await plugin.setup(context)
-                self._plugins.append(plugin)
+                after = set(self.service_manager.list_services().keys())
+                self._plugins.append(LoadedPlugin(
+                    plugin=plugin,
+                    install_path=Path(source.source),
+                    registered_services=sorted(after - before),
+                ))
             except Exception:
                 logger.exception("Failed to load plugin: %s", source.source)
 
@@ -321,11 +392,14 @@ class Gilbert:
         logger.info("Stopping Gilbert...")
 
         # Tear down plugins
-        for plugin in reversed(self._plugins):
+        for entry in reversed(self._plugins):
             try:
-                await plugin.teardown()
+                await entry.plugin.teardown()
             except Exception:
-                logger.exception("Error tearing down plugin: %s", plugin.metadata().name)
+                logger.exception(
+                    "Error tearing down plugin: %s",
+                    entry.plugin.metadata().name,
+                )
 
         # Stop all services (reverse order, includes storage close)
         await self.service_manager.stop_all()
