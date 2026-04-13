@@ -454,11 +454,17 @@ class AccessControlService(Service):
         return [
             ToolDefinition(
                 name="list_roles",
+                slash_group="acl",
+                slash_command="roles",
+                slash_help="List all roles: /acl roles",
                 description="List all roles in the system with their hierarchy levels.",
-                required_role="everyone",
+                required_role="admin",
             ),
             ToolDefinition(
                 name="create_role",
+                slash_group="acl",
+                slash_command="create_role",
+                slash_help="Create a role: /acl create_role <name> <level> [description]",
                 description="Create a custom role with a name and hierarchy level (lower number = more privileged).",
                 parameters=[
                     ToolParameter(name="name", type=ToolParameterType.STRING, description="Role name."),
@@ -469,6 +475,9 @@ class AccessControlService(Service):
             ),
             ToolDefinition(
                 name="update_role",
+                slash_group="acl",
+                slash_command="update_role",
+                slash_help="Update a role: /acl update_role <name> level=... description=...",
                 description="Update a custom role's level or description. Built-in roles (admin, user, everyone) cannot have their level changed.",
                 parameters=[
                     ToolParameter(name="name", type=ToolParameterType.STRING, description="Role name to update."),
@@ -479,6 +488,9 @@ class AccessControlService(Service):
             ),
             ToolDefinition(
                 name="delete_role",
+                slash_group="acl",
+                slash_command="delete_role",
+                slash_help="Delete a custom role: /acl delete_role <name>",
                 description="Delete a custom role. Built-in roles cannot be deleted.",
                 parameters=[
                     ToolParameter(name="name", type=ToolParameterType.STRING, description="Role name to delete."),
@@ -487,11 +499,17 @@ class AccessControlService(Service):
             ),
             ToolDefinition(
                 name="get_tool_permissions",
+                slash_group="acl",
+                slash_command="tools",
+                slash_help="List tool role requirements: /acl tools",
                 description="List all tools and their required roles, including any overrides.",
-                required_role="everyone",
+                required_role="admin",
             ),
             ToolDefinition(
                 name="set_tool_permission",
+                slash_group="acl",
+                slash_command="set_tool",
+                slash_help="Override a tool's role: /acl set_tool <tool> <role>",
                 description="Override the required role for a specific tool.",
                 parameters=[
                     ToolParameter(name="tool_name", type=ToolParameterType.STRING, description="Tool name."),
@@ -501,6 +519,9 @@ class AccessControlService(Service):
             ),
             ToolDefinition(
                 name="clear_tool_permission",
+                slash_group="acl",
+                slash_command="clear_tool",
+                slash_help="Revert a tool's role override: /acl clear_tool <tool>",
                 description="Remove a tool permission override, reverting to the tool's default role.",
                 parameters=[
                     ToolParameter(name="tool_name", type=ToolParameterType.STRING, description="Tool name."),
@@ -509,11 +530,17 @@ class AccessControlService(Service):
             ),
             ToolDefinition(
                 name="list_collection_acls",
+                slash_group="acl",
+                slash_command="collections",
+                slash_help="List collection ACLs: /acl collections",
                 description="List access control rules for entity collections.",
-                required_role="everyone",
+                required_role="admin",
             ),
             ToolDefinition(
                 name="set_collection_acl",
+                slash_group="acl",
+                slash_command="set_collection",
+                slash_help="Set collection ACL: /acl set_collection <collection> <read_role> <write_role>",
                 description="Set read/write role requirements for an entity collection.",
                 parameters=[
                     ToolParameter(name="collection", type=ToolParameterType.STRING, description="Collection name."),
@@ -524,11 +551,17 @@ class AccessControlService(Service):
             ),
             ToolDefinition(
                 name="list_event_visibility",
+                slash_group="acl",
+                slash_command="events",
+                slash_help="List event visibility rules: /acl events",
                 description="List all event visibility rules (which roles can see which events via WebSocket).",
-                required_role="everyone",
+                required_role="admin",
             ),
             ToolDefinition(
                 name="set_event_visibility",
+                slash_group="acl",
+                slash_command="set_event",
+                slash_help="Set event visibility: /acl set_event <prefix> <role>",
                 description="Set the minimum role required to see events matching a prefix via WebSocket.",
                 parameters=[
                     ToolParameter(name="event_prefix", type=ToolParameterType.STRING, description="Event type prefix (e.g., 'inbox.' or 'chat.message.')."),
@@ -538,6 +571,9 @@ class AccessControlService(Service):
             ),
             ToolDefinition(
                 name="clear_event_visibility",
+                slash_group="acl",
+                slash_command="clear_event",
+                slash_help="Revert event visibility override: /acl clear_event <prefix>",
                 description="Remove an event visibility override, reverting to the built-in default.",
                 parameters=[
                     ToolParameter(name="event_prefix", type=ToolParameterType.STRING, description="Event type prefix to clear."),
@@ -546,11 +582,17 @@ class AccessControlService(Service):
             ),
             ToolDefinition(
                 name="list_rpc_permissions",
+                slash_group="acl",
+                slash_command="rpcs",
+                slash_help="List RPC permission rules: /acl rpcs",
                 description="List all WebSocket RPC handler permission rules (which roles can call which frame types).",
-                required_role="everyone",
+                required_role="admin",
             ),
             ToolDefinition(
                 name="set_rpc_permission",
+                slash_group="acl",
+                slash_command="set_rpc",
+                slash_help="Set RPC min role: /acl set_rpc <frame_prefix> <role>",
                 description="Set the minimum role required to call a WebSocket RPC frame type.",
                 parameters=[
                     ToolParameter(name="frame_prefix", type=ToolParameterType.STRING, description="Frame type prefix (e.g., 'inbox.' or 'chat.room.create')."),
@@ -560,6 +602,9 @@ class AccessControlService(Service):
             ),
             ToolDefinition(
                 name="clear_rpc_permission",
+                slash_group="acl",
+                slash_command="clear_rpc",
+                slash_help="Revert RPC permission override: /acl clear_rpc <frame_prefix>",
                 description="Remove an RPC permission override, reverting to the built-in default.",
                 parameters=[
                     ToolParameter(name="frame_prefix", type=ToolParameterType.STRING, description="Frame type prefix to clear."),

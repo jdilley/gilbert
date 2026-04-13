@@ -55,6 +55,11 @@ class EventBusService(Service):
         return [
             ToolDefinition(
                 name="publish_event",
+                slash_command="publish_event",
+                slash_help=(
+                    "Publish an event. /publish_event <event_type> "
+                    "data='{...}' — handy for testing subscribers."
+                ),
                 description="Publish an event to the event bus. Subscribed handlers will be notified.",
                 required_role="admin",
                 parameters=[

@@ -260,10 +260,16 @@ class TestTools:
         assert "set_tool_permission" in names
         assert "clear_tool_permission" in names
 
-    def test_read_tools_are_everyone(self, service: AccessControlService) -> None:
+    def test_read_tools_are_admin(self, service: AccessControlService) -> None:
+        # ACL state is sensitive — even listing role assignments or
+        # tool-permission overrides is admin-only so non-admins can't
+        # enumerate the privilege model.
         tools = {t.name: t for t in service.get_tools()}
-        assert tools["list_roles"].required_role == "everyone"
-        assert tools["get_tool_permissions"].required_role == "everyone"
+        assert tools["list_roles"].required_role == "admin"
+        assert tools["get_tool_permissions"].required_role == "admin"
+        assert tools["list_collection_acls"].required_role == "admin"
+        assert tools["list_event_visibility"].required_role == "admin"
+        assert tools["list_rpc_permissions"].required_role == "admin"
 
     def test_write_tools_are_admin(self, service: AccessControlService) -> None:
         tools = {t.name: t for t in service.get_tools()}

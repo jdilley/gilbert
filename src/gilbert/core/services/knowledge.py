@@ -789,6 +789,9 @@ class KnowledgeService(Service):
         return [
             ToolDefinition(
                 name="search_documents",
+                slash_group="kb",
+                slash_command="search",
+                slash_help="Search the knowledge base: /kb search <query> [max_results] [source]",
                 description=(
                     "Search the document knowledge base using natural language. "
                     "Returns relevant passages with source references."
@@ -813,6 +816,9 @@ class KnowledgeService(Service):
             ),
             ToolDefinition(
                 name="get_document",
+                slash_group="kb",
+                slash_command="doc",
+                slash_help="Read a document: /kb doc <document_id>",
                 description="Retrieve the full text content of a document by its ID.",
                 parameters=[
                     ToolParameter(
@@ -824,6 +830,9 @@ class KnowledgeService(Service):
             ),
             ToolDefinition(
                 name="list_documents",
+                slash_group="kb",
+                slash_command="list",
+                slash_help="List documents: /kb list [source] [prefix]",
                 description="List documents available in the knowledge store.",
                 parameters=[
                     ToolParameter(
@@ -841,11 +850,17 @@ class KnowledgeService(Service):
             ),
             ToolDefinition(
                 name="list_document_sources",
+                slash_group="kb",
+                slash_command="sources",
+                slash_help="List document sources/backends: /kb sources",
                 description="List all registered document sources/backends.",
                 required_role="user",
             ),
             ToolDefinition(
                 name="render_document_page",
+                slash_group="kb",
+                slash_command="render",
+                slash_help="Render a PDF page as an image: /kb render <document_id> <page>",
                 description=(
                     "Render a specific page of a PDF document as an image and "
                     "return it for display in chat. Use when the user wants to "
@@ -867,6 +882,9 @@ class KnowledgeService(Service):
             ),
             ToolDefinition(
                 name="find_files",
+                slash_group="kb",
+                slash_command="find",
+                slash_help="Find files: /kb find [name=...] [type=...] [source=...] [max_results=...]",
                 description=(
                     "Search for files across all document sources by type and/or "
                     "name. Use this to find images, videos, PDFs, or other files "
@@ -927,6 +945,9 @@ class KnowledgeService(Service):
             ),
             ToolDefinition(
                 name="index_document",
+                slash_group="kb",
+                slash_command="index",
+                slash_help="Re-index a document: /kb index <document_id>",
                 description="Manually trigger re-indexing of a specific document.",
                 parameters=[
                     ToolParameter(
@@ -938,6 +959,9 @@ class KnowledgeService(Service):
             ),
             ToolDefinition(
                 name="reindex_all",
+                slash_group="kb",
+                slash_command="reindex",
+                slash_help="Full knowledge-base re-index: /kb reindex",
                 description=(
                     "Force a full re-index of all documents. Clears tracking data "
                     "so every document is treated as new. Runs in the background."

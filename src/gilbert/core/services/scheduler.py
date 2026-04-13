@@ -997,11 +997,21 @@ class SchedulerService(Service):
         return [
             ToolDefinition(
                 name="list_timers",
+                slash_group="timer",
+                slash_command="list",
+                slash_help="List all active timers and alarms: /timer list",
                 description="List all active timers and alarms (both system and user).",
                 required_role="everyone",
             ),
             ToolDefinition(
                 name="set_timer",
+                slash_group="timer",
+                slash_command="set",
+                slash_help=(
+                    "One-shot timer: /timer set <name> <seconds> "
+                    "message='...' — or tool=... / ai_prompt=... for "
+                    "actions on fire."
+                ),
                 description=(
                     "Set a user timer that fires ONCE after a delay. By "
                     "default publishes a 'timer.fired' event; optionally "
@@ -1090,6 +1100,13 @@ class SchedulerService(Service):
             ),
             ToolDefinition(
                 name="set_alarm",
+                slash_group="timer",
+                slash_command="alarm",
+                slash_help=(
+                    "Recurring alarm: /timer alarm <name> <type> "
+                    "[hour=... minute=... interval_seconds=...] "
+                    "[message=... tool=... ai_prompt=...]"
+                ),
                 description=(
                     "Set a recurring user alarm (interval, daily, or "
                     "hourly). By default publishes an 'alarm.fired' "
@@ -1201,6 +1218,9 @@ class SchedulerService(Service):
             ),
             ToolDefinition(
                 name="cancel_timer",
+                slash_group="timer",
+                slash_command="cancel",
+                slash_help="Cancel a timer/alarm: /timer cancel <name>",
                 description="Cancel a user timer or alarm by name. Cannot cancel system timers.",
                 parameters=[
                     ToolParameter(
@@ -1212,6 +1232,9 @@ class SchedulerService(Service):
             ),
             ToolDefinition(
                 name="pause_timer",
+                slash_group="timer",
+                slash_command="pause",
+                slash_help="Pause a timer/alarm: /timer pause <name>",
                 description="Pause a timer or alarm (admin only). System timers can only be paused, not cancelled.",
                 parameters=[
                     ToolParameter(
@@ -1224,6 +1247,9 @@ class SchedulerService(Service):
             ),
             ToolDefinition(
                 name="resume_timer",
+                slash_group="timer",
+                slash_command="resume",
+                slash_help="Resume a paused timer/alarm: /timer resume <name>",
                 description="Resume a paused timer or alarm (admin only).",
                 parameters=[
                     ToolParameter(

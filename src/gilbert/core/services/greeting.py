@@ -438,6 +438,8 @@ class GreetingService(Service):
         return [
             ToolDefinition(
                 name="greet",
+                slash_command="greet",
+                slash_help="Announce a personalized greeting: /greet <name>",
                 description=(
                     "Generate and announce a personalized greeting for someone. "
                     "Use this when a user asks you to greet someone or welcome them."

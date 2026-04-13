@@ -13,11 +13,63 @@ interface ChatInputProps {
   placeholder?: string;
 }
 
-/** Parse ``/command ...`` into {command, restAfterCommand} or null. */
-function matchSlash(input: string): { command: string; rest: string } | null {
-  const m = /^\/([a-zA-Z][a-zA-Z0-9_\-]*)(?:(\s)([\s\S]*))?$/.exec(input);
-  if (!m) return null;
-  return { command: m[1], rest: m[3] ?? "" };
+/** Parsed slash-command input broken into the command prefix the user
+ *  is typing (possibly empty or partial) and the remainder after it. */
+interface SlashParse {
+  /** What the user has typed as the command portion so far. May be
+   *  ``""`` (bare ``/``), ``"radio"`` (still picking), or ``"radio start"``
+   *  (grouped form, fully typed). */
+  commandPrefix: string;
+  /** Text after the command portion — treated as arguments for the
+   *  help strip and positional counting. */
+  argsText: string;
+  /** True when the user has typed at least one space after the command
+   *  portion — i.e. they've committed to whatever prefix is there. */
+  committed: boolean;
+}
+
+/** Parse the input into a slash-command prefix + args, resolving grouped
+ *  forms against the known command list. Returns ``null`` if the input
+ *  doesn't start with ``/``.
+ *
+ *  Algorithm: longest-prefix match. For every registered command
+ *  (sorted longest first so ``"radio start"`` wins over ``"radio"``),
+ *  check whether the body equals the command or starts with the command
+ *  followed by a space. If no full match, the user is still picking,
+ *  and we report whatever they've typed (trimmed to ≤ 2 words) as the
+ *  prefix so the suggestions list can filter correctly.
+ */
+function matchSlash(
+  input: string,
+  knownCommands: readonly string[],
+): SlashParse | null {
+  if (!input.startsWith("/")) return null;
+  const body = input.slice(1);
+
+  // Bare `/` — show the full picker.
+  if (body === "") {
+    return { commandPrefix: "", argsText: "", committed: false };
+  }
+
+  // Longest-prefix match first. Grouped commands (``radio start``) are
+  // longer than bare ones (``radio``), so this automatically prefers
+  // the grouped form when it's available.
+  const sortedCommands = [...knownCommands].sort(
+    (a, b) => b.length - a.length,
+  );
+  for (const cmd of sortedCommands) {
+    if (body === cmd || body.startsWith(cmd + " ")) {
+      const argsText = body.slice(cmd.length).replace(/^\s+/, "");
+      return { commandPrefix: cmd, argsText, committed: true };
+    }
+  }
+
+  // No full match → still picking. Use at most the first two
+  // whitespace-separated tokens so prefixes like ``"radio st"`` narrow
+  // grouped suggestions correctly.
+  const tokens = body.split(/\s+/).slice(0, 2);
+  const partial = tokens.join(" ").trimEnd();
+  return { commandPrefix: partial, argsText: "", committed: false };
 }
 
 /** Count shell-style tokens, respecting (simple) quotes, to pick current param. */
@@ -77,33 +129,41 @@ export function ChatInput({
     }
   }, [disabled]);
 
-  const slashMatch = useMemo(() => matchSlash(message), [message]);
+  const knownCommandNames = useMemo(
+    () => allCommands.map((c) => c.command),
+    [allCommands],
+  );
 
-  // Pickable commands list: shown while the user is still typing the
-  // command name (before the first space). Filters by prefix.
+  const slashMatch = useMemo(
+    () => matchSlash(message, knownCommandNames),
+    [message, knownCommandNames],
+  );
+
+  // Pickable commands list: shown while the user is still picking a
+  // command (hasn't committed to a known one yet). Filter on the
+  // typed prefix, matching against the full command name so grouped
+  // commands like ``radio start`` narrow correctly.
   const suggestions = useMemo(() => {
     if (!slashMatch) return [];
-    // Only show dropdown while we're still inside the command name token
-    // (i.e., user hasn't typed a space yet).
-    if (message.includes(" ")) return [];
-    const prefix = slashMatch.command.toLowerCase();
+    if (slashMatch.committed) return [];
+    const prefix = slashMatch.commandPrefix.toLowerCase();
     return allCommands.filter((c) =>
       c.command.toLowerCase().startsWith(prefix),
     );
-  }, [slashMatch, message, allCommands]);
+  }, [slashMatch, allCommands]);
 
-  // Active command (once the user has picked one and typed past the name).
+  // Active command (once the user has typed a full known command name).
   const activeCommand = useMemo<SlashCommand | null>(() => {
-    if (!slashMatch) return null;
+    if (!slashMatch || !slashMatch.committed) return null;
     return (
-      allCommands.find((c) => c.command === slashMatch.command) ?? null
+      allCommands.find((c) => c.command === slashMatch.commandPrefix) ?? null
     );
   }, [slashMatch, allCommands]);
 
   // Which parameter is currently being entered, for the help strip.
   const activeParamIndex = useMemo(() => {
     if (!activeCommand || !slashMatch) return -1;
-    const tokens = countCompletedTokens(slashMatch.rest);
+    const tokens = countCompletedTokens(slashMatch.argsText);
     const visibleParams = activeCommand.parameters.filter(
       (p) => !p.name.startsWith("_"),
     );
@@ -186,13 +246,23 @@ export function ChatInput({
     el.style.height = Math.min(el.scrollHeight, 150) + "px";
   }
 
-  // Unknown slash command warning strip (only when user has typed past the
-  // command name AND the command isn't in the available list).
+  // Unknown slash command warning strip. Only fires when the user
+  // clearly intended a slash command (typed `/word ` with a space) but
+  // the first word doesn't start any known command and the picker is
+  // empty. Still-picking prefixes like `/ra` never warn.
   const unknownCommand = useMemo(() => {
     if (!slashMatch) return false;
-    if (!message.includes(" ")) return false; // still picking
+    if (!slashMatch.commandPrefix) return false; // bare "/" — nothing to judge
     if (allCommands.length === 0) return false; // not loaded yet
-    return !allCommands.some((c) => c.command === slashMatch.command);
+    // If the prefix matches any known command (bare or grouped), we're
+    // either committed or still picking → no warning.
+    const prefix = slashMatch.commandPrefix.toLowerCase();
+    const anyMatch = allCommands.some((c) =>
+      c.command.toLowerCase().startsWith(prefix),
+    );
+    if (anyMatch) return false;
+    // Otherwise, warn only once the user has committed (typed a space).
+    return message.includes(" ");
   }, [slashMatch, message, allCommands]);
 
   return (

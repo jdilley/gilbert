@@ -200,6 +200,9 @@ class WebSearchService(Service, ToolProvider):
         return [
             ToolDefinition(
                 name="web_search",
+                slash_group="web",
+                slash_command="search",
+                slash_help="Search the web: /web search <query> [count]",
                 description=(
                     "Search the web for current information. "
                     "Use when the user asks about recent events, facts you're "
@@ -222,6 +225,9 @@ class WebSearchService(Service, ToolProvider):
             ),
             ToolDefinition(
                 name="image_search",
+                slash_group="web",
+                slash_command="images",
+                slash_help="Search the web for images: /web images <query> [count]",
                 description=(
                     "Search the web for images. Returns image URLs that can be "
                     "displayed in chat using markdown image syntax. Use when the "
@@ -244,6 +250,9 @@ class WebSearchService(Service, ToolProvider):
             ),
             ToolDefinition(
                 name="fetch_url",
+                slash_group="web",
+                slash_command="fetch",
+                slash_help="Fetch a page as text: /web fetch <url> [include_links]",
                 description=(
                     "Fetch the content of a web page and extract its text. "
                     "Use when the user provides a URL and wants to analyze, "
@@ -266,6 +275,9 @@ class WebSearchService(Service, ToolProvider):
             ),
             ToolDefinition(
                 name="fetch_url_raw",
+                slash_group="web",
+                slash_command="raw",
+                slash_help="Fetch raw HTML/text without processing: /web raw <url>",
                 description=(
                     "Fetch the raw HTML or text content of a URL without processing. "
                     "Use when the user needs the original source code, raw markup, "

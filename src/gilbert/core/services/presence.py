@@ -372,6 +372,9 @@ class PresenceService(Service):
         return [
             ToolDefinition(
                 name="check_presence",
+                slash_group="presence",
+                slash_command="check",
+                slash_help="Check one user: /presence check <user_id>",
                 description="Check if a specific user is present, nearby, or away.",
                 parameters=[
                     ToolParameter(
@@ -384,11 +387,17 @@ class PresenceService(Service):
             ),
             ToolDefinition(
                 name="who_is_here",
+                slash_group="presence",
+                slash_command="here",
+                slash_help="Who's currently around: /presence here",
                 description="List all users who are currently present or nearby.",
                 required_role="everyone",
             ),
             ToolDefinition(
                 name="list_all_presence",
+                slash_group="presence",
+                slash_command="all",
+                slash_help="Full presence snapshot: /presence all",
                 description="List presence state for all tracked users.",
                 required_role="everyone",
             ),

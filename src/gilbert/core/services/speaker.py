@@ -548,11 +548,17 @@ class SpeakerService(Service):
         tools = [
             ToolDefinition(
                 name="list_speakers",
+                slash_group="speaker",
+                slash_command="list",
+                slash_help="List all speakers with state + volume: /speaker list",
                 description="List all discovered speakers with their current state, volume, and group info.",
                 required_role="everyone",
             ),
             ToolDefinition(
                 name="play_audio",
+                slash_group="speaker",
+                slash_command="play",
+                slash_help="Play a URI on speakers: /speaker play <uri> [speakers] [volume]",
                 description="Play audio from a URI on one or more speakers.",
                 parameters=[
                     ToolParameter(
@@ -582,6 +588,9 @@ class SpeakerService(Service):
             ),
             ToolDefinition(
                 name="stop_audio",
+                slash_group="speaker",
+                slash_command="stop",
+                slash_help="Stop playback: /speaker stop [speakers]",
                 description="Stop playback on speakers.",
                 parameters=[
                     ToolParameter(
@@ -594,6 +603,9 @@ class SpeakerService(Service):
             ),
             ToolDefinition(
                 name="set_volume",
+                slash_group="speaker",
+                slash_command="volume",
+                slash_help="Set speaker volume: /speaker volume <speaker> <0-100>",
                 description="Set volume on a speaker.",
                 parameters=[
                     ToolParameter(
@@ -610,6 +622,9 @@ class SpeakerService(Service):
             ),
             ToolDefinition(
                 name="get_volume",
+                slash_group="speaker",
+                slash_command="get_volume",
+                slash_help="Read speaker volume: /speaker get_volume <speaker>",
                 description="Get the current volume of a speaker.",
                 parameters=[
                     ToolParameter(
@@ -622,6 +637,9 @@ class SpeakerService(Service):
             ),
             ToolDefinition(
                 name="set_speaker_alias",
+                slash_group="speaker",
+                slash_command="alias",
+                slash_help="Alias a speaker: /speaker alias <speaker> <alias>",
                 description="Assign an alias name to a speaker (e.g., 'Living Room Speaker' for 'Speaker 2'). Admin only.",
                 required_role="admin",
                 parameters=[
@@ -639,6 +657,9 @@ class SpeakerService(Service):
             ),
             ToolDefinition(
                 name="remove_speaker_alias",
+                slash_group="speaker",
+                slash_command="unalias",
+                slash_help="Remove a speaker alias: /speaker unalias <alias>",
                 description="Remove an alias from a speaker. Admin only.",
                 required_role="admin",
                 parameters=[
@@ -685,10 +706,16 @@ class SpeakerService(Service):
             tools.extend([
                 ToolDefinition(
                     name="list_speaker_groups",
+                    slash_group="speaker",
+                    slash_command="groups",
+                    slash_help="List speaker groups: /speaker groups",
                     description="List current speaker groups.",
                 ),
                 ToolDefinition(
                     name="group_speakers",
+                    slash_group="speaker",
+                    slash_command="group",
+                    slash_help="Group speakers for sync playback: /speaker group <s1>,<s2>",
                     description="Group speakers together for synchronized playback.",
                     parameters=[
                         ToolParameter(
@@ -700,6 +727,9 @@ class SpeakerService(Service):
                 ),
                 ToolDefinition(
                     name="ungroup_speakers",
+                    slash_group="speaker",
+                    slash_command="ungroup",
+                    slash_help="Remove speakers from groups: /speaker ungroup <s1>,<s2>",
                     description="Remove speakers from their groups.",
                     parameters=[
                         ToolParameter(

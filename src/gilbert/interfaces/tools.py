@@ -43,6 +43,12 @@ class ToolDefinition:
     # up in the slash-command autocomplete. Opt-in because not every tool
     # has a sensible shell-style form.
     slash_command: str | None = None
+    # Optional group name. When set, the full invocation becomes
+    # ``/<slash_group> <slash_command> <args>``, letting a service expose
+    # several related commands under one prefix (e.g. ``/radio start``,
+    # ``/radio stop``, ``/radio skip``). Plugins still get their namespace
+    # prefixed on top: ``/<plugin_ns>.<slash_group> <slash_command>``.
+    slash_group: str | None = None
     slash_help: str = ""  # short help text; falls back to ``description``
 
     def to_json_schema(self) -> dict[str, Any]:

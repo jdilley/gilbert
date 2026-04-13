@@ -48,11 +48,13 @@ from gilbert.interfaces.tools import (
     ToolParameterType,
 )
 
-# A valid slash-command name: ``/`` then an identifier-ish token. We
-# deliberately exclude things like ``/path/to/file`` or ``/`` by itself so
-# users can still paste paths in chat without accidentally triggering
+# A valid slash-command name: ``/`` then an identifier-ish token, optionally
+# prefixed with ``<namespace>.`` for plugin-sourced commands (e.g.
+# ``/currev.time_logs``). We deliberately exclude ``/path/to/file`` or a
+# bare ``/`` so users can still paste paths without accidentally triggering
 # command resolution.
-_COMMAND_NAME_RE = re.compile(r"^/([a-zA-Z][a-zA-Z0-9_\-]*)(?:\s|$)")
+_SEGMENT = r"[a-zA-Z][a-zA-Z0-9_\-]*"
+_COMMAND_NAME_RE = re.compile(rf"^/({_SEGMENT}(?:\.{_SEGMENT})?)(?:\s|$)")
 
 
 class SlashCommandError(ValueError):
@@ -67,10 +69,11 @@ class SlashCommandError(ValueError):
 def extract_command_name(text: str) -> str | None:
     """Return the command name if *text* looks like a slash command.
 
-    Returns ``None`` if *text* does not start with ``/`` followed by an
-    identifier-style token. This lets callers distinguish ``/announce ...``
-    (a real command) from ``/path/to/file`` or ``/ is a slash`` (plain
-    text that happens to start with a slash).
+    Recognizes both bare ``/announce`` and namespaced ``/namespace.command``
+    forms (namespaces are used to scope plugin-provided tools away from
+    core ones). Returns ``None`` if *text* does not start with ``/``
+    followed by an identifier-style token, so plain text like
+    ``/path/to/file`` passes through unchanged.
     """
     if not text:
         return None
@@ -80,9 +83,15 @@ def extract_command_name(text: str) -> str | None:
     return match.group(1)
 
 
-def format_usage(tool_def: ToolDefinition) -> str:
-    """Build a one-line usage string like ``/cmd <a:string> [b:int]``."""
-    cmd = tool_def.slash_command or tool_def.name
+def format_usage(tool_def: ToolDefinition, full_command: str | None = None) -> str:
+    """Build a one-line usage string like ``/cmd <a:string> [b:int]``.
+
+    *full_command* is the resolved command name the caller sees (including
+    any plugin namespace prefix). When omitted it falls back to the bare
+    ``tool_def.slash_command`` or the tool name, useful for unit tests
+    where there is no discovery layer.
+    """
+    cmd = full_command or tool_def.slash_command or tool_def.name
     parts = [f"/{cmd}"]
     for p in tool_def.parameters:
         if _is_injected_param(p.name):
@@ -93,29 +102,46 @@ def format_usage(tool_def: ToolDefinition) -> str:
 
 
 def parse_slash_command(
-    text: str, tool_def: ToolDefinition
+    text: str,
+    tool_def: ToolDefinition,
+    full_command: str | None = None,
 ) -> dict[str, Any]:
     """Parse *text* into an arguments dict for *tool_def*.
+
+    When the caller already knows the full command name — for example,
+    because it did a multi-word lookup like ``/radio start`` — it can
+    pass *full_command* so the parser strips exactly the right prefix
+    and uses the right name in usage hints. Otherwise the first
+    identifier-shaped word after ``/`` is used (single-word commands).
 
     Raises :class:`SlashCommandError` if the text is malformed, a required
     parameter is missing, or a value can't be coerced to the parameter's
     declared type.
     """
-    name = extract_command_name(text)
-    if name is None:
+    if full_command is None:
+        full_command = extract_command_name(text)
+    if full_command is None:
         raise SlashCommandError(
             "Not a slash command — must start with /<name>."
         )
 
-    # Strip leading ``/name`` and any surrounding whitespace
-    remainder = text[len("/" + name):].strip()
+    # Use the resolved full name in error messages so hints match what
+    # the user typed (including any plugin namespace or group prefix).
+    usage = format_usage(tool_def, full_command=full_command)
+
+    prefix = "/" + full_command
+    stripped = text.lstrip()
+    if not stripped.startswith(prefix):
+        raise SlashCommandError(
+            f"Expected command prefix {prefix!r}. Usage: {usage}"
+        )
+    remainder = stripped[len(prefix):].strip()
 
     try:
         tokens = shlex.split(remainder) if remainder else []
     except ValueError as exc:
         raise SlashCommandError(
-            f"Could not parse arguments: {exc}. "
-            f"Usage: {format_usage(tool_def)}"
+            f"Could not parse arguments: {exc}. Usage: {usage}"
         ) from exc
 
     # Parameters, excluding injected-context names (``_user_id`` etc.) so
@@ -142,7 +168,7 @@ def parse_slash_command(
             if i + 1 >= len(tokens):
                 raise SlashCommandError(
                     f"Flag --{key} requires a value. "
-                    f"Usage: {format_usage(tool_def)}"
+                    f"Usage: {usage}"
                 )
             keywords[key] = tokens[i + 1]
             i += 2
@@ -156,7 +182,7 @@ def parse_slash_command(
             known = ", ".join(p.name for p in params) or "(none)"
             raise SlashCommandError(
                 f"Unknown parameter '{k}'. Known parameters: {known}. "
-                f"Usage: {format_usage(tool_def)}"
+                f"Usage: {usage}"
             )
 
     # Assign positional arguments to parameters that weren't supplied as
@@ -173,7 +199,7 @@ def parse_slash_command(
                 if param.required and param.default is None:
                     raise SlashCommandError(
                         f"Missing required parameter '{param.name}'. "
-                        f"Usage: {format_usage(tool_def)}"
+                        f"Usage: {usage}"
                     ) from None
                 continue
         try:
@@ -183,7 +209,7 @@ def parse_slash_command(
         except Exception as exc:
             raise SlashCommandError(
                 f"Invalid value for '{param.name}': {exc}. "
-                f"Usage: {format_usage(tool_def)}"
+                f"Usage: {usage}"
             ) from exc
 
     # Reject leftover positional args — usually a mistake
@@ -191,7 +217,7 @@ def parse_slash_command(
     if leftover:
         raise SlashCommandError(
             f"Unexpected extra arguments: {leftover}. "
-            f"Usage: {format_usage(tool_def)}"
+            f"Usage: {usage}"
         )
 
     # Apply enum validation

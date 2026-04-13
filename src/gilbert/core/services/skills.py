@@ -170,6 +170,11 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         return [
             ToolDefinition(
                 name="manage_skills",
+                slash_command="skills",
+                slash_help=(
+                    "Manage skills: /skills <action> [url=... skill_name=...] "
+                    "(actions: install, uninstall, update, list, delete)"
+                ),
                 description=(
                     "Install, uninstall, update, or list available skills. "
                     "Install from GitHub URLs or archive URLs (.zip, .tar.gz). "

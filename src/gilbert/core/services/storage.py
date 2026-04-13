@@ -123,6 +123,9 @@ class StorageService(Service):
             ),
             ToolDefinition(
                 name="get_entity",
+                slash_group="db",
+                slash_command="entity",
+                slash_help="Fetch an entity: /db entity <collection> <id>",
                 description="Retrieve an entity by collection and ID.",
                 parameters=[
                     ToolParameter(
@@ -136,7 +139,7 @@ class StorageService(Service):
                         description="The entity ID.",
                     ),
                 ],
-                required_role="everyone",
+                required_role="admin",
             ),
             ToolDefinition(
                 name="query_entities",
@@ -171,12 +174,15 @@ class StorageService(Service):
                         required=False,
                     ),
                 ],
-                required_role="everyone",
+                required_role="admin",
             ),
             ToolDefinition(
                 name="list_collections",
+                slash_group="db",
+                slash_command="collections",
+                slash_help="List all entity collections: /db collections",
                 description="List all entity collection names.",
-                required_role="everyone",
+                required_role="admin",
             ),
         ]
 

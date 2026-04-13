@@ -793,16 +793,19 @@ class AIService(Service):
         # ── Slash-command short-circuit ─────────────────────────────
         # If the user typed ``/<name> ...`` and ``<name>`` matches a tool
         # that opted in via ``ToolDefinition.slash_command``, bypass the
-        # AI entirely and invoke the tool directly. Unknown commands are
+        # AI entirely and invoke the tool directly. Grouped commands
+        # like ``/radio start`` match a two-word key in the registry;
+        # plain ones match a single-word key. Unknown commands are
         # rejected with a helpful error rather than leaked to the AI.
-        cmd_name = extract_command_name(user_message)
-        if cmd_name is not None:
+        first_word = extract_command_name(user_message)
+        if first_word is not None:
             slash_cmds = self._slash_commands_for_user(user_ctx)
-            if cmd_name in slash_cmds:
+            matched = self._match_slash_command(user_message, slash_cmds)
+            if matched is not None:
                 return await self._execute_slash_command(
                     user_message,
-                    cmd_name,
-                    slash_cmds[cmd_name],
+                    matched,
+                    slash_cmds[matched],
                     messages,
                     conversation_id,
                     user_ctx,
@@ -814,7 +817,9 @@ class AIService(Service):
                 hint = "Available: " + ", ".join(f"/{c}" for c in available)
             else:
                 hint = "No slash commands are available to you."
-            error_text = f"Unknown slash command '/{cmd_name}'. {hint}"
+            error_text = (
+                f"Unknown slash command '/{first_word}'. {hint}"
+            )
             messages.append(Message(
                 role=MessageRole.USER,
                 content=user_message,
@@ -828,7 +833,7 @@ class AIService(Service):
                 conversation_id, messages, user_ctx=user_ctx,
             )
             return error_text, conversation_id, [], [
-                {"tool_name": f"/{cmd_name}", "is_error": True}
+                {"tool_name": f"/{first_word}", "is_error": True}
             ]
 
         # Append user message
@@ -1260,13 +1265,54 @@ class AIService(Service):
 
     # --- Slash-command execution ---
 
+    @staticmethod
+    def _resolve_slash_namespace(provider: ToolProvider) -> str:
+        """Figure out the slash-command namespace for *provider*, if any.
+
+        Resolution order:
+
+        1. If the provider's class declares ``slash_namespace`` as a
+           non-empty string, use it verbatim. Plugins use this to pick a
+           short human-friendly prefix (e.g. ``"currev"`` instead of
+           ``"current-data-sync"``).
+        2. If the provider's class was defined in a plugin module
+           (``gilbert_plugin_<name>``), derive the namespace from the
+           sanitized plugin name. This guarantees every plugin tool gets
+           a namespace even if the plugin author forgets to set one.
+        3. Otherwise (core service), return ``""`` — no prefix.
+        """
+        explicit = getattr(type(provider), "slash_namespace", "") or ""
+        if explicit:
+            return str(explicit)
+        module = type(provider).__module__ or ""
+        prefix = "gilbert_plugin_"
+        if module.startswith(prefix):
+            # ``gilbert_plugin_current_data_sync.data_sync_service`` →
+            # ``current_data_sync``
+            tail = module[len(prefix):]
+            return tail.split(".", 1)[0]
+        return ""
+
     def _slash_commands_for_user(
         self, user_ctx: UserContext | None,
     ) -> dict[str, tuple[ToolProvider, ToolDefinition]]:
-        """Return slash-enabled tools the user may invoke, keyed by command name.
+        """Return slash-enabled tools the user may invoke, keyed by full command name.
 
         Respects RBAC (via ``_discover_tools``) but ignores AI profile
         filtering — slash commands are user-initiated, not AI calls.
+
+        The registry key is the full user-facing invocation string,
+        reflecting both the plugin namespace (if any) and the tool's
+        slash group (if any). Examples::
+
+            "announce"                 # core, no group
+            "radio start"              # core, group="radio", cmd="start"
+            "currev.time_logs"         # plugin ns, no group
+            "currev.sync status"       # plugin ns, group="sync", cmd="status"
+
+        Plugin-sourced tools are automatically prefixed with their
+        plugin namespace so they can't collide with core commands or
+        with each other.
         """
         all_tools = self._discover_tools(user_ctx=user_ctx)
         result: dict[str, tuple[ToolProvider, ToolDefinition]] = {}
@@ -1274,15 +1320,57 @@ class AIService(Service):
             cmd = tool_def.slash_command
             if not cmd:
                 continue
-            if cmd in result:
+            group = tool_def.slash_group
+            local = f"{group} {cmd}" if group else cmd
+            namespace = self._resolve_slash_namespace(provider)
+            full_cmd = f"{namespace}.{local}" if namespace else local
+            if full_cmd in result:
                 logger.warning(
                     "Duplicate slash command %r from tool %r "
                     "(already registered by %r)",
-                    cmd, tool_def.name, result[cmd][1].name,
+                    full_cmd, tool_def.name, result[full_cmd][1].name,
                 )
                 continue
-            result[cmd] = (provider, tool_def)
+            result[full_cmd] = (provider, tool_def)
         return result
+
+    @staticmethod
+    def _match_slash_command(
+        text: str,
+        registry: dict[str, tuple[ToolProvider, ToolDefinition]],
+    ) -> str | None:
+        """Longest-prefix lookup from an input line to a registered command.
+
+        Given raw input like ``"/radio start some args"`` and a registry
+        whose keys may include both grouped forms like ``"radio start"``
+        and plain forms like ``"announce"``, return the longest matching
+        key or ``None``.
+
+        The algorithm tries the two-word form first (``"radio start"``)
+        and falls back to the first-word form (``"radio"``). Plugin
+        namespaces (``"currev.radio"`` / ``"currev.radio start"``) work
+        because they use the first space as the separator between group
+        and subcommand — the dot-prefixed namespace stays attached to
+        the group.
+        """
+        stripped = text.lstrip()
+        if not stripped.startswith("/"):
+            return None
+        body = stripped[1:]
+        if not body:
+            return None
+        parts = body.split(None, 2)
+        if not parts:
+            return None
+        first = parts[0]
+        # Prefer the two-word (grouped) form when it matches.
+        if len(parts) >= 2:
+            candidate = f"{first} {parts[1]}"
+            if candidate in registry:
+                return candidate
+        if first in registry:
+            return first
+        return None
 
     async def _execute_slash_command(
         self,
@@ -1312,8 +1400,13 @@ class AIService(Service):
         ))
 
         # Parse — errors are shown to the user as the assistant reply.
+        # ``cmd_name`` is the matched full command (e.g. ``"radio start"``
+        # or ``"currev.time_logs"``), passed explicitly so the parser
+        # strips the correct prefix for grouped invocations.
         try:
-            arguments = parse_slash_command(raw_text, tool_def)
+            arguments = parse_slash_command(
+                raw_text, tool_def, full_command=cmd_name,
+            )
         except SlashCommandError as exc:
             error_text = str(exc)
             messages.append(Message(
@@ -1730,6 +1823,8 @@ class AIService(Service):
         tools = [
             ToolDefinition(
                 name="rename_conversation",
+                slash_command="rename",
+                slash_help="Rename the current conversation: /rename <title>",
                 description="Rename the current chat conversation to a user-specified title.",
                 parameters=[
                     ToolParameter(
@@ -1818,6 +1913,12 @@ class AIService(Service):
             tools.append(
                 ToolDefinition(
                     name="memory",
+                    slash_command="memory",
+                    slash_help=(
+                        "Manage memories: /memory <action> "
+                        "[summary='...'] [content='...'] "
+                        "(actions: remember, recall, update, forget, list)"
+                    ),
                     description=(
                         "Manage persistent memories for the current user. "
                         "Use 'remember' when the user tells you something worth remembering "
@@ -2132,13 +2233,18 @@ class AIService(Service):
         slash_cmds = self._slash_commands_for_user(conn.user_ctx)
         commands: list[dict[str, Any]] = []
         for cmd_name, (provider, tool_def) in sorted(slash_cmds.items()):
+            # ``cmd_name`` may contain a space (e.g. "radio start") or a
+            # plugin-namespace dot (e.g. "currev.time_logs"); either way
+            # it IS the full invocation so the usage string reflects the
+            # grouped / namespaced form the user actually types.
             commands.append({
                 "command": cmd_name,
+                "group": tool_def.slash_group or "",
                 "tool_name": tool_def.name,
                 "provider": provider.tool_provider_name,
                 "description": tool_def.description,
                 "help": tool_def.slash_help or tool_def.description,
-                "usage": format_usage(tool_def),
+                "usage": format_usage(tool_def, full_command=cmd_name),
                 "required_role": tool_def.required_role,
                 "parameters": [
                     {
@@ -2179,12 +2285,15 @@ class AIService(Service):
 
         # Slash commands bypass the AI entirely and are handled inside
         # chat(). In shared rooms they also bypass the mentions_gilbert
-        # check — invoking a tool is always intentional.
-        slash_cmd_name = extract_command_name(message)
-        is_slash_command = (
-            slash_cmd_name is not None
-            and slash_cmd_name in self._slash_commands_for_user(conn.user_ctx)
-        )
+        # check — invoking a tool is always intentional. We use the
+        # longest-prefix matcher here so grouped commands like
+        # ``/radio start`` are detected correctly.
+        is_slash_command = False
+        if extract_command_name(message) is not None:
+            slash_cmds = self._slash_commands_for_user(conn.user_ctx)
+            is_slash_command = (
+                self._match_slash_command(message, slash_cmds) is not None
+            )
 
         try:
             if is_shared:

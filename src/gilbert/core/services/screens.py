@@ -692,6 +692,12 @@ class ScreenService(Service):
         return [
             ToolDefinition(
                 name="display",
+                slash_command="display",
+                slash_help=(
+                    "Push content to a screen: /display <action> "
+                    "screen_name=... (actions: show_document, show_text, "
+                    "show_images, list_screens, clear)"
+                ),
                 description=(
                     "Push content to a named display screen. "
                     "Screens are browser tabs on monitors around the shop/office. "

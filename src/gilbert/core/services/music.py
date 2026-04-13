@@ -268,6 +268,9 @@ class MusicService(Service):
         tools = [
             ToolDefinition(
                 name="search_music",
+                slash_group="music",
+                slash_command="search",
+                slash_help="Search for tracks/albums/playlists: /music search <query>",
                 description="Search for tracks, albums, and playlists.",
                 parameters=[
                     ToolParameter(
@@ -286,6 +289,9 @@ class MusicService(Service):
             ),
             ToolDefinition(
                 name="get_track_info",
+                slash_group="music",
+                slash_command="track",
+                slash_help="Track metadata: /music track <track_id>",
                 description="Get full metadata for a track (name, artist, album, art, duration, links).",
                 parameters=[
                     ToolParameter(
@@ -298,6 +304,9 @@ class MusicService(Service):
             ),
             ToolDefinition(
                 name="get_album_info",
+                slash_group="music",
+                slash_command="album",
+                slash_help="Album metadata + tracks: /music album <album_id>",
                 description="Get album metadata and track listing.",
                 parameters=[
                     ToolParameter(
@@ -316,6 +325,9 @@ class MusicService(Service):
             ),
             ToolDefinition(
                 name="get_playlist",
+                slash_group="music",
+                slash_command="playlist",
+                slash_help="Playlist + tracks: /music playlist <playlist_id>",
                 description="Get a playlist with its tracks.",
                 parameters=[
                     ToolParameter(
@@ -328,6 +340,11 @@ class MusicService(Service):
             ),
             ToolDefinition(
                 name="play_track",
+                slash_group="music",
+                slash_command="play",
+                slash_help=(
+                    "Play a track: /music play <track_id> speakers=..."
+                ),
                 description=(
                     "Play a music track on speakers. Optionally start at a specific "
                     "position in the song. If no speakers specified, uses last-used or all."

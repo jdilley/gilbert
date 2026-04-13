@@ -604,6 +604,9 @@ class RadioDJService(Service):
         return [
             ToolDefinition(
                 name="radio_start",
+                slash_group="radio",
+                slash_command="start",
+                slash_help="Start the radio DJ: /radio start [genre]",
                 description="Start the radio DJ. Optionally specify a genre to begin with.",
                 parameters=[
                     ToolParameter(
@@ -617,11 +620,17 @@ class RadioDJService(Service):
             ),
             ToolDefinition(
                 name="radio_stop",
+                slash_group="radio",
+                slash_command="stop",
+                slash_help="Stop the radio DJ: /radio stop",
                 description="Stop the radio DJ.",
                 required_role="user",
             ),
             ToolDefinition(
                 name="radio_request",
+                slash_group="radio",
+                slash_command="request",
+                slash_help="Request music: /radio request <genre|mood|artist>",
                 description="Request a specific genre, mood, or artist to play now.",
                 parameters=[
                     ToolParameter(
@@ -634,21 +643,33 @@ class RadioDJService(Service):
             ),
             ToolDefinition(
                 name="radio_skip",
+                slash_group="radio",
+                slash_command="skip",
+                slash_help="Skip the current track: /radio skip",
                 description="Skip the current track.",
                 required_role="user",
             ),
             ToolDefinition(
                 name="radio_like",
+                slash_group="radio",
+                slash_command="like",
+                slash_help="Like what's playing: /radio like",
                 description="Like the current genre/song. Records the genre as a preference for the user.",
                 required_role="user",
             ),
             ToolDefinition(
                 name="radio_dislike",
+                slash_group="radio",
+                slash_command="dislike",
+                slash_help="Dislike what's playing and switch: /radio dislike",
                 description="Dislike the current genre/song. Vetoes the genre and switches to something else.",
                 required_role="user",
             ),
             ToolDefinition(
                 name="radio_veto",
+                slash_group="radio",
+                slash_command="veto",
+                slash_help="Ban a genre: /radio veto <genre>",
                 description="Ban a genre so it won't be played for this user.",
                 parameters=[
                     ToolParameter(
@@ -661,11 +682,17 @@ class RadioDJService(Service):
             ),
             ToolDefinition(
                 name="radio_status",
+                slash_group="radio",
+                slash_command="status",
+                slash_help="Current radio state: /radio status",
                 description="Get the current radio DJ status: what's playing, who's here, preferences.",
                 required_role="user",
             ),
             ToolDefinition(
                 name="radio_set_preferences",
+                slash_group="radio",
+                slash_command="prefs",
+                slash_help="Set a user's music prefs: /radio prefs <user_id> [likes=a,b] [vetoes=c,d]",
                 description="Set a user's music preferences directly.",
                 parameters=[
                     ToolParameter(

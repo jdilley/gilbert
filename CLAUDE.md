@@ -163,6 +163,82 @@ AI interactions use **named profiles** that control which tools are available. T
 - Default profiles (`default`, `human_chat`, `text_only`, `sales_agent`) are seeded from built-in constants in `AIService` on first run.
 - New services that call `ai.chat()` should declare their `ai_calls` and pass the call name. The profile assignment can be configured without code changes.
 
+### Slash Commands — Direct Tool Invocation
+
+Every tool is also a candidate for direct user invocation from the chat input as a slash command (e.g. `/announce "hello" speakers`). Slash commands bypass the AI entirely: the chat handler parses the input, enforces RBAC, and calls `ToolProvider.execute_tool()` directly. The result is recorded in the conversation with the same `tool_calls`/`tool_results` shape as an AI-driven tool use.
+
+**Opting a tool in:**
+
+```python
+# Top-level command: /mycmd <args>
+ToolDefinition(
+    name="my_tool",
+    slash_command="mycmd",
+    slash_help="Short one-line hint shown in autocomplete",
+    description="Full description (used by the AI)",
+    parameters=[...],
+    required_role="user",
+)
+```
+
+**Grouped commands.** Services with several related tools should share a single top-level slash prefix by declaring `slash_group`. The user invokes them as `/<group> <subcommand> <args>`:
+
+```python
+# User types /radio start, /radio stop, /radio skip, etc.
+ToolDefinition(
+    name="radio_start",
+    slash_group="radio",
+    slash_command="start",
+    slash_help="Start the radio DJ: /radio start [genre]",
+    ...
+)
+ToolDefinition(
+    name="radio_stop",
+    slash_group="radio",
+    slash_command="stop",
+    ...
+)
+```
+
+Grouping is the preferred pattern whenever a service exposes more than two related tools — it keeps the global slash namespace uncluttered (`/radio` has 9 subcommands under one prefix instead of 9 top-level commands), and autocomplete naturally narrows as the user types `/radio st` → `start`/`status`/`stop`. The same leaf name can be reused across groups: `/radio stop` and `/speaker stop` don't collide.
+
+Single-tool or otherwise-unique services (e.g. `/announce`, `/greet`, `/rename`, `/memory`) should stay top-level — grouping is only worth it when there's actually something to group.
+
+**The standard is that most tools SHOULD expose a slash command.** The exceptions are tools whose parameter shapes don't translate well to shell syntax:
+- Tools that take raw HTML / multi-line structured content as a required field (e.g. `inbox_reply`'s `body_html`).
+- Tools whose required arguments are opaque IDs the user can't know by heart (fine if the ID also appears in another slash command's output).
+- Tools with complex `object`/`array` inputs that have no natural positional form (e.g. `query_entities`' filter list).
+- Tools that only make sense as a mid-AI-turn callback (e.g. `email_attach` inside an active draft).
+
+Everything else — including admin tools — should opt in. RBAC automatically hides commands from users who can't invoke them, so admin-only commands pollute nothing for non-admins.
+
+**Parser rules (see `core/slash_commands.py`):**
+
+- Tokenization uses `shlex` — standard shell quoting for values with spaces.
+- Positional arguments are assigned to parameters in declaration order (skipping injected `_*` params and any keyword-supplied ones).
+- Keyword args: `key=value`, `--key=value`, or `--key value`.
+- Positional slots can't be skipped — to set a later parameter without setting an earlier one, use a keyword arg. **Order your parameters so the most-commonly-supplied ones come first** if you want a natural positional form; complex or less-common parameters should live near the end so keyword access is practical.
+- Type coercion per `ToolParameterType`: strings pass through, numbers parse, booleans accept `true/yes/1/on`/`false/no/0/off`, arrays accept JSON (`["a","b"]`) or comma-split (`a,b,c`), objects must be JSON.
+- Enums are validated post-coercion.
+
+**Plugin namespacing:**
+
+Tools provided by plugins are automatically exposed under a dotted namespace (e.g. `/currev.time_logs`) to prevent collisions with core tools or other plugins. The namespace is resolved by `AIService._resolve_slash_namespace()`:
+
+1. If the service class declares `slash_namespace: str` as a class attribute, that wins — plugins use this to pick a short, user-friendly prefix.
+2. Otherwise, if the service class's `__module__` starts with `gilbert_plugin_`, the sanitized plugin name (the part after the prefix, up to the first `.`) is used.
+3. Core services (no plugin module, no class attribute) get no prefix — their slash commands are bare.
+
+Plugins should set `slash_namespace` on their `Service` subclass rather than relying on the auto-detected form, both for brevity and because the auto-detected name mirrors the plugin directory name (which can be long).
+
+**Uniqueness:**
+
+Within a namespace, slash commands must be unique. A static test (`tests/unit/test_slash_command_uniqueness.py`) walks every `ToolDefinition` under `src/gilbert/core/services/` and `src/gilbert/integrations/` and fails the build if two core tools claim the same `slash_command` — so collisions are caught before they reach production. Plugin tools are checked at discovery time with a runtime warning.
+
+**Autocomplete:**
+
+`slash.commands.list` (everyone role) is an RPC that returns the RBAC-filtered command list for the caller. The chat input (`ChatInput.tsx`) fetches it on connect and drives a popover with prefix-filtered suggestions plus a parameter help strip that highlights the current argument as the user types.
+
 ### Key Directories
 
 - `src/gilbert/interfaces/` — ABCs, protocol definitions, shared data types, and WS connection protocol (`WsConnectionBase`, `RpcHandler`). Includes ACL policy defaults (`acl.py`), AI profile dataclass, document type mappings, and all capability protocols.
@@ -319,6 +395,16 @@ These are the most critical. Scan imports in each layer:
 - Plugin resolves dependencies via **concrete imports** instead of `resolver.require_capability()` / `resolver.get_capability()`.
 - Plugin reads config via `context.config` for runtime settings instead of implementing `Configurable` and using the `ConfigurationReader` protocol.
 - Plugin accesses `_private` attributes on resolved services.
+- Plugin `Service` class that provides tools does **not** declare `slash_namespace` — plugins should set a short, user-friendly namespace rather than relying on the auto-detected directory-name fallback. Verify by grepping for `class ... (Service)` in `plugins/` and checking each tool-providing class has a `slash_namespace = "..."` class attribute.
+
+### Slash Command Violations
+
+- **Tools without a `slash_command`** — audit every `ToolDefinition(...)` in `src/gilbert/core/services/`, `src/gilbert/integrations/`, and `plugins/`. Tools should set `slash_command="..."` unless they fit one of the documented exceptions (raw HTML/multi-line required inputs, opaque-ID-only inputs, complex structured arrays/objects, mid-AI-turn callbacks). Missing `slash_command` on an eligible tool is a violation.
+- **Missing `slash_help`** on tools that declare `slash_command` — every exposed command should also have a one-line `slash_help` string for the autocomplete popover. It's fine for `slash_help` to be shorter than `description`; the goal is a terse hint, not a duplicate of the AI-facing docs.
+- **Multi-tool services that don't use `slash_group`** — any service exposing three or more slash-enabled tools that are conceptually related (e.g. radio, speaker, knowledge, users) should collapse them under a `slash_group` so the top-level namespace stays tidy. Services with one or two tools, or with tools that aren't really a cohesive set, can stay top-level.
+- **Parameter order hostile to shell use** — if a tool's first positional is a rarely-supplied parameter (e.g. `limit` before `query`), slash users will always have to use keyword args. Fix by reordering parameters so the most-commonly-set ones come first. This doesn't affect the AI since it always sends structured JSON.
+- **Non-identifier `slash_command` or `slash_group` values** — both must match `[a-zA-Z][a-zA-Z0-9_\-]*`. Dots are reserved for plugin namespacing and spaces are reserved for group/subcommand composition; both are applied automatically at discovery time. `tests/unit/test_slash_command_uniqueness.py` enforces this.
+- **Duplicate `(slash_group, slash_command)` pairs across core tools** — two tools claiming the same slash in the same group is a collision. The uniqueness test catches this. The same leaf name CAN appear under different groups (`/radio stop` vs `/speaker stop`) — that's by design.
 
 ### How to Run
 

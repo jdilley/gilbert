@@ -75,10 +75,17 @@ def announce_def() -> ToolDefinition:
         ("/an_nounce", "an_nounce"),
         ("/do-it", "do-it"),
         ("/X", "X"),
+        # Plugin-namespaced commands (dot separator)
+        ("/currev.time_logs", "currev.time_logs"),
+        ("/currev.time_logs mon tue", "currev.time_logs"),
+        ("/plugin-name.some_tool", "plugin-name.some_tool"),
         ("  /announce", None),  # leading whitespace — not a command
         ("/", None),
         ("/123abc", None),  # must start with a letter
         ("/path/to/file", None),  # nested slash — not a command
+        ("/.foo", None),  # dot can't be the first segment char
+        ("/foo.", None),  # trailing dot without a second segment
+        ("/foo.123", None),  # second segment must start with a letter
         ("announce", None),
         ("", None),
         ("/ announce", None),
@@ -86,6 +93,68 @@ def announce_def() -> ToolDefinition:
 )
 def test_extract_command_name(text: str, expected: str | None) -> None:
     assert extract_command_name(text) == expected
+
+
+def test_parse_namespaced_command(announce_def: ToolDefinition) -> None:
+    args = parse_slash_command(
+        '/currev.announce "hi" speakers', announce_def,
+    )
+    assert args == {"text": "hi", "destination": "speakers"}
+
+
+def test_namespaced_usage_hint_in_errors(announce_def: ToolDefinition) -> None:
+    # When the user typed a namespaced command, the Usage: hint in the
+    # error should echo that exact form so they can copy-paste to fix it.
+    with pytest.raises(SlashCommandError, match=r"Usage: /currev\.announce"):
+        parse_slash_command("/currev.announce", announce_def)
+
+
+# --- Grouped / multi-word commands ----------------------------------
+
+
+def test_parse_with_explicit_full_command_override() -> None:
+    """When the caller knows the full command name (e.g. ``radio start``),
+    it passes it in so the parser strips the right prefix and uses the
+    right name for usage hints."""
+    tool = _def(
+        params=[
+            ToolParameter(
+                name="genre",
+                type=ToolParameterType.STRING,
+                description="Genre to start with",
+                required=False,
+            ),
+        ],
+    )
+    args = parse_slash_command(
+        "/radio start chill", tool, full_command="radio start",
+    )
+    assert args == {"genre": "chill"}
+
+
+def test_parse_grouped_error_uses_full_command() -> None:
+    tool = _def(
+        params=[
+            ToolParameter(
+                name="name",
+                type=ToolParameterType.STRING,
+                description="Required name",
+                required=True,
+            ),
+        ],
+    )
+    with pytest.raises(SlashCommandError, match=r"Usage: /timer set"):
+        parse_slash_command(
+            "/timer set", tool, full_command="timer set",
+        )
+
+
+def test_parse_rejects_wrong_prefix_when_full_command_given() -> None:
+    tool = _def(params=[])
+    with pytest.raises(SlashCommandError, match="Expected command prefix"):
+        parse_slash_command(
+            "/radio stop", tool, full_command="radio start",
+        )
 
 
 # --- format_usage --------------------------------------------------------

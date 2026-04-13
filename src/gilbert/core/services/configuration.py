@@ -603,6 +603,9 @@ class ConfigurationService(Service):
         return [
             ToolDefinition(
                 name="get_configuration",
+                slash_group="config",
+                slash_command="get",
+                slash_help="Read config by dot-path: /config get [path]",
                 description="Get configuration values. Returns the full config or a specific value by path.",
                 parameters=[
                     ToolParameter(
@@ -616,6 +619,9 @@ class ConfigurationService(Service):
             ),
             ToolDefinition(
                 name="set_configuration",
+                slash_group="config",
+                slash_command="set",
+                slash_help="Set a config value: /config set <path> <value>",
                 description="Set a configuration value. Persists the change and notifies/restarts affected services.",
                 parameters=[
                     ToolParameter(
@@ -633,6 +639,9 @@ class ConfigurationService(Service):
             ),
             ToolDefinition(
                 name="describe_configuration",
+                slash_group="config",
+                slash_command="describe",
+                slash_help="Show config schema: /config describe [namespace]",
                 description="Describe all configurable parameters with types, descriptions, and defaults.",
                 parameters=[
                     ToolParameter(

@@ -469,6 +469,9 @@ class UserService(Service):
         return [
             ToolDefinition(
                 name="list_users",
+                slash_group="user",
+                slash_command="list",
+                slash_help="List all users: /user list [limit]",
                 description="List all users (syncs from external providers first).",
                 parameters=[
                     ToolParameter(
@@ -482,6 +485,9 @@ class UserService(Service):
             ),
             ToolDefinition(
                 name="get_user",
+                slash_group="user",
+                slash_command="get",
+                slash_help="Look up a user: /user get <user_id-or-email>",
                 description="Get a user by ID or email address.",
                 parameters=[
                     ToolParameter(
@@ -494,6 +500,12 @@ class UserService(Service):
             ),
             ToolDefinition(
                 name="create_user",
+                slash_group="user",
+                slash_command="create",
+                slash_help=(
+                    "Create a local user: /user create <username> "
+                    "<display_name> <password> email=..."
+                ),
                 description="Create a new local user account.",
                 parameters=[
                     ToolParameter(
@@ -522,6 +534,9 @@ class UserService(Service):
             ),
             ToolDefinition(
                 name="sync_users",
+                slash_group="user",
+                slash_command="sync",
+                slash_help="Sync users from external providers: /user sync",
                 description="Sync users from all external providers (e.g., Google Workspace).",
                 parameters=[],
                 required_role="admin",
