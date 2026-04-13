@@ -101,6 +101,42 @@ def _item_id(item: Any) -> str:
     return ""
 
 
+# Match ``spotify:<kind>:<id>`` anywhere in a string. SMAPI item ids for
+# Spotify come back in shapes like ``0fffffffspotify:track:3w0pyHgJJW9JN0cJxmi33Z``
+# (8-char hex "flags" prefix + percent- or un-encoded Spotify URI) and we
+# want the clean URI out so the speaker backend can build the real
+# ``x-sonos-spotify:...`` playback URI via ``_to_sonos_spotify_uri``.
+_SPOTIFY_URI_RE = re.compile(
+    r"spotify(?::|%3[Aa])(track|album|playlist|artist|episode|show)"
+    r"(?::|%3[Aa])([A-Za-z0-9]+)"
+)
+
+
+def _extract_spotify_uri(item_id: str) -> str | None:
+    """Recover a clean ``spotify:<kind>:<id>`` URI from a SMAPI item id.
+
+    SoCo's ``MusicService.sonos_uri_from_id`` returns a ``soco://...``
+    URI that Sonos' AVTransport refuses with ``UPnP Error 714 Illegal
+    MIME-Type`` for Spotify content on modern firmware — the player
+    actually needs a real ``x-sonos-spotify:`` URI plus DIDL metadata.
+    The good news is SMAPI item ids for the Spotify service embed the
+    canonical Spotify URI inside them; we extract it here so the speaker
+    backend can rebuild a proper Sonos-Spotify URI via the existing
+    ``_to_sonos_spotify_uri`` helper.
+
+    Returns ``None`` if the id doesn't look like it contains a Spotify
+    reference — callers should fall back to the SoCo path for non-
+    Spotify SMAPI services.
+    """
+    if not item_id:
+        return None
+    match = _SPOTIFY_URI_RE.search(item_id)
+    if not match:
+        return None
+    kind, sid = match.group(1), match.group(2)
+    return f"spotify:{kind}:{sid}"
+
+
 def _item_uri(item: Any) -> str:
     resources = getattr(item, "resources", None) or []
     if resources:
@@ -498,6 +534,21 @@ class SonosMusic(MusicBackend):
         if not item.id:
             raise ValueError(f"MusicItem has no uri and no id: {item.title}")
 
+        # Fast path for Spotify: the SMAPI item id embeds the canonical
+        # ``spotify:<kind>:<id>`` URI. Handing that straight through to
+        # the speaker backend lets it build a real ``x-sonos-spotify:``
+        # URI, which is the shape Sonos' AVTransport actually accepts.
+        # ``sonos_uri_from_id`` returns ``soco://...``, which modern
+        # firmware rejects as "Illegal MIME-Type" (UPnP 714).
+        spotify_uri = _extract_spotify_uri(item.id)
+        if spotify_uri is not None:
+            return Playable(uri=spotify_uri, didl_meta="", title=item.title)
+
+        # Fallback for non-Spotify SMAPI services. ``sonos_uri_from_id``
+        # is documented to work for them, though it has only been
+        # verified in practice for a handful of services; if your
+        # service returns 714 here the fix is to teach this method how
+        # to extract its canonical URI in the same way we do for Spotify.
         def _resolve() -> str:
             svc = self._get_smapi()
             return str(svc.sonos_uri_from_id(item.id))
