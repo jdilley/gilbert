@@ -8,7 +8,7 @@ import pytest
 
 from gilbert.core.services.radio_dj import RadioDJService
 from gilbert.interfaces.events import Event
-from gilbert.interfaces.music import PlaylistInfo, SearchResults
+from gilbert.interfaces.music import MusicItem, MusicItemKind, Playable
 from gilbert.interfaces.speaker import PlayRequest
 
 
@@ -129,24 +129,70 @@ class FakePresenceService:
 
 
 class FakeMusicService:
-    def __init__(self) -> None:
+    """Fake music service mimicking the new MusicService shape.
+
+    Exposes the same surface the radio DJ calls: ``search`` returns a
+    list of ``MusicItem`` (new interface), ``play_item`` delegates to the
+    speaker service (matching the real service's behavior), and
+    ``now_playing`` returns whatever the test has set.
+    """
+
+    def __init__(self, speaker_svc: Any = None) -> None:
         self.last_search: str | None = None
+        self.last_kind: MusicItemKind | None = None
+        self.speaker_svc = speaker_svc
+        # Test hook: what now_playing() should return. None means "stopped".
+        self.current_now_playing: Any = None
+        # Test hook: set to True to simulate empty search results.
+        self.empty_results: bool = False
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
         return ServiceInfo(name="music", capabilities=frozenset({"music"}))
 
-    async def search(self, query: str, *, limit: int = 10) -> SearchResults:
+    async def search(
+        self,
+        query: str,
+        *,
+        kind: MusicItemKind = MusicItemKind.TRACK,
+        limit: int = 10,
+    ) -> list[MusicItem]:
         self.last_search = query
-        return SearchResults(
-            playlists=[
-                PlaylistInfo(
-                    playlist_id="pl_123",
-                    name=f"Best of {query}",
-                    external_url=f"spotify:playlist:pl_123",
-                ),
-            ],
-        )
+        self.last_kind = kind
+        if self.empty_results:
+            return []
+        return [
+            MusicItem(
+                id="pl_123",
+                title=f"Best of {query}",
+                kind=kind,
+                uri="x-sonos-spotify:spotify%3aplaylist%3apl_123",
+                service="Spotify",
+            ),
+        ]
+
+    async def play_item(
+        self,
+        item: MusicItem,
+        speaker_names: list[str] | None = None,
+        volume: int | None = None,
+    ) -> Playable:
+        # Mirror the real MusicService.play_item: resolve + delegate to speakers.
+        if self.speaker_svc is not None:
+            await self.speaker_svc.play_on_speakers(
+                uri=item.uri,
+                speaker_names=speaker_names,
+                volume=volume,
+                title=item.title,
+                didl_meta=item.didl_meta,
+            )
+        return Playable(uri=item.uri, didl_meta=item.didl_meta, title=item.title)
+
+    async def now_playing(self, speaker_name: str | None = None) -> Any:
+        from gilbert.interfaces.speaker import NowPlaying, PlaybackState
+        if self.current_now_playing is None:
+            return NowPlaying(state=PlaybackState.STOPPED)
+        return self.current_now_playing
 
 
 class FakeSpeakerService:
@@ -198,13 +244,13 @@ class FakeResolver:
 
 
 @pytest.fixture
-def music_svc() -> FakeMusicService:
-    return FakeMusicService()
+def speaker_svc() -> FakeSpeakerService:
+    return FakeSpeakerService()
 
 
 @pytest.fixture
-def speaker_svc() -> FakeSpeakerService:
-    return FakeSpeakerService()
+def music_svc(speaker_svc: FakeSpeakerService) -> FakeMusicService:
+    return FakeMusicService(speaker_svc=speaker_svc)
 
 
 @pytest.fixture
@@ -475,6 +521,109 @@ class TestPreferences:
         assert "vetoed" in result.lower() or "country" in result.lower()
         prefs = await started_dj._get_preferences("alice")
         assert "country" in prefs["vetoes"]
+
+    @pytest.mark.asyncio
+    async def test_like_current_records_track_when_known(
+        self, started_dj: RadioDJService, music_svc: FakeMusicService
+    ) -> None:
+        """When the music service can report the current track, like_current also
+        records the specific track (title/artist) so preferences aren't just genre-level."""
+        from gilbert.interfaces.speaker import NowPlaying, PlaybackState
+
+        music_svc.current_now_playing = NowPlaying(
+            state=PlaybackState.PLAYING,
+            title="Black Dog",
+            artist="Led Zeppelin",
+            album="Led Zeppelin IV",
+            uri="spotify:track:abc",
+        )
+        await started_dj.start_radio(genre="classic rock")
+        result = await started_dj.like_current("alice")
+        assert "Black Dog" in result
+        prefs = await started_dj._get_preferences("alice")
+        assert "classic rock" in prefs["likes"]
+        liked_tracks = prefs.get("liked_tracks", [])
+        assert len(liked_tracks) == 1
+        assert liked_tracks[0]["title"] == "Black Dog"
+        assert liked_tracks[0]["artist"] == "Led Zeppelin"
+
+    @pytest.mark.asyncio
+    async def test_dislike_current_records_track_when_known(
+        self, started_dj: RadioDJService, music_svc: FakeMusicService
+    ) -> None:
+        """Disliking also records the specific track as vetoed, not just the genre."""
+        from gilbert.interfaces.speaker import NowPlaying, PlaybackState
+
+        music_svc.current_now_playing = NowPlaying(
+            state=PlaybackState.PLAYING,
+            title="Achy Breaky Heart",
+            artist="Billy Ray Cyrus",
+        )
+        await started_dj.start_radio(genre="country")
+        await started_dj.dislike_current("alice")
+
+        prefs = await started_dj._get_preferences("alice")
+        assert "country" in prefs["vetoes"]
+        vetoed_tracks = prefs.get("vetoed_tracks", [])
+        assert len(vetoed_tracks) == 1
+        assert vetoed_tracks[0]["title"] == "Achy Breaky Heart"
+
+    @pytest.mark.asyncio
+    async def test_like_then_dislike_moves_track(
+        self, started_dj: RadioDJService, music_svc: FakeMusicService
+    ) -> None:
+        """Vetoing a previously-liked track removes it from liked_tracks."""
+        from gilbert.interfaces.speaker import NowPlaying, PlaybackState
+
+        music_svc.current_now_playing = NowPlaying(
+            state=PlaybackState.PLAYING,
+            title="Changeling",
+            artist="The Doors",
+        )
+        await started_dj.start_radio(genre="classic rock")
+        await started_dj.like_current("alice")
+        await started_dj.dislike_current("alice")
+
+        prefs = await started_dj._get_preferences("alice")
+        liked = prefs.get("liked_tracks", [])
+        vetoed = prefs.get("vetoed_tracks", [])
+        assert not any(t["title"] == "Changeling" for t in liked)
+        assert any(t["title"] == "Changeling" for t in vetoed)
+
+    @pytest.mark.asyncio
+    async def test_get_status_includes_now_playing(
+        self, started_dj: RadioDJService, music_svc: FakeMusicService
+    ) -> None:
+        """The status should reflect the track currently playing on the speaker."""
+        from gilbert.interfaces.speaker import NowPlaying, PlaybackState
+
+        music_svc.current_now_playing = NowPlaying(
+            state=PlaybackState.PLAYING,
+            title="Kashmir",
+            artist="Led Zeppelin",
+            album="Physical Graffiti",
+            duration_seconds=514.0,
+            position_seconds=61.0,
+        )
+        await started_dj.start_radio(genre="classic rock")
+        status = await started_dj.get_status()
+        assert "now_playing" in status
+        assert status["now_playing"]["title"] == "Kashmir"
+        assert status["now_playing"]["is_playing"] is True
+        assert status["now_playing"]["position_seconds"] == 61.0
+
+    @pytest.mark.asyncio
+    async def test_get_status_handles_missing_now_playing(
+        self, started_dj: RadioDJService, music_svc: FakeMusicService
+    ) -> None:
+        """When the backend reports STOPPED with no metadata, the status still includes
+        the now_playing field (with empty strings) — a clear signal to the caller."""
+        from gilbert.interfaces.speaker import NowPlaying, PlaybackState
+
+        music_svc.current_now_playing = NowPlaying(state=PlaybackState.STOPPED)
+        status = await started_dj.get_status()
+        assert status["now_playing"]["title"] == ""
+        assert status["now_playing"]["is_playing"] is False
 
 
 # --- Polling ---

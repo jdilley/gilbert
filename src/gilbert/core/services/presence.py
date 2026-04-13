@@ -7,12 +7,21 @@ Publishes events on the event bus:
 - ``presence.departed`` — user disappeared from poll (record deleted)
 """
 
+import contextlib
 import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from gilbert.interfaces.configuration import ConfigParam
+from gilbert.core.services._backend_actions import (
+    all_backend_actions,
+    invoke_backend_action,
+)
+from gilbert.interfaces.configuration import (
+    ConfigAction,
+    ConfigActionResult,
+    ConfigParam,
+)
 from gilbert.interfaces.events import Event, EventBus, EventBusProvider
 from gilbert.interfaces.presence import (
     PresenceBackend,
@@ -203,6 +212,21 @@ class PresenceService(Service):
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
         self._apply_config(config)
+
+    # --- ConfigActionProvider ---
+
+    def config_actions(self) -> list[ConfigAction]:
+        with contextlib.suppress(ImportError):
+            import gilbert.integrations.unifi.presence  # noqa: F401
+        return all_backend_actions(
+            registry=PresenceBackend.registered_backends(),
+            current_backend=self._backend,
+        )
+
+    async def invoke_config_action(
+        self, key: str, payload: dict[str, Any],
+    ) -> ConfigActionResult:
+        return await invoke_backend_action(self._backend, key, payload)
 
     async def stop(self) -> None:
         if self._backend is not None:

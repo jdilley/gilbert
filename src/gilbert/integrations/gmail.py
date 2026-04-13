@@ -16,6 +16,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
 
+from gilbert.interfaces.configuration import ConfigAction, ConfigActionResult
 from gilbert.interfaces.email import EmailAddress, EmailAttachment, EmailBackend, EmailMessage
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,55 @@ class GmailBackend(EmailBackend):
                 restart_required=True,
             ),
         ]
+
+    @classmethod
+    def backend_actions(cls) -> list[ConfigAction]:
+        return [
+            ConfigAction(
+                key="test_connection",
+                label="Test connection",
+                description=(
+                    "Fetch the Gmail profile for the delegated user to "
+                    "verify the service account and delegation."
+                ),
+            ),
+        ]
+
+    async def invoke_backend_action(
+        self, key: str, payload: dict,
+    ) -> ConfigActionResult:
+        if key == "test_connection":
+            return await self._action_test_connection()
+        return ConfigActionResult(
+            status="error",
+            message=f"Unknown action: {key}",
+        )
+
+    async def _action_test_connection(self) -> ConfigActionResult:
+        if self._service is None:
+            return ConfigActionResult(
+                status="error",
+                message=(
+                    "Gmail backend is not initialized — check "
+                    "service_account_json and delegated_user, then save "
+                    "and restart."
+                ),
+            )
+        try:
+            profile = await asyncio.to_thread(
+                self._service.users().getProfile(userId="me").execute,
+            )
+        except Exception as exc:
+            return ConfigActionResult(
+                status="error",
+                message=f"Gmail API error: {exc}",
+            )
+        email = profile.get("emailAddress", "(unknown)")
+        total = profile.get("messagesTotal", 0)
+        return ConfigActionResult(
+            status="ok",
+            message=f"Connected to Gmail as {email} ({total} messages).",
+        )
 
     def __init__(self) -> None:
         self._email_address: str = ""

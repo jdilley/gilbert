@@ -11,6 +11,7 @@ from gilbert.core.services.speaker import SpeakerService
 from gilbert.core.services.storage import StorageService
 from gilbert.interfaces.service import ServiceResolver
 from gilbert.interfaces.speaker import (
+    NowPlaying,
     PlayRequest,
     PlaybackState,
     SpeakerBackend,
@@ -46,6 +47,7 @@ class StubSpeakerBackend(SpeakerBackend):
         self.last_play_request: PlayRequest | None = None
         self.stopped_ids: list[str] | None = None
         self.volume_changes: list[tuple[str, int]] = []
+        self._now_playing: dict[str, NowPlaying] = {}
 
     async def initialize(self, config: dict[str, object]) -> None:
         self.initialized = True
@@ -96,6 +98,17 @@ class StubSpeakerBackend(SpeakerBackend):
 
     async def ungroup_speakers(self, speaker_ids: list[str]) -> None:
         self._groups = []
+
+    async def get_playback_state(self, speaker_id: str) -> PlaybackState:
+        for s in self._speakers:
+            if s.speaker_id == speaker_id:
+                return s.state
+        return PlaybackState.STOPPED
+
+    async def get_now_playing(self, speaker_id: str) -> NowPlaying:
+        if speaker_id in self._now_playing:
+            return self._now_playing[speaker_id]
+        return await super().get_now_playing(speaker_id)
 
 
 class StubStorageBackend(StorageBackend):
@@ -569,6 +582,89 @@ async def test_announce_with_tts(
     assert stub_backend.last_play_request is not None
     assert stub_backend.last_play_request.speaker_ids == ["uid-1", "uid-2"]
     assert stub_backend.last_play_request.volume == 60
+
+
+# --- Now playing ---
+
+
+async def test_get_now_playing_by_name(
+    service: SpeakerService, stub_backend: StubSpeakerBackend, resolver: ServiceResolver
+) -> None:
+    """Explicitly naming a speaker queries that speaker's now-playing info."""
+    await service.start(resolver)
+    stub_backend._now_playing["uid-2"] = NowPlaying(
+        state=PlaybackState.PLAYING,
+        title="Stairway to Heaven",
+        artist="Led Zeppelin",
+        album="Led Zeppelin IV",
+        duration_seconds=482.0,
+        position_seconds=120.0,
+    )
+    now = await service.get_now_playing("Speaker 2")
+    assert now.state == PlaybackState.PLAYING
+    assert now.title == "Stairway to Heaven"
+    assert now.artist == "Led Zeppelin"
+    assert now.position_seconds == 120.0
+
+
+async def test_get_now_playing_prefers_last_used(
+    service: SpeakerService, stub_backend: StubSpeakerBackend, resolver: ServiceResolver
+) -> None:
+    """With no explicit name, the last-used speaker wins over the heuristic."""
+    await service.start(resolver)
+    # Simulate a previous play_on_speakers call setting last-used to Speaker 1
+    await service.play_on_speakers(uri="http://x/a.mp3", speaker_names=["Speaker 1"])
+
+    stub_backend._now_playing["uid-1"] = NowPlaying(
+        state=PlaybackState.PAUSED,
+        title="Paused Song",
+        artist="Artist",
+    )
+    # Speaker 3 is also PLAYING in the stub, but Speaker 1 wins because it was
+    # the last-used speaker.
+    now = await service.get_now_playing()
+    assert now.title == "Paused Song"
+    assert now.state == PlaybackState.PAUSED
+
+
+async def test_get_now_playing_falls_back_to_playing_speaker(
+    stub_backend: StubSpeakerBackend, resolver: ServiceResolver
+) -> None:
+    """With nothing last-used, a speaker that's currently playing wins."""
+    svc = SpeakerService()
+    svc._backend = stub_backend
+    svc._enabled = True
+    await svc.start(resolver)
+
+    # Speaker 3 is in PLAYING state per the stub's default setup
+    stub_backend._now_playing["uid-3"] = NowPlaying(
+        state=PlaybackState.PLAYING,
+        title="Current Jam",
+        artist="Band",
+    )
+    now = await svc.get_now_playing()
+    assert now.title == "Current Jam"
+
+
+async def test_get_now_playing_unknown_speaker(
+    service: SpeakerService, resolver: ServiceResolver
+) -> None:
+    await service.start(resolver)
+    with pytest.raises(KeyError, match="Unknown speaker"):
+        await service.get_now_playing("Nonexistent")
+
+
+async def test_get_now_playing_default_when_no_metadata(
+    service: SpeakerService, resolver: ServiceResolver
+) -> None:
+    """Backends without a real override fall back to the state-only default."""
+    await service.start(resolver)
+    # Explicitly target Speaker 1 (STOPPED); stub has no _now_playing entry for it,
+    # so it falls through to the SpeakerBackend default which mirrors
+    # get_playback_state and leaves metadata empty.
+    now = await service.get_now_playing("Speaker 1")
+    assert now.state == PlaybackState.STOPPED
+    assert now.title == ""
 
 
 # --- Config parsing ---

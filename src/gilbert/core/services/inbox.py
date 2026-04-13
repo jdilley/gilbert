@@ -7,12 +7,21 @@ reply to, and compose email.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from gilbert.interfaces.configuration import ConfigParam
+from gilbert.core.services._backend_actions import (
+    all_backend_actions,
+    invoke_backend_action,
+)
+from gilbert.interfaces.configuration import (
+    ConfigAction,
+    ConfigActionResult,
+    ConfigParam,
+)
 from gilbert.interfaces.email import EmailAddress, EmailAttachment, EmailBackend, EmailMessage
 from gilbert.interfaces.events import EventBusProvider
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
@@ -206,6 +215,21 @@ class InboxService(Service):
     async def on_config_changed(self, config: dict[str, Any]) -> None:
         self._poll_interval = int(config.get("poll_interval", self._poll_interval))
         self._max_body_length = int(config.get("max_body_length", self._max_body_length))
+
+    # --- ConfigActionProvider ---
+
+    def config_actions(self) -> list[ConfigAction]:
+        with contextlib.suppress(ImportError):
+            import gilbert.integrations.gmail  # noqa: F401
+        return all_backend_actions(
+            registry=EmailBackend.registered_backends(),
+            current_backend=self._backend,
+        )
+
+    async def invoke_config_action(
+        self, key: str, payload: dict[str, Any],
+    ) -> ConfigActionResult:
+        return await invoke_backend_action(self._backend, key, payload)
 
     # ── Polling ────────────────────────────────────────────────
 

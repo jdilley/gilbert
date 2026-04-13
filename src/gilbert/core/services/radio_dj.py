@@ -9,13 +9,19 @@ import json
 import logging
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from gilbert.interfaces.configuration import ConfigParam, ConfigurationReader
 from gilbert.interfaces.events import Event, EventBus, EventBusProvider
-from gilbert.interfaces.music import SearchResults, TrackInfo
+from gilbert.interfaces.music import (
+    MusicItem,
+    MusicItemKind,
+    MusicSearchUnavailableError,
+    Playable,
+)
 from gilbert.interfaces.presence import PresenceProvider, PresenceState, UserPresence
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
+from gilbert.interfaces.speaker import NowPlaying, PlaybackState
 from gilbert.interfaces.storage import StorageProvider
 from gilbert.interfaces.tools import (
     ToolDefinition,
@@ -273,6 +279,66 @@ class RadioDJService(Service):
             prefs["likes"] = likes
             await self._save_preferences(user_id, prefs)
 
+    async def _add_liked_track(self, user_id: str, now: NowPlaying) -> None:
+        """Record a specific track as liked by a user (dedup by title+artist)."""
+        if not now.title:
+            return
+        prefs = await self._get_preferences(user_id)
+        liked: list[dict[str, Any]] = prefs.get("liked_tracks", [])
+        key = (now.title.lower(), now.artist.lower())
+        if any(
+            (t.get("title", "").lower(), t.get("artist", "").lower()) == key
+            for t in liked
+        ):
+            return
+        liked.append({
+            "title": now.title,
+            "artist": now.artist,
+            "album": now.album,
+            "uri": now.uri,
+        })
+        prefs["liked_tracks"] = liked
+        await self._save_preferences(user_id, prefs)
+
+    async def _add_vetoed_track(self, user_id: str, now: NowPlaying) -> None:
+        """Record a specific track as vetoed by a user (dedup by title+artist)."""
+        if not now.title:
+            return
+        prefs = await self._get_preferences(user_id)
+        vetoed: list[dict[str, Any]] = prefs.get("vetoed_tracks", [])
+        liked: list[dict[str, Any]] = prefs.get("liked_tracks", [])
+        key = (now.title.lower(), now.artist.lower())
+
+        def _track_key(t: dict[str, Any]) -> tuple[str, str]:
+            return (t.get("title", "").lower(), t.get("artist", "").lower())
+
+        if not any(_track_key(t) == key for t in vetoed):
+            vetoed.append({
+                "title": now.title,
+                "artist": now.artist,
+                "album": now.album,
+                "uri": now.uri,
+            })
+        # Remove from liked if present
+        prefs["liked_tracks"] = [t for t in liked if _track_key(t) != key]
+        prefs["vetoed_tracks"] = vetoed
+        await self._save_preferences(user_id, prefs)
+
+    async def _get_now_playing(self) -> NowPlaying | None:
+        """Best-effort query of the current track from the music service.
+
+        Returns None if the music service can't report it (e.g. the speaker
+        backend doesn't support track introspection, or the call errors).
+        """
+        if self._music_svc is None:
+            return None
+        try:
+            # _music_svc is Any (duck-typed); MusicService.now_playing is the source of truth.
+            return cast(NowPlaying, await self._music_svc.now_playing())
+        except Exception:
+            logger.debug("Failed to query music.now_playing", exc_info=True)
+            return None
+
     async def _add_veto(self, user_id: str, genre: str) -> None:
         prefs = await self._get_preferences(user_id)
         vetoes: list[str] = prefs.get("vetoes", [])
@@ -352,25 +418,35 @@ class RadioDJService(Service):
     async def _play_genre(self, genre: str) -> bool:
         """Search for a playlist matching the genre and start playback.
 
-        Returns True if playback started successfully.
+        Uses the music service's generic search → resolve → play flow, so
+        it works with any ``MusicBackend`` that implements the interface
+        (currently ``SonosMusic``). Returns True if playback started
+        successfully.
         """
         try:
-            results: SearchResults = await self._music_svc.search(
-                f"{genre} playlist", limit=1,
-            )
-            if not results.playlists:
+            try:
+                results: list[MusicItem] = await self._music_svc.search(
+                    genre, kind=MusicItemKind.PLAYLIST, limit=1,
+                )
+            except MusicSearchUnavailableError as exc:
+                logger.warning("Radio DJ: %s", exc)
+                return False
+
+            if not results:
                 logger.warning("No playlists found for genre: %s", genre)
                 return False
 
-            playlist = results.playlists[0]
-            uri = playlist.external_url or f"spotify:playlist:{playlist.playlist_id}"
+            playlist = results[0]
 
-            await self._speaker_svc.play_on_speakers(
-                uri=uri,
-                speaker_names=self._speakers or None,
-                volume=self._default_volume,
-                title=f"Radio DJ: {genre}",
-            )
+            try:
+                playable: Playable = await self._music_svc.play_item(
+                    playlist,
+                    speaker_names=self._speakers or None,
+                    volume=self._default_volume,
+                )
+            except (RuntimeError, MusicSearchUnavailableError) as exc:
+                logger.warning("Radio DJ playback failed for %s: %s", genre, exc)
+                return False
 
             old_genre = self._current_genre
             self._current_genre = genre
@@ -387,7 +463,10 @@ class RadioDJService(Service):
                     source="radio_dj",
                 ))
 
-            logger.info("Radio DJ playing: %s (playlist: %s)", genre, playlist.name)
+            logger.info(
+                "Radio DJ playing: %s (playlist: %s, uri: %s)",
+                genre, playlist.title, playable.uri,
+            )
             return True
 
         except Exception:
@@ -459,28 +538,46 @@ class RadioDJService(Service):
         return "Failed to skip track."
 
     async def like_current(self, user_id: str) -> str:
-        """Like the current genre for a user."""
+        """Like the current genre (and the specific track, if known) for a user."""
         if not self._current_genre:
             return "Nothing is playing right now."
         await self._add_like(user_id, self._current_genre)
+        now = await self._get_now_playing()
+        if now is not None and now.title:
+            await self._add_liked_track(user_id, now)
         if self._event_bus:
             await self._event_bus.publish(Event(
                 event_type="radio_dj.track.liked",
-                data={"user_id": user_id, "genre": self._current_genre},
+                data={
+                    "user_id": user_id,
+                    "genre": self._current_genre,
+                    "title": now.title if now else "",
+                    "artist": now.artist if now else "",
+                },
                 source="radio_dj",
             ))
+        if now is not None and now.title:
+            return f"Liked: {now.title} — {now.artist} ({self._current_genre})"
         return f"Liked: {self._current_genre}"
 
     async def dislike_current(self, user_id: str) -> str:
-        """Dislike (veto) the current genre and skip."""
+        """Dislike the current track: veto the genre + this specific track, then skip."""
         if not self._current_genre:
             return "Nothing is playing right now."
         genre = self._current_genre
         await self._add_veto(user_id, genre)
+        now = await self._get_now_playing()
+        if now is not None and now.title:
+            await self._add_vetoed_track(user_id, now)
         if self._event_bus:
             await self._event_bus.publish(Event(
                 event_type="radio_dj.track.vetoed",
-                data={"user_id": user_id, "genre": genre},
+                data={
+                    "user_id": user_id,
+                    "genre": genre,
+                    "title": now.title if now else "",
+                    "artist": now.artist if now else "",
+                },
                 source="radio_dj",
             ))
         # Switch to a different genre
@@ -504,9 +601,9 @@ class RadioDJService(Service):
         return f"Vetoed {genre}"
 
     async def get_status(self) -> dict[str, Any]:
-        """Get the current DJ status."""
+        """Get the current DJ status, including the track currently playing if known."""
         present = await self._get_present_user_ids()
-        return {
+        status: dict[str, Any] = {
             "active": self._active,
             "current_genre": self._current_genre,
             "present_users": sorted(present),
@@ -515,6 +612,19 @@ class RadioDJService(Service):
             "speakers": self._speakers,
             "min_switch_interval_minutes": self._min_switch_minutes,
         }
+        now = await self._get_now_playing()
+        if now is not None:
+            status["now_playing"] = {
+                "state": now.state.value,
+                "is_playing": now.state == PlaybackState.PLAYING,
+                "title": now.title,
+                "artist": now.artist,
+                "album": now.album,
+                "uri": now.uri,
+                "duration_seconds": now.duration_seconds,
+                "position_seconds": now.position_seconds,
+            }
+        return status
 
     # --- Polling and event handling ---
 

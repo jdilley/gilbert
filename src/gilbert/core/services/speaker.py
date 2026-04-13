@@ -1,15 +1,26 @@
 """Speaker service — wraps a SpeakerBackend as a discoverable service with announce support."""
 
 import asyncio
+import contextlib
 import json
 import logging
 import uuid
 from typing import Any
 
 from gilbert.core.output import cleanup_old_files, get_output_dir
-from gilbert.interfaces.configuration import ConfigParam
+from gilbert.core.services._backend_actions import (
+    all_backend_actions,
+    invoke_backend_action,
+)
+from gilbert.interfaces.configuration import (
+    ConfigAction,
+    ConfigActionResult,
+    ConfigParam,
+)
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.speaker import (
+    NowPlaying,
+    PlaybackState,
     PlayRequest,
     SpeakerBackend,
 )
@@ -205,6 +216,21 @@ class SpeakerService(Service):
     async def on_config_changed(self, config: dict[str, Any]) -> None:
         self._apply_config(config)
 
+    # --- ConfigActionProvider ---
+
+    def config_actions(self) -> list[ConfigAction]:
+        with contextlib.suppress(ImportError):
+            import gilbert.integrations.sonos_speaker  # noqa: F401
+        return all_backend_actions(
+            registry=SpeakerBackend.registered_backends(),
+            current_backend=self._backend,
+        )
+
+    async def invoke_config_action(
+        self, key: str, payload: dict[str, Any],
+    ) -> ConfigActionResult:
+        return await invoke_backend_action(self._backend, key, payload)
+
     async def stop(self) -> None:
         if self._backend is not None:
             await self._backend.close()
@@ -369,10 +395,14 @@ class SpeakerService(Service):
         volume: int | None = None,
         title: str = "",
         position_seconds: float | None = None,
+        didl_meta: str = "",
     ) -> None:
         """Play a URI on the specified speakers.
 
-        Resolves names, prepares topology, then plays.
+        Resolves names, prepares topology, then plays. ``didl_meta`` is
+        an optional DIDL-Lite envelope for items that need one (Sonos
+        radio stations, containerized favorites) — most playable URIs
+        don't need it.
         """
         target_ids = await self._resolve_target_ids(speaker_names)
         await self.prepare_speakers(target_ids)
@@ -383,6 +413,7 @@ class SpeakerService(Service):
             volume=volume,
             title=title,
             position_seconds=position_seconds,
+            didl_meta=didl_meta,
         ))
 
     async def stop_speakers(
@@ -392,6 +423,40 @@ class SpeakerService(Service):
         """Stop playback on the specified speakers."""
         target_ids = await self._resolve_target_ids(speaker_names)
         await self._require_backend().stop(target_ids)
+
+    async def get_now_playing(
+        self,
+        speaker_name: str | None = None,
+    ) -> NowPlaying:
+        """Return what's currently playing on a speaker.
+
+        Speaker selection falls through in this order:
+
+        1. If ``speaker_name`` is given, that speaker (resolved by name/alias).
+        2. The first of the last-used speakers (typically the one music was
+           last played on).
+        3. The first speaker found whose state is ``PLAYING``.
+        4. The first discovered speaker, regardless of state.
+
+        Returns a ``NowPlaying`` with ``state=STOPPED`` if no speakers exist.
+        """
+        backend = self._require_backend()
+        if speaker_name:
+            sid = await self.resolve_speaker_name(speaker_name)
+            if sid is None:
+                raise KeyError(f"Unknown speaker or alias: {speaker_name!r}")
+            return await backend.get_now_playing(sid)
+
+        if self._last_speaker_ids:
+            return await backend.get_now_playing(self._last_speaker_ids[0])
+
+        speakers = await backend.list_speakers()
+        if not speakers:
+            return NowPlaying(state=PlaybackState.STOPPED)
+        for s in speakers:
+            if s.state == PlaybackState.PLAYING:
+                return await backend.get_now_playing(s.speaker_id)
+        return await backend.get_now_playing(speakers[0].speaker_id)
 
     # --- Announce ---
 

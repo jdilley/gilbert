@@ -3,6 +3,7 @@
 import logging
 from typing import Any
 
+from gilbert.interfaces.configuration import ConfigAction, ConfigActionResult
 from gilbert.interfaces.tunnel import TunnelBackend
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,41 @@ class NgrokTunnel(TunnelBackend):
                 default="", restart_required=True,
             ),
         ]
+
+    @classmethod
+    def backend_actions(cls) -> list[ConfigAction]:
+        return [
+            ConfigAction(
+                key="test_connection",
+                label="Test connection",
+                description=(
+                    "Report the current public tunnel URL (or an error if "
+                    "the tunnel isn't active)."
+                ),
+            ),
+        ]
+
+    async def invoke_backend_action(
+        self, key: str, payload: dict,
+    ) -> ConfigActionResult:
+        if key == "test_connection":
+            return await self._action_test_connection()
+        return ConfigActionResult(
+            status="error",
+            message=f"Unknown action: {key}",
+        )
+
+    async def _action_test_connection(self) -> ConfigActionResult:
+        if not self._public_url or self._tunnel is None:
+            return ConfigActionResult(
+                status="error",
+                message="Ngrok tunnel is not active — enable the service and restart.",
+            )
+        return ConfigActionResult(
+            status="ok",
+            message=f"Tunnel is up: {self._public_url}",
+            open_url=self._public_url,
+        )
 
     def __init__(self) -> None:
         self._tunnel: Any = None

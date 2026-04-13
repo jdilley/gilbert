@@ -11,7 +11,7 @@
 - [Multi-backend Aggregator Pattern](memory-multi-backend-pattern.md) — services with multiple backends use aggregator pattern
 - [User & Auth System](memory-user-auth-system.md) — multi-user support with local accounts, external providers, roles, sessions
 - [Speaker System](memory-speaker-system.md) — speaker control with Sonos/SoCo, aliases, grouping, TTS announcements
-- [Music Service](memory-music-service.md) — music search/metadata/playback with Spotify, seek support, speaker integration
+- [Music Service](memory-music-service.md) — Sonos-backed browse/search/play with SMAPI auth flow and speaker integration
 - [Persona (AIService Internal)](memory-persona-service.md) — AI personality/behavior stored in entity system, merged into AIService as _PersonaHelper
 - [Presence Service](memory-presence-service.md) — user presence via UniFi (WiFi, cameras, badges), polling + events
 - [Scheduler Service](memory-scheduler-service.md) — system and user timers/alarms with asyncio task loops
@@ -27,3 +27,4 @@
 - [Skills System](memory-skills-system.md) — Agent Skills standard support, per-conversation skill activation via SKILL.md files
 - [Web Search Service](memory-websearch-service.md) — web search AI tool with Tavily backend
 - [Slash Commands](memory-slash-commands.md) — direct tool invocation from chat via /command syntax, bypassing the AI
+- [Config Actions](memory-config-actions.md) — action buttons on service settings pages (test_connection, link flows), with two-phase followup support

@@ -4,10 +4,19 @@ Provides optical character recognition for document indexing.
 Backend-agnostic — the Tesseract implementation is one option.
 """
 
+import contextlib
 import logging
 from typing import Any
 
-from gilbert.interfaces.configuration import ConfigParam
+from gilbert.core.services._backend_actions import (
+    all_backend_actions,
+    invoke_backend_action,
+)
+from gilbert.interfaces.configuration import (
+    ConfigAction,
+    ConfigActionResult,
+    ConfigParam,
+)
 from gilbert.interfaces.ocr import OCRBackend
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.tools import ToolParameterType
@@ -120,6 +129,21 @@ class OCRService(Service):
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
         pass  # All OCR params are restart_required
+
+    # --- ConfigActionProvider ---
+
+    def config_actions(self) -> list[ConfigAction]:
+        with contextlib.suppress(ImportError):
+            import gilbert.integrations.tesseract_ocr  # noqa: F401
+        return all_backend_actions(
+            registry=OCRBackend.registered_backends(),
+            current_backend=self._backend,
+        )
+
+    async def invoke_config_action(
+        self, key: str, payload: dict[str, Any],
+    ) -> ConfigActionResult:
+        return await invoke_backend_action(self._backend, key, payload)
 
     # --- Public API ---
 

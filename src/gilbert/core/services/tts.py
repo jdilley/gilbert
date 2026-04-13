@@ -4,13 +4,22 @@ Adds backend-agnostic silence padding to synthesized audio so speakers
 don't cut off the last word.
 """
 
+import contextlib
 import json
 import logging
 import uuid
 from typing import Any
 
 from gilbert.core.output import cleanup_old_files, get_output_dir
-from gilbert.interfaces.configuration import ConfigParam
+from gilbert.core.services._backend_actions import (
+    all_backend_actions,
+    invoke_backend_action,
+)
+from gilbert.interfaces.configuration import (
+    ConfigAction,
+    ConfigActionResult,
+    ConfigParam,
+)
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.tools import (
     ToolDefinition,
@@ -167,6 +176,21 @@ class TTSService(Service):
         sp = config.get("silence_padding")
         if sp is not None:
             self._silence_padding = float(sp)
+
+    # --- ConfigActionProvider ---
+
+    def config_actions(self) -> list[ConfigAction]:
+        with contextlib.suppress(ImportError):
+            import gilbert.integrations.elevenlabs_tts  # noqa: F401
+        return all_backend_actions(
+            registry=TTSBackend.registered_backends(),
+            current_backend=self._backend,
+        )
+
+    async def invoke_config_action(
+        self, key: str, payload: dict[str, Any],
+    ) -> ConfigActionResult:
+        return await invoke_backend_action(self._backend, key, payload)
 
     async def stop(self) -> None:
         if self._backend is not None:

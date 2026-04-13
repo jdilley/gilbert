@@ -4,12 +4,21 @@ Uses a DoorbellBackend to poll for ring events. When a new ring is detected,
 publishes a ``doorbell.ring`` event on the event bus and announces over speakers.
 """
 
+import contextlib
 import logging
 import time
 from datetime import datetime, timezone
 from typing import Any
 
-from gilbert.interfaces.configuration import ConfigParam
+from gilbert.core.services._backend_actions import (
+    all_backend_actions,
+    invoke_backend_action,
+)
+from gilbert.interfaces.configuration import (
+    ConfigAction,
+    ConfigActionResult,
+    ConfigParam,
+)
 from gilbert.interfaces.doorbell import DoorbellBackend
 from gilbert.interfaces.events import Event, EventBus, EventBusProvider
 from gilbert.interfaces.scheduler import Schedule, SchedulerProvider
@@ -192,6 +201,21 @@ class DoorbellService(Service):
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
         self._apply_config(config)
+
+    # --- ConfigActionProvider ---
+
+    def config_actions(self) -> list[ConfigAction]:
+        with contextlib.suppress(ImportError):
+            import gilbert.integrations.unifi.doorbell  # noqa: F401
+        return all_backend_actions(
+            registry=DoorbellBackend.registered_backends(),
+            current_backend=self._backend,
+        )
+
+    async def invoke_config_action(
+        self, key: str, payload: dict[str, Any],
+    ) -> ConfigActionResult:
+        return await invoke_backend_action(self._backend, key, payload)
 
     async def stop(self) -> None:
         if self._backend is not None:

@@ -13,6 +13,7 @@ from gilbert.interfaces.auth import (
     AuthInfo,
     LoginMethod,
 )
+from gilbert.interfaces.configuration import ConfigAction, ConfigActionResult
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,49 @@ class GoogleAuthBackend(AuthBackend):
                 default="",
             ),
         ]
+
+    @classmethod
+    def backend_actions(cls) -> list[ConfigAction]:
+        return [
+            ConfigAction(
+                key="test_connection",
+                label="Test configuration",
+                description=(
+                    "Verify that a Google OAuth client ID and client "
+                    "secret are present in the backend configuration."
+                ),
+            ),
+        ]
+
+    async def invoke_backend_action(
+        self, key: str, payload: dict,
+    ) -> ConfigActionResult:
+        if key == "test_connection":
+            return await self._action_test_connection()
+        return ConfigActionResult(
+            status="error",
+            message=f"Unknown action: {key}",
+        )
+
+    async def _action_test_connection(self) -> ConfigActionResult:
+        if not self._oauth_client_id:
+            return ConfigActionResult(
+                status="error",
+                message="Google OAuth client ID is missing.",
+            )
+        if not self._client_secret:
+            return ConfigActionResult(
+                status="error",
+                message="Google OAuth client secret is missing.",
+            )
+        domain_msg = f"restricted to {self._domain}" if self._domain else "any domain"
+        return ConfigActionResult(
+            status="ok",
+            message=(
+                f"Google OAuth credentials configured ({domain_msg}). "
+                "Actual sign-in is verified on first user login."
+            ),
+        )
 
     def __init__(self) -> None:
         self._oauth_client_id: str = ""

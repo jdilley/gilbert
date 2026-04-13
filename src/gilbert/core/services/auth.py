@@ -4,19 +4,28 @@ Discovers all ``authentication_provider`` services and delegates
 authentication to them. Manages sessions centrally.
 """
 
+import contextlib
 import logging
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from gilbert.config import AuthConfig
+from gilbert.core.services._backend_actions import (
+    invoke_backend_action,
+    merge_backend_actions,
+)
 from gilbert.interfaces.auth import (
     AuthBackend,
     AuthInfo,
     LoginMethod,
     UserContext,
 )
-from gilbert.interfaces.configuration import ConfigParam
+from gilbert.interfaces.configuration import (
+    ConfigAction,
+    ConfigActionResult,
+    ConfigParam,
+)
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.storage import StorageBackend
 from gilbert.interfaces.tools import ToolParameterType
@@ -172,6 +181,25 @@ class AuthService(Service):
         ttl = config.get("session_ttl_seconds")
         if ttl is not None:
             self._config.session_ttl_seconds = int(ttl)
+
+    # --- ConfigActionProvider ---
+    #
+    # Auth service hosts multiple backends (e.g. local + google). Expose
+    # the google backend's actions since local auth has nothing upstream
+    # to test. If no google backend is live, fall back to the registry
+    # class so the action still appears on the settings page.
+
+    def config_actions(self) -> list[ConfigAction]:
+        with contextlib.suppress(ImportError):
+            import gilbert.integrations.google_auth  # noqa: F401
+        google_backend = self._backends.get("google")
+        fallback_cls = AuthBackend.registered_backends().get("google")
+        return merge_backend_actions(google_backend, fallback_cls)
+
+    async def invoke_config_action(
+        self, key: str, payload: dict[str, Any],
+    ) -> ConfigActionResult:
+        return await invoke_backend_action(self._backends.get("google"), key, payload)
 
     # ---- Backend access ----
 

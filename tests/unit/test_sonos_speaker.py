@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 from typing import Any
 
-from gilbert.integrations.sonos_speaker import _speaker_info
+from gilbert.integrations.sonos_speaker import _parse_hms, _speaker_info
 from gilbert.interfaces.speaker import PlaybackState
 
 
@@ -77,6 +77,25 @@ def test_speaker_info_with_no_group() -> None:
     assert info.group_id == ""
     assert info.group_name == ""
     assert info.is_group_coordinator is True
+
+
+def test_parse_hms_standard_format() -> None:
+    """SoCo returns positions/durations as ``H:MM:SS``."""
+    assert _parse_hms("0:00:00") == 0.0
+    assert _parse_hms("0:01:23") == 83.0
+    assert _parse_hms("1:02:03") == 3723.0
+
+
+def test_parse_hms_empty_and_sentinels() -> None:
+    """Empty strings and SoCo's NOT_IMPLEMENTED sentinel return 0.0."""
+    assert _parse_hms("") == 0.0
+    assert _parse_hms("NOT_IMPLEMENTED") == 0.0
+
+
+def test_parse_hms_malformed_returns_zero() -> None:
+    """Malformed strings degrade gracefully to 0.0 rather than raising."""
+    assert _parse_hms("garbage") == 0.0
+    assert _parse_hms("a:b:c") == 0.0
 
 
 def test_speaker_info_with_none_coordinator_does_not_crash() -> None:

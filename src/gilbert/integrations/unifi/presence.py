@@ -3,19 +3,20 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from gilbert.integrations.unifi.access import UniFiAccess
 from gilbert.integrations.unifi.client import (
-    UniFiAuthError,
     UniFiAPIError,
+    UniFiAuthError,
     UniFiClient,
     UniFiConnectionError,
 )
 from gilbert.integrations.unifi.name_resolver import NameResolver
 from gilbert.integrations.unifi.network import UniFiNetwork
 from gilbert.integrations.unifi.protect import UniFiProtect
+from gilbert.interfaces.configuration import ConfigAction, ConfigActionResult
 from gilbert.interfaces.presence import (
     PresenceBackend,
     PresenceState,
@@ -200,6 +201,101 @@ class UniFiPresenceBackend(PresenceBackend):
         self._protect = None
         self._access = None
 
+    # --- Backend actions ---
+
+    @classmethod
+    def backend_actions(cls) -> list[ConfigAction]:
+        return [
+            ConfigAction(
+                key="test_connection",
+                label="Test connection",
+                description=(
+                    "Ping the configured UniFi controller(s) to verify "
+                    "credentials and reachability."
+                ),
+            ),
+        ]
+
+    async def invoke_backend_action(
+        self, key: str, payload: dict,
+    ) -> ConfigActionResult:
+        if key == "test_connection":
+            return await self._action_test_connection()
+        return ConfigActionResult(
+            status="error",
+            message=f"Unknown action: {key}",
+        )
+
+    async def _action_test_connection(self) -> ConfigActionResult:
+        """Probe each initialized UniFi subsystem with a cheap real query.
+
+        Deliberately avoids calling ``client.login()`` directly — the
+        working runtime path is "make an API call, UniFiClient
+        auto-logs-in on first request / on 401". Testing that same path
+        matches what polling actually does, so if presence is working
+        we'll see it working here too.
+        """
+        subsystems_ok: list[str] = []
+        errors: list[str] = []
+
+        if self._network is None and self._protect is None and self._access is None:
+            return ConfigActionResult(
+                status="error",
+                message=(
+                    "No UniFi subsystems are initialized. Check that host "
+                    "and credentials are set under Network/Protect, save, "
+                    "and restart the presence service."
+                ),
+            )
+
+        if self._network is not None:
+            try:
+                clients = await self._network.get_connected_clients()
+                subsystems_ok.append(f"network ({len(clients)} clients)")
+            except (UniFiAuthError, UniFiConnectionError, UniFiAPIError) as exc:
+                errors.append(f"network: {exc}")
+            except Exception as exc:
+                errors.append(f"network: {exc}")
+
+        if self._protect is not None:
+            try:
+                cameras = await self._protect.list_cameras()
+                subsystems_ok.append(f"protect ({len(cameras)} cameras)")
+            except (UniFiAuthError, UniFiConnectionError, UniFiAPIError) as exc:
+                errors.append(f"protect: {exc}")
+            except Exception as exc:
+                errors.append(f"protect: {exc}")
+
+        if self._access is not None:
+            try:
+                # Small lookback window so the query is as cheap as possible
+                events = await self._access.get_badge_events(lookback_hours=1)
+                subsystems_ok.append(f"access ({len(events)} recent events)")
+            except (UniFiAuthError, UniFiConnectionError, UniFiAPIError) as exc:
+                errors.append(f"access: {exc}")
+            except Exception as exc:
+                errors.append(f"access: {exc}")
+
+        if not subsystems_ok and errors:
+            return ConfigActionResult(
+                status="error",
+                message="; ".join(errors),
+            )
+        if errors:
+            return ConfigActionResult(
+                status="error",
+                message=(
+                    "Partial success — "
+                    + ", ".join(subsystems_ok)
+                    + " OK; "
+                    + "; ".join(errors)
+                ),
+            )
+        return ConfigActionResult(
+            status="ok",
+            message="Connected: " + ", ".join(subsystems_ok),
+        )
+
     # --- PresenceBackend implementation ---
 
     async def get_presence(self, user_id: str) -> UserPresence:
@@ -357,7 +453,7 @@ def _epoch_ms_to_iso(epoch_ms: int) -> str:
     if not epoch_ms:
         return ""
     try:
-        dt = datetime.fromtimestamp(epoch_ms / 1000.0, tz=timezone.utc)
+        dt = datetime.fromtimestamp(epoch_ms / 1000.0, tz=UTC)
         return dt.isoformat()
     except (ValueError, OSError):
         return ""

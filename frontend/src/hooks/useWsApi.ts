@@ -17,7 +17,12 @@ import type { CollectionGroup, CollectionData, EntityData } from "@/types/entiti
 import type { InboxStats, InboxMessage, MessageDetail, PendingReply } from "@/types/inbox";
 import type { UIBlock } from "@/types/ui";
 import type { SkillInfo } from "@/types/skills";
-import type { ConfigDescribeResponse, ConfigSectionResponse, ConfigSetResult } from "@/types/config";
+import type {
+  ConfigActionInvokeResponse,
+  ConfigDescribeResponse,
+  ConfigSectionResponse,
+  ConfigSetResult,
+} from "@/types/config";
 import type { Job } from "@/types/scheduler";
 import type { SlashCommand } from "@/types/slash";
 
@@ -283,6 +288,18 @@ export function useWsApi() {
 
     resetConfigSection: (namespace: string) =>
       rpc<{ status: string }>({ type: "config.section.reset", namespace }),
+
+    invokeConfigAction: (
+      namespace: string,
+      key: string,
+      payload: Record<string, unknown> = {},
+    ) =>
+      rpc<ConfigActionInvokeResponse>({
+        type: "config.action.invoke",
+        namespace,
+        key,
+        payload,
+      }),
 
     // ── Scheduler ─────────────────────────────────────────────────
 

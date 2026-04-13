@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from gilbert.interfaces.configuration import ConfigAction, ConfigActionResult
 from gilbert.interfaces.websearch import WebSearchBackend, WebSearchResult
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,56 @@ class TavilySearch(WebSearchBackend):
                 default=_DEFAULT_TIMEOUT,
             ),
         ]
+
+    @classmethod
+    def backend_actions(cls) -> list[ConfigAction]:
+        return [
+            ConfigAction(
+                key="test_connection",
+                label="Test connection",
+                description=(
+                    "Run a one-result search to verify the Tavily API key."
+                ),
+            ),
+        ]
+
+    async def invoke_backend_action(
+        self, key: str, payload: dict,
+    ) -> ConfigActionResult:
+        if key == "test_connection":
+            return await self._action_test_connection()
+        return ConfigActionResult(
+            status="error",
+            message=f"Unknown action: {key}",
+        )
+
+    async def _action_test_connection(self) -> ConfigActionResult:
+        if self._client is None:
+            return ConfigActionResult(
+                status="error",
+                message="Tavily backend is not initialized — save settings first.",
+            )
+        try:
+            results = await self.search("test", count=1)
+        except httpx.HTTPStatusError as exc:
+            reason = (
+                "API key rejected"
+                if exc.response.status_code in (401, 403)
+                else f"HTTP {exc.response.status_code}"
+            )
+            return ConfigActionResult(
+                status="error",
+                message=f"Tavily API error: {reason}",
+            )
+        except Exception as exc:
+            return ConfigActionResult(
+                status="error",
+                message=f"Connection failed: {exc}",
+            )
+        return ConfigActionResult(
+            status="ok",
+            message=f"Connected to Tavily ({len(results)} result(s) returned).",
+        )
 
     def __init__(self) -> None:
         self._api_key: str = ""

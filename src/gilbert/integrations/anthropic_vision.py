@@ -5,6 +5,7 @@ import base64
 import logging
 from typing import Any
 
+from gilbert.interfaces.configuration import ConfigAction, ConfigActionResult
 from gilbert.interfaces.vision import VisionBackend
 
 logger = logging.getLogger(__name__)
@@ -40,16 +41,71 @@ class AnthropicVision(VisionBackend):
             ),
         ]
 
+    @classmethod
+    def backend_actions(cls) -> list[ConfigAction]:
+        return [
+            ConfigAction(
+                key="test_connection",
+                label="Test connection",
+                description=(
+                    "Send a tiny text-only message to the Anthropic API "
+                    "to verify the API key and vision model."
+                ),
+            ),
+        ]
+
+    async def invoke_backend_action(
+        self, key: str, payload: dict,
+    ) -> ConfigActionResult:
+        if key == "test_connection":
+            return await self._action_test_connection()
+        return ConfigActionResult(
+            status="error",
+            message=f"Unknown action: {key}",
+        )
+
+    async def _action_test_connection(self) -> ConfigActionResult:
+        if not self._api_key:
+            return ConfigActionResult(
+                status="error",
+                message="Anthropic Vision backend has no API key configured.",
+            )
+        try:
+            client = self._get_client()
+            await asyncio.to_thread(
+                client.messages.create,
+                model=self._model,
+                max_tokens=16,
+                messages=[{"role": "user", "content": "hi"}],
+            )
+        except Exception as exc:
+            return ConfigActionResult(
+                status="error",
+                message=f"Anthropic API error: {exc}",
+            )
+        return ConfigActionResult(
+            status="ok",
+            message=f"Connected to Anthropic Vision (model: {self._model}).",
+        )
+
     def __init__(self) -> None:
         self._api_key: str = ""
         self._model: str = _DEFAULT_MODEL
         self._max_tokens: int = 4096
         self._client: Any = None
+        # Latched on the first 401 we see. Causes ``available`` to flip
+        # to False so the PDF indexing loop (which checks per page) stops
+        # attempting vision for the rest of the session. Cleared on
+        # ``initialize()`` so editing the API key in settings → restart
+        # retries automatically.
+        self._auth_failed: bool = False
 
     async def initialize(self, config: dict[str, Any]) -> None:
         self._api_key = str(config.get("api_key", ""))
         self._model = str(config.get("model", _DEFAULT_MODEL))
         self._max_tokens = int(config.get("max_tokens", 4096))
+        self._auth_failed = False
+        self._client = None
 
         if self._api_key:
             logger.info("Anthropic Vision backend initialized (model=%s)", self._model)
@@ -61,7 +117,7 @@ class AnthropicVision(VisionBackend):
 
     @property
     def available(self) -> bool:
-        return bool(self._api_key)
+        return bool(self._api_key) and not self._auth_failed
 
     def _get_client(self) -> Any:
         if self._client is None:
@@ -70,7 +126,7 @@ class AnthropicVision(VisionBackend):
         return self._client
 
     async def describe_image(self, image_bytes: bytes, media_type: str) -> str:
-        if not self._api_key:
+        if not self._api_key or self._auth_failed:
             return ""
 
         try:
@@ -118,6 +174,36 @@ class AnthropicVision(VisionBackend):
 
             return "\n".join(text_parts).strip()
 
-        except Exception:
+        except Exception as exc:
+            if self._is_auth_error(exc):
+                # Latch the failure so the indexing loop stops calling us
+                # per-page. Log once, loud and clear, so the user can see
+                # that vision is off until they fix the key.
+                self._auth_failed = True
+                logger.warning(
+                    "Anthropic Vision: API key rejected (401). Disabling "
+                    "vision extraction for this session — fix the key in "
+                    "Settings → Intelligence → Vision and the backend will "
+                    "retry automatically on restart.",
+                )
+                return ""
             logger.warning("Vision describe_image failed", exc_info=True)
             return ""
+
+    @staticmethod
+    def _is_auth_error(exc: BaseException) -> bool:
+        """Detect Anthropic authentication failures across SDK versions."""
+        # Prefer the SDK's typed exception when available
+        try:
+            import anthropic
+
+            if isinstance(exc, anthropic.AuthenticationError):
+                return True
+        except Exception:
+            pass
+        # Fall back to status-code / message heuristics
+        status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+        if status == 401:
+            return True
+        message = str(exc).lower()
+        return "invalid x-api-key" in message or "authentication_error" in message

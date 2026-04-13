@@ -4,6 +4,7 @@ Also includes internal helpers for persona and user memory (previously
 separate services, now merged into AIService).
 """
 
+import contextlib
 import json as _json
 import logging
 import uuid
@@ -12,6 +13,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from gilbert.core.context import get_current_user
+from gilbert.core.services._backend_actions import (
+    all_backend_actions,
+    invoke_backend_action,
+)
 from gilbert.core.slash_commands import (
     SlashCommandError,
     extract_command_name,
@@ -28,7 +33,12 @@ from gilbert.interfaces.ai import (
     StopReason,
 )
 from gilbert.interfaces.auth import AccessControlProvider, UserContext
-from gilbert.interfaces.configuration import ConfigParam, ConfigurationReader
+from gilbert.interfaces.configuration import (
+    ConfigAction,
+    ConfigActionResult,
+    ConfigParam,
+    ConfigurationReader,
+)
 
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.storage import Filter, FilterOp, IndexDefinition, Query, SortField, StorageBackend
@@ -499,6 +509,21 @@ class AIService(Service):
     async def stop(self) -> None:
         if self._backend is not None:
             await self._backend.close()
+
+    # --- ConfigActionProvider ---
+
+    def config_actions(self) -> list[ConfigAction]:
+        with contextlib.suppress(ImportError):
+            import gilbert.integrations.anthropic_ai  # noqa: F401
+        return all_backend_actions(
+            registry=AIBackend.registered_backends(),
+            current_backend=self._backend,
+        )
+
+    async def invoke_config_action(
+        self, key: str, payload: dict[str, Any],
+    ) -> ConfigActionResult:
+        return await invoke_backend_action(self._backend, key, payload)
 
     # --- AI Context Profiles ---
 

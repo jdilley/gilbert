@@ -134,7 +134,7 @@ class MusicConfig(BaseConfig):
     """Music service configuration."""
 
     enabled: bool = False
-    backend: str = "spotify"
+    backend: str = "sonos"
     settings: dict[str, Any] = {}
 
 

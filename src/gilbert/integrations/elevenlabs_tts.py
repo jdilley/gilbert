@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from gilbert.interfaces.configuration import ConfigAction, ConfigActionResult
 from gilbert.interfaces.tts import (
     AudioFormat,
     SynthesisRequest,
@@ -114,6 +115,59 @@ class ElevenLabsTTS(TTSBackend):
                 default=_DEFAULT_CACHE_TTL_SECONDS,
             ),
         ]
+
+    @classmethod
+    def backend_actions(cls) -> list[ConfigAction]:
+        return [
+            ConfigAction(
+                key="test_connection",
+                label="Test connection",
+                description=(
+                    "Verify the ElevenLabs API key works by listing the "
+                    "available voices."
+                ),
+            ),
+        ]
+
+    async def invoke_backend_action(
+        self, key: str, payload: dict,
+    ) -> ConfigActionResult:
+        if key == "test_connection":
+            return await self._action_test_connection()
+        return ConfigActionResult(
+            status="error",
+            message=f"Unknown action: {key}",
+        )
+
+    async def _action_test_connection(self) -> ConfigActionResult:
+        if self._client is None:
+            return ConfigActionResult(
+                status="error",
+                message="ElevenLabs backend is not initialized — save settings first.",
+            )
+        # list_voices is a cheap authenticated GET that exercises the API
+        # key without synthesizing audio or spending credits.
+        try:
+            voices = await self.list_voices()
+        except httpx.HTTPStatusError as exc:
+            reason = (
+                "API key rejected (401)"
+                if exc.response.status_code == 401
+                else f"HTTP {exc.response.status_code}"
+            )
+            return ConfigActionResult(
+                status="error",
+                message=f"ElevenLabs API error: {reason}",
+            )
+        except Exception as exc:
+            return ConfigActionResult(
+                status="error",
+                message=f"Connection failed: {exc}",
+            )
+        return ConfigActionResult(
+            status="ok",
+            message=f"Connected to ElevenLabs ({len(voices)} voices available).",
+        )
 
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None

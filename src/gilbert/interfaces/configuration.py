@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from gilbert.interfaces.tools import ToolParameterType
 
@@ -31,6 +31,116 @@ class ConfigParam:
     """Dynamic choices resolved at runtime (e.g., ``"speakers"`` to list speaker names)."""
     backend_param: bool = False
     """True if this param is declared by a backend, not the service itself."""
+
+
+@dataclass(frozen=True)
+class ConfigAction:
+    """An action button advertised by a service or backend on its settings page.
+
+    Unlike a ``ConfigParam``, which writes a value, an action triggers a
+    server-side operation (e.g. "Test connection", "Link account",
+    "Re-discover"). Services declare actions via ``ConfigActionProvider``;
+    backends declare them via ``backend_actions()`` and the owning service
+    forwards invocations.
+
+    The ``key`` is unique within the service's namespace. ``required_role``
+    gates who can click the button (defaults to admin, matching the rest of
+    the settings page).
+    """
+
+    key: str
+    label: str
+    description: str = ""
+    backend_action: bool = False
+    """True if declared by a backend; set automatically when the service
+    merges backend actions into its own list."""
+    backend: str = ""
+    """Name of the backend this action belongs to, when declared by a
+    backend. The UI uses this to filter visible actions by the currently
+    selected backend (dropdown value), so switching backends in an
+    unsaved state still shows the right set of buttons without a
+    round-trip. Empty for service-level actions."""
+    confirm: str = ""
+    """Optional confirmation prompt shown before invocation."""
+    required_role: str = "admin"
+    hidden: bool = False
+    """If True, the UI does not render a button for this action in the
+    initial action list, but the RPC will still accept invocations for
+    its key. Used for two-phase flows: the visible action returns a
+    ``followup_action`` that points at the hidden one, so the same
+    button re-labels to 'Continue' without the followup key needing to
+    exist on the settings page as its own button."""
+
+
+@dataclass(frozen=True)
+class ConfigActionResult:
+    """Result of invoking a ``ConfigAction``.
+
+    The UI interprets ``status`` + the optional fields:
+
+    - ``ok`` — show ``message`` as a success toast.
+    - ``error`` — show ``message`` as an error toast.
+    - ``pending`` — show ``message`` as an info toast; if ``open_url`` is
+      set, open it in a new tab; if ``followup_action`` is set, the button
+      relabels to "Continue" and the next click invokes that action key.
+
+    ``data`` is free-form JSON-serializable output for actions that want to
+    return structured results to the UI beyond the toast text.
+    """
+
+    status: Literal["ok", "error", "pending"]
+    message: str = ""
+    open_url: str = ""
+    followup_action: str = ""
+    data: dict[str, Any] = field(default_factory=dict)
+
+
+@runtime_checkable
+class ConfigActionProvider(Protocol):
+    """Protocol for services that expose action buttons on their settings page.
+
+    Services implement this in addition to ``Configurable`` when they want
+    to advertise one-click operations beyond plain config writes. Backends
+    expose actions via ``BackendActionProvider``; the owning service is
+    responsible for merging those into its own ``config_actions()`` list
+    (with ``backend_action=True``) and forwarding invocations.
+    """
+
+    def config_actions(self) -> list[ConfigAction]:
+        """Declare action buttons for this service's settings page."""
+        ...
+
+    async def invoke_config_action(
+        self, key: str, payload: dict[str, Any],
+    ) -> ConfigActionResult:
+        """Invoke an action by key. ``payload`` is free-form per-action."""
+        ...
+
+
+@runtime_checkable
+class BackendActionProvider(Protocol):
+    """Protocol for backends that expose action buttons in their settings.
+
+    Backends opt in by implementing both methods — no ABC changes required.
+    The owning service's ``config_actions()`` should merge the result of
+    ``backend_actions()`` (with ``backend_action=True``) into its own list,
+    and forward invocations to ``invoke_backend_action()``.
+
+    ``backend_actions()`` is invoked on an instance, but concrete backends
+    typically implement it as a ``@classmethod`` alongside
+    ``backend_config_params()`` so the settings UI can list actions before
+    the backend is initialized.
+    """
+
+    def backend_actions(self) -> list[ConfigAction]:
+        """Declare action buttons contributed by this backend."""
+        ...
+
+    async def invoke_backend_action(
+        self, key: str, payload: dict[str, Any],
+    ) -> ConfigActionResult:
+        """Invoke a backend-level action by key."""
+        ...
 
 
 @runtime_checkable

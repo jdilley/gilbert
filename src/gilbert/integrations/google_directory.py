@@ -10,8 +10,11 @@ import json
 import logging
 from typing import Any
 
-from gilbert.interfaces.configuration import ConfigParam
-
+from gilbert.interfaces.configuration import (
+    ConfigAction,
+    ConfigActionResult,
+    ConfigParam,
+)
 from gilbert.interfaces.tools import ToolParameterType
 from gilbert.interfaces.users import ExternalUser, UserProviderBackend
 
@@ -26,7 +29,6 @@ class GoogleDirectoryBackend(UserProviderBackend):
     @classmethod
     def backend_config_params(cls) -> list["ConfigParam"]:
         from gilbert.interfaces.configuration import ConfigParam
-        from gilbert.interfaces.tools import ToolParameterType
 
         return [
             ConfigParam(
@@ -45,6 +47,60 @@ class GoogleDirectoryBackend(UserProviderBackend):
                 restart_required=True,
             ),
         ]
+
+    @classmethod
+    def backend_actions(cls) -> list[ConfigAction]:
+        return [
+            ConfigAction(
+                key="test_connection",
+                label="Test connection",
+                description=(
+                    "List a single user from the Google Workspace domain "
+                    "as a smoke test of the service account credentials."
+                ),
+            ),
+        ]
+
+    async def invoke_backend_action(
+        self, key: str, payload: dict,
+    ) -> ConfigActionResult:
+        if key == "test_connection":
+            return await self._action_test_connection()
+        return ConfigActionResult(
+            status="error",
+            message=f"Unknown action: {key}",
+        )
+
+    async def _action_test_connection(self) -> ConfigActionResult:
+        if self._directory is None:
+            return ConfigActionResult(
+                status="error",
+                message=(
+                    "Google Directory is not initialized — check "
+                    "sa_json, delegated_user, and domain, then save and "
+                    "restart."
+                ),
+            )
+        try:
+            response = await asyncio.to_thread(
+                self._directory.users().list(
+                    domain=self._domain,
+                    maxResults=1,
+                ).execute,
+            )
+        except Exception as exc:
+            return ConfigActionResult(
+                status="error",
+                message=f"Google Directory API error: {exc}",
+            )
+        users = response.get("users", [])
+        return ConfigActionResult(
+            status="ok",
+            message=(
+                f"Connected to Google Directory (domain={self._domain}). "
+                f"Smoke test returned {len(users)} user(s)."
+            ),
+        )
 
     def __init__(self) -> None:
         self._domain: str = ""

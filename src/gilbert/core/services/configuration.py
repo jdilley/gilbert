@@ -22,7 +22,13 @@ from gilbert.config import (
     YAML_ONLY_SECTIONS,
     _deep_merge,
 )
-from gilbert.interfaces.configuration import ConfigParam, Configurable
+from gilbert.interfaces.configuration import (
+    ConfigAction,
+    ConfigActionProvider,
+    ConfigActionResult,
+    ConfigParam,
+    Configurable,
+)
 from gilbert.interfaces.events import Event, EventBusProvider
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.storage import Query, StorageBackend
@@ -340,6 +346,13 @@ class ConfigurationService(Service):
 
             section = self.get_section_safe(ns)
 
+            actions: list[ConfigAction] = []
+            if isinstance(svc, ConfigActionProvider):
+                try:
+                    actions = list(svc.config_actions())
+                except Exception:
+                    logger.exception("Error collecting config actions for %s", ns)
+
             categories.setdefault(cat, []).append({
                 "namespace": ns,
                 "service_name": name,
@@ -348,6 +361,7 @@ class ConfigurationService(Service):
                 "failed": failed,
                 "params": [self._serialize_param(p, section) for p in params],
                 "values": section,
+                "actions": [self._serialize_action(a) for a in actions],
             })
 
         # Add the "Services" category if there are toggleable services
@@ -410,6 +424,28 @@ class ConfigurationService(Service):
             "backend_param": p.backend_param,
         }
 
+    def _serialize_action(self, a: ConfigAction) -> dict[str, Any]:
+        """Serialize a ConfigAction for the WS response."""
+        return {
+            "key": a.key,
+            "label": a.label,
+            "description": a.description,
+            "backend_action": a.backend_action,
+            "backend": a.backend,
+            "confirm": a.confirm,
+            "required_role": a.required_role,
+            "hidden": a.hidden,
+        }
+
+    def _serialize_action_result(self, r: ConfigActionResult) -> dict[str, Any]:
+        return {
+            "status": r.status,
+            "message": r.message,
+            "open_url": r.open_url,
+            "followup_action": r.followup_action,
+            "data": r.data,
+        }
+
     def _resolve_dynamic_choices(self, source: str) -> list[str] | None:
         """Resolve a dynamic choices source to a list of values."""
         if self._resolver is None:
@@ -428,6 +464,17 @@ class ConfigurationService(Service):
                     return svc.available_doorbells
                 except Exception:
                     pass
+        elif source == "music_services":
+            from gilbert.interfaces.music import LinkedMusicServiceLister
+
+            svc = self._resolver.get_capability("music")
+            if isinstance(svc, LinkedMusicServiceLister):
+                try:
+                    linked = svc.list_linked_services()
+                    if linked:
+                        return [str(s) for s in linked]
+                except Exception:
+                    logger.debug("music_services dynamic choices failed", exc_info=True)
         return None
 
     # --- Sensitive field masking ---
@@ -738,6 +785,7 @@ class ConfigurationService(Service):
             "config.section.get": self._ws_section_get,
             "config.section.set": self._ws_section_set,
             "config.section.reset": self._ws_section_reset,
+            "config.action.invoke": self._ws_action_invoke,
         }
 
     async def _ws_describe_list(
@@ -820,6 +868,78 @@ class ConfigurationService(Service):
             "ref": frame.get("id"),
             "namespace": namespace,
             "results": results,
+        }
+
+    async def _ws_action_invoke(
+        self, conn: Any, frame: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Invoke a ConfigAction on a service, RBAC-checked by role."""
+        namespace = frame.get("namespace", "")
+        key = frame.get("key", "")
+        payload = frame.get("payload", {}) or {}
+        if not namespace or not key:
+            return {
+                "type": "gilbert.error", "ref": frame.get("id"),
+                "error": "namespace and key required", "code": 400,
+            }
+        if not isinstance(payload, dict):
+            return {
+                "type": "gilbert.error", "ref": frame.get("id"),
+                "error": "payload must be an object", "code": 400,
+            }
+
+        configurable = self._find_configurable(namespace)
+        if configurable is None or not isinstance(configurable, ConfigActionProvider):
+            return {
+                "type": "gilbert.error", "ref": frame.get("id"),
+                "error": f"No actions available for '{namespace}'", "code": 404,
+            }
+
+        # Find the action descriptor so we can RBAC-check before invoking
+        try:
+            actions = list(configurable.config_actions())
+        except Exception:
+            logger.exception("Error collecting config actions for %s", namespace)
+            return {
+                "type": "gilbert.error", "ref": frame.get("id"),
+                "error": "Failed to list actions", "code": 500,
+            }
+        action = next((a for a in actions if a.key == key), None)
+        if action is None:
+            return {
+                "type": "gilbert.error", "ref": frame.get("id"),
+                "error": f"Unknown action '{key}'", "code": 404,
+            }
+
+        # RBAC check
+        if self._resolver is not None:
+            acl = self._resolver.get_capability("access_control")
+            from gilbert.interfaces.auth import AccessControlProvider
+
+            if isinstance(acl, AccessControlProvider):
+                required_level = acl.get_role_level(action.required_role)
+                user_level = getattr(conn, "user_level", 999)
+                if user_level > required_level:
+                    return {
+                        "type": "gilbert.error", "ref": frame.get("id"),
+                        "error": "Insufficient permissions for this action",
+                        "code": 403,
+                    }
+
+        try:
+            result = await configurable.invoke_config_action(key, payload)
+        except Exception as exc:
+            logger.exception("Config action %s.%s failed", namespace, key)
+            result = ConfigActionResult(
+                status="error", message=f"Action failed: {exc}",
+            )
+
+        return {
+            "type": "config.action.invoke.result",
+            "ref": frame.get("id"),
+            "namespace": namespace,
+            "key": key,
+            "result": self._serialize_action_result(result),
         }
 
     async def _ws_section_reset(

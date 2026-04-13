@@ -1,4 +1,4 @@
-"""Tests for MusicService — search, metadata, playback integration."""
+"""Tests for MusicService — browse, search, and speaker playback integration."""
 
 import json
 from typing import Any
@@ -8,73 +8,80 @@ import pytest
 
 from gilbert.config import GilbertConfig
 from gilbert.core.services.music import MusicService
+from gilbert.interfaces.configuration import (
+    BackendActionProvider,
+    ConfigActionProvider,
+)
 from gilbert.interfaces.music import (
-    AlbumInfo,
-    ArtistInfo,
     MusicBackend,
-    PlaylistDetail,
-    PlaylistInfo,
-    SearchResults,
-    TrackInfo,
+    MusicItem,
+    MusicItemKind,
+    MusicSearchUnavailableError,
+    Playable,
 )
 from gilbert.interfaces.service import ServiceResolver
 
-
 # --- Stub backend ---
 
-_ARTIST = ArtistInfo(artist_id="ar-1", name="Test Artist", external_url="https://example.com/artist")
-_ALBUM = AlbumInfo(
-    album_id="al-1",
-    name="Test Album",
-    artists=[_ARTIST],
-    album_art_url="https://example.com/art.jpg",
-    release_date="2024-01-15",
-    total_tracks=12,
-    external_url="https://example.com/album",
-)
-_TRACKS = [
-    TrackInfo(
-        track_id="tr-1",
-        name="First Song",
-        artists=[_ARTIST],
-        album=_ALBUM,
-        duration_seconds=213.5,
-        track_number=1,
-        uri="spotify:track:tr-1",
-        external_url="https://example.com/track/1",
-        explicit=False,
+_FAVORITES = [
+    MusicItem(
+        id="fav-1",
+        title="Horizon",
+        kind=MusicItemKind.TRACK,
+        subtitle="Parkway Drive",
+        uri="x-sonos-spotify:spotify%3atrack%3aabc",
+        service="Sonos Favorites",
     ),
-    TrackInfo(
-        track_id="tr-2",
-        name="Second Song",
-        artists=[_ARTIST],
-        album=_ALBUM,
-        duration_seconds=186.2,
-        track_number=2,
-        uri="spotify:track:tr-2",
-        external_url="https://example.com/track/2",
-        preview_url="https://example.com/preview/2",
-        explicit=True,
+    MusicItem(
+        id="fav-2",
+        title="Morning Jazz",
+        kind=MusicItemKind.STATION,
+        uri="",
+        didl_meta="<DIDL-Lite>station</DIDL-Lite>",
+        service="Sonos Favorites",
     ),
 ]
-_PLAYLIST = PlaylistInfo(
-    playlist_id="pl-1",
-    name="Test Playlist",
-    description="A test playlist",
-    owner="testuser",
-    track_count=2,
-    external_url="https://example.com/playlist",
-    image_url="https://example.com/playlist.jpg",
-)
+
+_PLAYLISTS = [
+    MusicItem(
+        id="SQ:1",
+        title="BBQ Mix",
+        kind=MusicItemKind.PLAYLIST,
+        uri="file:///jffs/settings/savedqueues.rsq#1",
+        service="Sonos Playlists",
+    ),
+    MusicItem(
+        id="SQ:2",
+        title="Workout",
+        kind=MusicItemKind.PLAYLIST,
+        uri="file:///jffs/settings/savedqueues.rsq#2",
+        service="Sonos Playlists",
+    ),
+]
+
+_SEARCH_RESULTS = [
+    MusicItem(
+        id="opaque-track-1",
+        title="Black Dog",
+        kind=MusicItemKind.TRACK,
+        subtitle="Led Zeppelin",
+        uri="",  # Search results need resolution
+        service="Spotify",
+    ),
+]
 
 
 class StubMusicBackend(MusicBackend):
     """In-memory music backend for testing."""
 
+    backend_name = "_stub"
+
     def __init__(self) -> None:
         self.initialized = False
         self.closed = False
         self.init_config: dict[str, object] = {}
+        self.search_should_fail: bool = False
+        self.search_calls: list[tuple[str, MusicItemKind, int]] = []
 
     async def initialize(self, config: dict[str, object]) -> None:
         self.init_config = config
@@ -83,32 +90,35 @@ class StubMusicBackend(MusicBackend):
     async def close(self) -> None:
         self.closed = True
 
-    async def search(self, query: str, *, limit: int = 10) -> SearchResults:
-        return SearchResults(tracks=list(_TRACKS), albums=[_ALBUM], playlists=[_PLAYLIST])
+    async def list_favorites(self) -> list[MusicItem]:
+        return list(_FAVORITES)
 
-    async def get_track(self, track_id: str) -> TrackInfo | None:
-        for t in _TRACKS:
-            if t.track_id == track_id:
-                return t
-        return None
+    async def list_playlists(self) -> list[MusicItem]:
+        return list(_PLAYLISTS)
 
-    async def get_album(self, album_id: str) -> AlbumInfo | None:
-        if album_id == _ALBUM.album_id:
-            return _ALBUM
-        return None
+    async def search(
+        self,
+        query: str,
+        *,
+        kind: MusicItemKind = MusicItemKind.TRACK,
+        limit: int = 10,
+    ) -> list[MusicItem]:
+        self.search_calls.append((query, kind, limit))
+        if self.search_should_fail:
+            raise MusicSearchUnavailableError("not linked")
+        return list(_SEARCH_RESULTS)
 
-    async def get_album_tracks(self, album_id: str) -> list[TrackInfo]:
-        if album_id == _ALBUM.album_id:
-            return list(_TRACKS)
-        return []
-
-    async def get_playlist(self, playlist_id: str) -> PlaylistDetail | None:
-        if playlist_id == _PLAYLIST.playlist_id:
-            return PlaylistDetail(playlist=_PLAYLIST, tracks=list(_TRACKS))
-        return None
-
-    async def get_playable_uri(self, track_id: str) -> str:
-        return f"spotify:track:{track_id}"
+    async def resolve_playable(self, item: MusicItem) -> Playable:
+        # Container items (stations) have no URI but carry DIDL meta
+        if item.uri or item.didl_meta:
+            return Playable(
+                uri=item.uri, didl_meta=item.didl_meta, title=item.title,
+            )
+        # Opaque search-result items need id → uri resolution
+        return Playable(
+            uri=f"x-sonos-spotify:spotify%3atrack%3a{item.id}",
+            title=item.title,
+        )
 
 
 # --- Fixtures ---
@@ -132,8 +142,29 @@ def service(stub_backend: StubMusicBackend) -> MusicService:
     svc = MusicService()
     svc._backend = stub_backend
     svc._enabled = True
-    svc._config = {"client_id": "test-client-id", "client_secret": "test-client-secret"}
     return svc
+
+
+def _mock_speaker_svc() -> Any:
+    """Build a speaker service mock that satisfies MusicService.play_item."""
+    from gilbert.core.services.speaker import SpeakerService
+
+    speaker_svc = MagicMock(spec=SpeakerService)
+    speaker_svc.play_on_speakers = AsyncMock()
+    return speaker_svc
+
+
+def _resolver_with_speaker(speaker_svc: Any) -> ServiceResolver:
+    resolver = AsyncMock(spec=ServiceResolver)
+
+    def get_cap(cap: str) -> Any:
+        if cap == "speaker_control":
+            return speaker_svc
+        return None
+
+    resolver.get_capability.side_effect = get_cap
+    resolver.require_capability.side_effect = LookupError("not available")
+    return resolver
 
 
 # --- Service info ---
@@ -146,11 +177,15 @@ def test_service_info(service: MusicService) -> None:
     assert "ai_tools" in info.capabilities
 
 
+def test_satisfies_config_action_provider() -> None:
+    svc = MusicService()
+    assert isinstance(svc, ConfigActionProvider)
+
+
 # --- Lifecycle ---
 
 
 async def test_start_disabled_without_config(resolver: ServiceResolver) -> None:
-    """When no config is provided, music service stays disabled."""
     svc = MusicService()
     await svc.start(resolver)
     assert not svc._enabled
@@ -158,14 +193,13 @@ async def test_start_disabled_without_config(resolver: ServiceResolver) -> None:
 
 
 async def test_stop_closes_backend(
-    service: MusicService, stub_backend: StubMusicBackend, resolver: ServiceResolver
+    service: MusicService, stub_backend: StubMusicBackend,
 ) -> None:
     await service.stop()
     assert stub_backend.closed
 
 
 async def test_stop_when_disabled(resolver: ServiceResolver) -> None:
-    """Stopping a disabled service should not raise."""
     svc = MusicService()
     await svc.start(resolver)
     await svc.stop()  # should not raise
@@ -181,189 +215,365 @@ def test_tool_provider_name(service: MusicService) -> None:
 def test_get_tools(service: MusicService) -> None:
     tools = service.get_tools()
     names = [t.name for t in tools]
-    assert "search_music" in names
-    assert "get_track_info" in names
-    assert "get_album_info" in names
-    assert "get_playlist" in names
-    assert "play_track" in names
+    assert set(names) == {
+        "list_favorites",
+        "list_playlists",
+        "search_music",
+        "play_music",
+        "now_playing",
+    }
+
+
+def test_all_tools_grouped_under_music(service: MusicService) -> None:
+    for tool in service.get_tools():
+        assert tool.slash_group == "music"
+
+
+# --- Browse ---
+
+
+async def test_tool_list_favorites(service: MusicService) -> None:
+    result = await service.execute_tool("list_favorites", {})
+    parsed = json.loads(result)
+    assert len(parsed["favorites"]) == 2
+    titles = [f["title"] for f in parsed["favorites"]]
+    assert "Horizon" in titles
+    assert "Morning Jazz" in titles
+    # Station has its kind preserved
+    station = next(f for f in parsed["favorites"] if f["title"] == "Morning Jazz")
+    assert station["kind"] == "station"
+
+
+async def test_tool_list_playlists(service: MusicService) -> None:
+    result = await service.execute_tool("list_playlists", {})
+    parsed = json.loads(result)
+    assert len(parsed["playlists"]) == 2
+    assert parsed["playlists"][0]["title"] == "BBQ Mix"
+    assert parsed["playlists"][0]["kind"] == "playlist"
 
 
 # --- Search ---
 
 
-async def test_tool_search(service: MusicService, resolver: ServiceResolver) -> None:
-    await service.start(resolver)
-    result = await service.execute_tool("search_music", {"query": "test song"})
-    parsed = json.loads(result)
-
-    assert len(parsed["tracks"]) == 2
-    assert parsed["tracks"][0]["name"] == "First Song"
-    assert parsed["tracks"][0]["duration_seconds"] == 213.5
-    assert parsed["tracks"][0]["artists"][0]["name"] == "Test Artist"
-
-    assert len(parsed["albums"]) == 1
-    assert parsed["albums"][0]["name"] == "Test Album"
-    assert parsed["albums"][0]["album_art_url"] == "https://example.com/art.jpg"
-
-    assert len(parsed["playlists"]) == 1
-    assert parsed["playlists"][0]["name"] == "Test Playlist"
-
-
-# --- Track info ---
-
-
-async def test_tool_get_track(service: MusicService, resolver: ServiceResolver) -> None:
-    await service.start(resolver)
-    result = await service.execute_tool("get_track_info", {"track_id": "tr-1"})
-    parsed = json.loads(result)
-
-    assert parsed["name"] == "First Song"
-    assert parsed["duration_seconds"] == 213.5
-    assert parsed["track_number"] == 1
-    assert parsed["uri"] == "spotify:track:tr-1"
-    assert parsed["album"]["name"] == "Test Album"
-    assert parsed["album"]["album_art_url"] == "https://example.com/art.jpg"
-
-
-async def test_tool_get_track_not_found(
-    service: MusicService, resolver: ServiceResolver
+async def test_tool_search(
+    service: MusicService, stub_backend: StubMusicBackend,
 ) -> None:
-    await service.start(resolver)
-    result = await service.execute_tool("get_track_info", {"track_id": "nonexistent"})
-    parsed = json.loads(result)
-    assert "error" in parsed
-
-
-async def test_tool_get_track_with_preview(
-    service: MusicService, resolver: ServiceResolver
-) -> None:
-    await service.start(resolver)
-    result = await service.execute_tool("get_track_info", {"track_id": "tr-2"})
-    parsed = json.loads(result)
-    assert parsed["preview_url"] == "https://example.com/preview/2"
-    assert parsed["explicit"] is True
-
-
-# --- Album info ---
-
-
-async def test_tool_get_album(service: MusicService, resolver: ServiceResolver) -> None:
-    await service.start(resolver)
-    result = await service.execute_tool("get_album_info", {"album_id": "al-1"})
-    parsed = json.loads(result)
-
-    assert parsed["name"] == "Test Album"
-    assert parsed["release_date"] == "2024-01-15"
-    assert parsed["total_tracks"] == 12
-    assert len(parsed["tracks"]) == 2
-
-
-async def test_tool_get_album_without_tracks(
-    service: MusicService, resolver: ServiceResolver
-) -> None:
-    await service.start(resolver)
     result = await service.execute_tool(
-        "get_album_info", {"album_id": "al-1", "include_tracks": False}
+        "search_music", {"query": "led zeppelin", "kind": "tracks", "limit": 5},
     )
     parsed = json.loads(result)
-    assert parsed["name"] == "Test Album"
-    assert "tracks" not in parsed
+    assert parsed["kind"] == "track"
+    assert len(parsed["results"]) == 1
+    assert parsed["results"][0]["title"] == "Black Dog"
+    assert parsed["results"][0]["subtitle"] == "Led Zeppelin"
+    # Verify the backend was called with the parsed kind
+    assert stub_backend.search_calls == [("led zeppelin", MusicItemKind.TRACK, 5)]
 
 
-async def test_tool_get_album_not_found(
-    service: MusicService, resolver: ServiceResolver
+async def test_tool_search_unavailable(
+    service: MusicService, stub_backend: StubMusicBackend,
 ) -> None:
-    await service.start(resolver)
-    result = await service.execute_tool("get_album_info", {"album_id": "nonexistent"})
+    stub_backend.search_should_fail = True
+    result = await service.execute_tool("search_music", {"query": "anything"})
     parsed = json.loads(result)
     assert "error" in parsed
+    assert "not linked" in parsed["error"]
 
 
-# --- Playlist ---
-
-
-async def test_tool_get_playlist(service: MusicService, resolver: ServiceResolver) -> None:
-    await service.start(resolver)
-    result = await service.execute_tool("get_playlist", {"playlist_id": "pl-1"})
-    parsed = json.loads(result)
-
-    assert parsed["name"] == "Test Playlist"
-    assert parsed["owner"] == "testuser"
-    assert len(parsed["tracks"]) == 2
-
-
-async def test_tool_get_playlist_not_found(
-    service: MusicService, resolver: ServiceResolver
+async def test_tool_search_default_kind_is_tracks(
+    service: MusicService, stub_backend: StubMusicBackend,
 ) -> None:
-    await service.start(resolver)
-    result = await service.execute_tool("get_playlist", {"playlist_id": "nonexistent"})
+    await service.execute_tool("search_music", {"query": "foo"})
+    assert stub_backend.search_calls[0][1] == MusicItemKind.TRACK
+
+
+# --- Play ---
+
+
+async def test_tool_play_requires_speaker_service(service: MusicService) -> None:
+    result = await service.execute_tool("play_music", {"title": "Horizon"})
     parsed = json.loads(result)
     assert "error" in parsed
+    assert "Speaker service" in parsed["error"]
 
 
-# --- Play track ---
-
-
-async def test_tool_play_track_no_speakers(
-    service: MusicService, resolver: ServiceResolver
-) -> None:
-    await service.start(resolver)
-    result = await service.execute_tool("play_track", {"track_id": "tr-1"})
-    parsed = json.loads(result)
-    assert "error" in parsed  # No speaker service available
-
-
-async def test_tool_play_track_with_speakers(
+async def test_tool_play_favorite_by_title(
     stub_backend: StubMusicBackend,
 ) -> None:
-    """Test play_track when speaker service is available."""
-    from gilbert.core.services.speaker import SpeakerService
-    from gilbert.interfaces.speaker import PlayRequest, PlaybackState, SpeakerBackend, SpeakerInfo
-
-    # Create a minimal speaker backend mock
-    mock_speaker_backend = AsyncMock(spec=SpeakerBackend)
-    mock_speaker_backend.supports_grouping = False
-    mock_speaker_backend.list_speakers = AsyncMock(return_value=[
-        SpeakerInfo(speaker_id="s1", name="Kitchen", ip_address="10.0.0.1"),
-    ])
-    mock_speaker_backend.play_uri = AsyncMock()
-
-    speaker_svc = MagicMock(spec=SpeakerService)
-    speaker_svc.play_on_speakers = AsyncMock()
-    speaker_svc.backend = mock_speaker_backend
-
-    resolver = AsyncMock(spec=ServiceResolver)
-
-    def get_cap(cap: str) -> Any:
-        if cap == "speaker_control":
-            return speaker_svc
-        return None
-
-    resolver.get_capability.side_effect = get_cap
-    resolver.require_capability.side_effect = LookupError("not available")
+    speaker_svc = _mock_speaker_svc()
+    resolver = _resolver_with_speaker(speaker_svc)
 
     service = MusicService()
     service._backend = stub_backend
     service._enabled = True
     await service.start(resolver)
 
-    result = await service.execute_tool("play_track", {
-        "track_id": "tr-1",
+    result = await service.execute_tool("play_music", {
+        "title": "Horizon",
         "speakers": ["Kitchen"],
-        "position_seconds": 12.5,
     })
     parsed = json.loads(result)
 
     assert parsed["status"] == "playing"
-    assert parsed["name"] == "First Song"
-    assert parsed["started_at_seconds"] == 12.5
+    assert parsed["title"] == "Horizon"
+    assert parsed["source"] == "favorites"
+    # Direct-URI favorite skips search entirely
+    assert stub_backend.search_calls == []
 
-    # Verify play_on_speakers was called with correct args
     speaker_svc.play_on_speakers.assert_awaited_once()
     call_kwargs = speaker_svc.play_on_speakers.call_args[1]
-    assert call_kwargs["uri"] == "spotify:track:tr-1"
-    assert call_kwargs["position_seconds"] == 12.5
+    assert call_kwargs["uri"].startswith("x-sonos-spotify:")
     assert call_kwargs["speaker_names"] == ["Kitchen"]
+
+
+async def test_tool_play_playlist_fallback(
+    stub_backend: StubMusicBackend,
+) -> None:
+    """When no favorite matches, falls through to playlists."""
+    speaker_svc = _mock_speaker_svc()
+    resolver = _resolver_with_speaker(speaker_svc)
+
+    service = MusicService()
+    service._backend = stub_backend
+    service._enabled = True
+    await service.start(resolver)
+
+    result = await service.execute_tool("play_music", {"title": "Workout"})
+    parsed = json.loads(result)
+
+    assert parsed["status"] == "playing"
+    assert parsed["source"] == "playlists"
+    assert parsed["kind"] == "playlist"
+
+
+async def test_tool_play_search_fallback(
+    stub_backend: StubMusicBackend,
+) -> None:
+    """When no favorite or playlist matches, runs a fresh search."""
+    speaker_svc = _mock_speaker_svc()
+    resolver = _resolver_with_speaker(speaker_svc)
+
+    service = MusicService()
+    service._backend = stub_backend
+    service._enabled = True
+    await service.start(resolver)
+
+    result = await service.execute_tool("play_music", {"title": "Black Dog"})
+    parsed = json.loads(result)
+
+    assert parsed["status"] == "playing"
+    assert parsed["source"] == "search"
+    assert parsed["title"] == "Black Dog"
+    # Search results lack a direct URI, so resolve_playable constructs one
+    call_kwargs = speaker_svc.play_on_speakers.call_args[1]
+    assert call_kwargs["uri"].startswith("x-sonos-spotify:")
+
+
+async def test_tool_play_no_match_returns_error(
+    stub_backend: StubMusicBackend,
+) -> None:
+    """When nothing matches anywhere, reports the sources tried."""
+    speaker_svc = _mock_speaker_svc()
+    resolver = _resolver_with_speaker(speaker_svc)
+
+    service = MusicService()
+    service._backend = stub_backend
+    service._enabled = True
+    await service.start(resolver)
+
+    # Empty the search response so all three sources fail
+    _SEARCH_RESULTS.clear()
+    try:
+        result = await service.execute_tool("play_music", {"title": "xyzzy"})
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert parsed["sources_tried"] == ["favorites", "playlists", "search"]
+    finally:
+        _SEARCH_RESULTS.append(MusicItem(
+            id="opaque-track-1",
+            title="Black Dog",
+            kind=MusicItemKind.TRACK,
+            subtitle="Led Zeppelin",
+            uri="",
+            service="Spotify",
+        ))
+
+
+async def test_tool_play_restricted_source(
+    stub_backend: StubMusicBackend,
+) -> None:
+    """``source=favorites`` means only favorites are consulted."""
+    speaker_svc = _mock_speaker_svc()
+    resolver = _resolver_with_speaker(speaker_svc)
+
+    service = MusicService()
+    service._backend = stub_backend
+    service._enabled = True
+    await service.start(resolver)
+
+    result = await service.execute_tool("play_music", {
+        "title": "Workout",  # Only in playlists
+        "source": "favorites",
+    })
+    parsed = json.loads(result)
+    assert "error" in parsed
+    assert parsed["sources_tried"] == ["favorites"]
+
+
+async def test_tool_play_carries_didl_meta(
+    stub_backend: StubMusicBackend,
+) -> None:
+    """Stations carry DIDL metadata through to the speaker service."""
+    speaker_svc = _mock_speaker_svc()
+    resolver = _resolver_with_speaker(speaker_svc)
+
+    service = MusicService()
+    service._backend = stub_backend
+    service._enabled = True
+    await service.start(resolver)
+
+    await service.execute_tool("play_music", {"title": "Morning Jazz"})
+    call_kwargs = speaker_svc.play_on_speakers.call_args[1]
+    assert call_kwargs["didl_meta"] == "<DIDL-Lite>station</DIDL-Lite>"
+
+
+# --- Now playing ---
+
+
+async def test_now_playing_requires_speaker_service(service: MusicService) -> None:
+    result = await service.execute_tool("now_playing", {})
+    parsed = json.loads(result)
+    assert "error" in parsed
+    assert "Speaker service" in parsed["error"]
+
+
+async def test_now_playing_delegates_to_speaker(
+    stub_backend: StubMusicBackend,
+) -> None:
+    from gilbert.interfaces.speaker import NowPlaying, PlaybackState
+
+    speaker_svc = _mock_speaker_svc()
+    speaker_svc.get_now_playing = AsyncMock(return_value=NowPlaying(
+        state=PlaybackState.PLAYING,
+        title="Black Dog",
+        artist="Led Zeppelin",
+        album="Led Zeppelin IV",
+        album_art_url="https://example.com/art.jpg",
+        uri="spotify:track:abc",
+        duration_seconds=296.0,
+        position_seconds=42.5,
+    ))
+    resolver = _resolver_with_speaker(speaker_svc)
+
+    service = MusicService()
+    service._backend = stub_backend
+    service._enabled = True
+    await service.start(resolver)
+
+    result = await service.execute_tool("now_playing", {"speaker": "Kitchen"})
+    parsed = json.loads(result)
+
+    assert parsed["state"] == "playing"
+    assert parsed["is_playing"] is True
+    assert parsed["title"] == "Black Dog"
+    assert parsed["artist"] == "Led Zeppelin"
+    speaker_svc.get_now_playing.assert_awaited_once_with("Kitchen")
+
+
+async def test_now_playing_auto_pick(
+    stub_backend: StubMusicBackend,
+) -> None:
+    from gilbert.interfaces.speaker import NowPlaying, PlaybackState
+
+    speaker_svc = _mock_speaker_svc()
+    speaker_svc.get_now_playing = AsyncMock(
+        return_value=NowPlaying(state=PlaybackState.STOPPED),
+    )
+    resolver = _resolver_with_speaker(speaker_svc)
+
+    service = MusicService()
+    service._backend = stub_backend
+    service._enabled = True
+    await service.start(resolver)
+
+    result = await service.execute_tool("now_playing", {})
+    parsed = json.loads(result)
+    assert parsed["state"] == "stopped"
+    assert parsed["is_playing"] is False
+    speaker_svc.get_now_playing.assert_awaited_once_with(None)
+
+
+def test_now_playing_tool_exposed(service: MusicService) -> None:
+    tools = service.get_tools()
+    tool = next(t for t in tools if t.name == "now_playing")
+    assert tool.slash_group == "music"
+    assert tool.slash_command == "now"
+    assert tool.required_role == "everyone"
+
+
+# --- ConfigActionProvider forwarding ---
+
+
+class _ActionableBackend(MusicBackend):
+    """Backend that implements BackendActionProvider for wiring tests."""
+
+    backend_name = "_actionable"
+
+    def __init__(self) -> None:
+        self.invocations: list[tuple[str, dict]] = []
+
+    async def initialize(self, config: dict) -> None: ...
+    async def close(self) -> None: ...
+    async def list_favorites(self) -> list[MusicItem]:
+        return []
+    async def list_playlists(self) -> list[MusicItem]:
+        return []
+    async def search(self, query: str, *, kind: Any = None, limit: int = 10) -> list[MusicItem]:
+        return []
+    async def resolve_playable(self, item: MusicItem) -> Playable:
+        return Playable(uri="")
+
+    @classmethod
+    def backend_actions(cls) -> list:
+        from gilbert.interfaces.configuration import ConfigAction
+
+        return [ConfigAction(key="probe", label="Probe", description="Test probe")]
+
+    async def invoke_backend_action(self, key: str, payload: dict) -> Any:
+        from gilbert.interfaces.configuration import ConfigActionResult
+
+        self.invocations.append((key, payload))
+        return ConfigActionResult(status="ok", message=f"probed {key}")
+
+
+async def test_config_actions_forwarded_from_backend() -> None:
+    svc = MusicService()
+    svc._backend = _ActionableBackend()
+    actions = svc.config_actions()
+    # The service now returns actions from EVERY registered backend so
+    # the UI can display the right set when the user changes the
+    # backend dropdown without saving. The _ActionableBackend's 'probe'
+    # should appear, tagged with its backend name.
+    probe_actions = [a for a in actions if a.key == "probe"]
+    assert len(probe_actions) == 1
+    assert probe_actions[0].backend_action is True
+    assert probe_actions[0].backend == "_actionable"
+
+
+async def test_invoke_config_action_forwarded_to_backend() -> None:
+    backend = _ActionableBackend()
+    assert isinstance(backend, BackendActionProvider)
+    svc = MusicService()
+    svc._backend = backend
+    result = await svc.invoke_config_action("probe", {"foo": "bar"})
+    assert result.status == "ok"
+    assert backend.invocations == [("probe", {"foo": "bar"})]
+
+
+async def test_invoke_config_action_no_backend() -> None:
+    svc = MusicService()
+    result = await svc.invoke_config_action("anything", {})
+    assert result.status == "error"
 
 
 # --- Config parsing ---
@@ -372,7 +582,7 @@ async def test_tool_play_track_with_speakers(
 def test_config_music_defaults() -> None:
     config = GilbertConfig.model_validate({})
     assert config.music.enabled is False
-    assert config.music.backend == "spotify"
+    assert config.music.backend == "sonos"
     assert config.music.settings == {}
 
 
@@ -380,23 +590,18 @@ def test_config_music_full() -> None:
     raw = {
         "music": {
             "enabled": True,
-            "backend": "spotify",
-            "settings": {"client_id": "xxx", "client_secret": "yyy"},
+            "backend": "sonos",
+            "settings": {"preferred_service": "Spotify"},
         }
     }
     config = GilbertConfig.model_validate(raw)
     assert config.music.enabled is True
-    assert config.music.settings["client_id"] == "xxx"
-
-
-# --- Credential type ---
-
+    assert config.music.settings["preferred_service"] == "Spotify"
 
 
 # --- Unknown tool ---
 
 
-async def test_tool_unknown_raises(service: MusicService, resolver: ServiceResolver) -> None:
-    await service.start(resolver)
+async def test_tool_unknown_raises(service: MusicService) -> None:
     with pytest.raises(KeyError, match="Unknown tool"):
         await service.execute_tool("nonexistent", {})

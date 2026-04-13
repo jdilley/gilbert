@@ -6,9 +6,10 @@ Speaker control system with abstract interface and Sonos (SoCo) implementation. 
 ## Details
 
 ### Interface
-- `src/gilbert/interfaces/speaker.py` — `SpeakerBackend` ABC with data classes: `SpeakerInfo`, `SpeakerGroup`, `PlayRequest`, `PlaybackState`
+- `src/gilbert/interfaces/speaker.py` — `SpeakerBackend` ABC with data classes: `SpeakerInfo`, `SpeakerGroup`, `PlayRequest`, `PlaybackState`, `NowPlaying`
 - Grouping is optional — `supports_grouping` property defaults to `False`; backends override if they support it
 - Methods: `list_speakers`, `get_speaker`, `play_uri`, `stop`, `get_volume`, `set_volume`, `list_groups`, `group_speakers`, `ungroup_speakers`
+- Transport introspection: `get_playback_state(speaker_id)` returns a `PlaybackState`; `get_now_playing(speaker_id)` returns a `NowPlaying` (state + title/artist/album/album_art_url/uri/duration_seconds/position_seconds). Both default to "stopped / no metadata" — Sonos overrides both. In the Sonos impl, `get_now_playing` follows the group coordinator since only the coordinator reports the authoritative current track. `SpeakerService.get_now_playing(speaker_name=None)` resolves a target via: explicit name → last-used speaker → any speaker currently `PLAYING` → first discovered speaker.
 
 ### Sonos Integration
 - `src/gilbert/integrations/sonos_speaker.py` — `SonosSpeaker` using the `soco` library

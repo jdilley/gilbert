@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -11,6 +12,11 @@ from typing import Any
 import httpx
 
 
+from gilbert.core.services._backend_actions import (
+    all_backend_actions,
+    invoke_backend_action,
+)
+from gilbert.interfaces.configuration import ConfigAction, ConfigActionResult
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.tools import (
     ToolDefinition,
@@ -187,6 +193,21 @@ class WebSearchService(Service, ToolProvider):
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
         self._settings = config.get("settings", self._settings)
+
+    # --- ConfigActionProvider ---
+
+    def config_actions(self) -> list[ConfigAction]:
+        with contextlib.suppress(ImportError):
+            import gilbert.integrations.tavily_search  # noqa: F401
+        return all_backend_actions(
+            registry=WebSearchBackend.registered_backends(),
+            current_backend=self._backend,
+        )
+
+    async def invoke_config_action(
+        self, key: str, payload: dict[str, Any],
+    ) -> ConfigActionResult:
+        return await invoke_backend_action(self._backend, key, payload)
 
     # ── ToolProvider ─────────────────────────────────────────────────
 

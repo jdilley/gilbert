@@ -13,8 +13,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ConfigField } from "./ConfigField";
-import { ChevronDownIcon, ChevronRightIcon, SaveIcon, RotateCcwIcon } from "lucide-react";
-import type { ConfigSection as ConfigSectionType, ConfigParamMeta } from "@/types/config";
+import { ChevronDownIcon, ChevronRightIcon, SaveIcon, RotateCcwIcon, ZapIcon, ExternalLinkIcon } from "lucide-react";
+import type {
+  ConfigSection as ConfigSectionType,
+  ConfigParamMeta,
+  ConfigActionMeta,
+  ConfigActionResult,
+} from "@/types/config";
 
 interface ConfigSectionProps {
   section: ConfigSectionType;
@@ -57,12 +62,20 @@ function backendGroups(
   return groups;
 }
 
+interface ActionUIState {
+  status: "idle" | "running" | "ok" | "error" | "pending";
+  message: string;
+  /** When set, the button becomes a "Continue" that invokes this key instead. */
+  followup: string;
+}
+
 export function ConfigSection({ section }: ConfigSectionProps) {
   const queryClient = useQueryClient();
   const api = useWsApi();
   const [expanded, setExpanded] = useState(false);
   const [localValues, setLocalValues] = useState<Record<string, unknown>>({});
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [actionStates, setActionStates] = useState<Record<string, ActionUIState>>({});
 
   // Merge server values with local edits
   const merged = useMemo(
@@ -104,6 +117,77 @@ export function ConfigSection({ section }: ConfigSectionProps) {
       setTimeout(() => setSaveStatus(null), 3000);
     },
   });
+
+  const runAction = useCallback(
+    async (action: ConfigActionMeta, keyOverride?: string) => {
+      if (action.confirm && !keyOverride) {
+        if (!window.confirm(action.confirm)) return;
+      }
+      const invokeKey = keyOverride ?? action.key;
+      setActionStates((prev) => ({
+        ...prev,
+        [action.key]: { status: "running", message: "", followup: "" },
+      }));
+      try {
+        const resp = await api.invokeConfigAction(section.namespace, invokeKey);
+        const result: ConfigActionResult = resp.result;
+
+        // If the backend asked us to persist values, push them into
+        // localValues as if the user had typed them. This lets the user
+        // see the new values as pending changes and click Save
+        // explicitly — matching how every other field behaves and
+        // activating the Save button without a manual focus/blur.
+        const persistRaw = (result.data ?? {})["persist"];
+        if (persistRaw && typeof persistRaw === "object") {
+          const persist = persistRaw as Record<string, unknown>;
+          if (Object.keys(persist).length > 0) {
+            setLocalValues((prev) => ({ ...prev, ...persist }));
+            setSaveStatus(null);
+          }
+        }
+
+        setActionStates((prev) => ({
+          ...prev,
+          [action.key]: {
+            status: result.status,
+            message: result.message,
+            followup: result.followup_action ?? "",
+          },
+        }));
+
+        if (result.open_url) {
+          window.open(result.open_url, "_blank", "noopener,noreferrer");
+        }
+
+        // Auto-clear ok messages after a few seconds; leave errors/pending up.
+        // Actions that produced `persist` values stay visible longer because
+        // the user still needs to click Save — clearing the "click Save to
+        // store" message too fast is confusing.
+        const hasPersist =
+          persistRaw && typeof persistRaw === "object" &&
+          Object.keys(persistRaw as Record<string, unknown>).length > 0;
+        if (result.status === "ok") {
+          setTimeout(() => {
+            setActionStates((prev) => {
+              const next = { ...prev };
+              if (next[action.key]?.status === "ok") delete next[action.key];
+              return next;
+            });
+          }, hasPersist ? 20000 : 5000);
+        }
+      } catch (exc) {
+        setActionStates((prev) => ({
+          ...prev,
+          [action.key]: {
+            status: "error",
+            message: (exc as Error)?.message ?? String(exc),
+            followup: "",
+          },
+        }));
+      }
+    },
+    [api, section.namespace],
+  );
 
   // Split params into groups
   const enabledParam = section.params.find((p) => p.key === "enabled");
@@ -224,6 +308,81 @@ export function ConfigSection({ section }: ConfigSectionProps) {
           )}
 
           </>}
+
+          {/* Actions — one-click operations declared by the service/backend.
+              Filter by current dropdown backend so switching backends (even
+              unsaved) immediately surfaces the right button set. Actions
+              with an empty ``backend`` field are service-level and always
+              render. */}
+          {(() => {
+            const currentBackendName = String(merged["backend"] ?? "");
+            const visible = (section.actions ?? []).filter((a) =>
+              !a.hidden && (!a.backend || a.backend === currentBackendName),
+            );
+            if (visible.length === 0) return null;
+            const backendChangedUnsaved =
+              backendParam !== undefined &&
+              "backend" in localValues &&
+              localValues["backend"] !== section.values["backend"];
+            return (
+            <div className="mt-6 pt-4 border-t border-dashed">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                Actions
+              </h4>
+              {backendChangedUnsaved && (
+                <div className="text-xs text-amber-400 mb-3">
+                  Save to enable actions for the new backend.
+                </div>
+              )}
+              <div className="space-y-2">
+                {visible.map((action) => {
+                  const state = actionStates[action.key];
+                  const running = state?.status === "running";
+                  const pending = state?.status === "pending";
+                  const isFollowup = pending && !!state?.followup;
+                  const nextKey = isFollowup ? state.followup : action.key;
+                  const label = isFollowup ? "Continue" : action.label;
+
+                  return (
+                    <div key={action.key} className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={running}
+                          onClick={() => runAction(action, isFollowup ? nextKey : undefined)}
+                        >
+                          {isFollowup
+                            ? <ExternalLinkIcon className="size-3.5 mr-1.5" />
+                            : <ZapIcon className="size-3.5 mr-1.5" />}
+                          {running ? "Running..." : label}
+                        </Button>
+                        {action.description && !state && (
+                          <span className="text-xs text-muted-foreground">{action.description}</span>
+                        )}
+                        {state?.message && (
+                          <span
+                            className={
+                              state.status === "error"
+                                ? "text-xs text-red-400"
+                                : state.status === "ok"
+                                ? "text-xs text-green-400"
+                                : state.status === "pending"
+                                ? "text-xs text-amber-400"
+                                : "text-xs text-muted-foreground"
+                            }
+                          >
+                            {state.message}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            );
+          })()}
 
           {/* Save / Reset bar */}
           <div className="flex flex-wrap items-center gap-2 mt-6 pt-4 border-t">

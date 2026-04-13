@@ -7,7 +7,9 @@ from typing import Any
 import soco
 from soco import SoCo
 
+from gilbert.interfaces.configuration import ConfigAction, ConfigActionResult
 from gilbert.interfaces.speaker import (
+    NowPlaying,
     PlaybackState,
     PlayRequest,
     SpeakerBackend,
@@ -30,6 +32,24 @@ _STATE_MAP: dict[str, PlaybackState] = {
     "STOPPED": PlaybackState.STOPPED,
     "TRANSITIONING": PlaybackState.TRANSITIONING,
 }
+
+
+def _parse_hms(value: str) -> float:
+    """Parse a Sonos-style duration/position string (``H:MM:SS``) into seconds.
+
+    Returns 0.0 for empty, ``NOT_IMPLEMENTED``, or malformed values.
+    """
+    if not value or value == "NOT_IMPLEMENTED":
+        return 0.0
+    parts = value.split(":")
+    try:
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + float(parts[1])
+        return float(parts[0])
+    except ValueError:
+        return 0.0
 
 
 def _speaker_id(device: SoCo) -> str:
@@ -159,6 +179,50 @@ class SonosSpeaker(SpeakerBackend):
 
     backend_name = "sonos"
 
+    @classmethod
+    def backend_actions(cls) -> list[ConfigAction]:
+        return [
+            ConfigAction(
+                key="test_connection",
+                label="Test connection",
+                description=(
+                    "Run Sonos discovery and report how many speakers "
+                    "are reachable on the network."
+                ),
+            ),
+        ]
+
+    async def invoke_backend_action(
+        self, key: str, payload: dict,
+    ) -> ConfigActionResult:
+        if key == "test_connection":
+            return await self._action_test_connection()
+        return ConfigActionResult(
+            status="error",
+            message=f"Unknown action: {key}",
+        )
+
+    async def _action_test_connection(self) -> ConfigActionResult:
+        try:
+            found = await asyncio.to_thread(soco.discover)
+        except Exception as exc:
+            return ConfigActionResult(
+                status="error",
+                message=f"Sonos discovery failed: {exc}",
+            )
+        devices = list(found) if found else []
+        if not devices:
+            return ConfigActionResult(
+                status="error",
+                message="No Sonos speakers found on the network.",
+            )
+        # Refresh the cached device map so subsequent calls see them.
+        self._devices = {_speaker_id(d): d for d in devices}
+        return ConfigActionResult(
+            status="ok",
+            message=f"Found {len(devices)} Sonos speaker(s) on the network.",
+        )
+
     def __init__(self) -> None:
         self._devices: dict[str, SoCo] = {}
         self._spotify_sn: int = 0
@@ -231,7 +295,12 @@ class SonosSpeaker(SpeakerBackend):
         if uri.startswith("spotify:"):
             uri = await asyncio.to_thread(_to_sonos_spotify_uri, uri, self._spotify_sn)
         try:
-            await asyncio.to_thread(coordinator.play_uri, uri, title=title)
+            if request.didl_meta:
+                await asyncio.to_thread(
+                    coordinator.play_uri, uri, meta=request.didl_meta, title=title,
+                )
+            else:
+                await asyncio.to_thread(coordinator.play_uri, uri, title=title)
         except Exception:
             logger.exception("Sonos play_uri failed: uri=%s speaker=%s", uri, coordinator.player_name)
             raise
@@ -307,6 +376,41 @@ class SonosSpeaker(SpeakerBackend):
         transport = await asyncio.to_thread(device.get_current_transport_info)
         state_str = transport.get("current_transport_state", "STOPPED")
         return _STATE_MAP.get(state_str, PlaybackState.STOPPED)
+
+    async def get_now_playing(self, speaker_id: str) -> NowPlaying:
+        """Query Sonos for the currently playing track on a speaker.
+
+        Follows the group coordinator when the speaker is grouped — only the
+        coordinator has authoritative transport/track state.
+        """
+        device = _find_device(self._devices, speaker_id)
+
+        def _fetch() -> NowPlaying:
+            # Follow the group coordinator: in a Sonos group, only the
+            # coordinator reports the actual track being played.
+            group = device.group
+            coordinator = group.coordinator if group and group.coordinator else device
+            transport = coordinator.get_current_transport_info()
+            state = _STATE_MAP.get(
+                transport.get("current_transport_state", "STOPPED"),
+                PlaybackState.STOPPED,
+            )
+            try:
+                track = coordinator.get_current_track_info()
+            except Exception:
+                return NowPlaying(state=state)
+            return NowPlaying(
+                state=state,
+                title=track.get("title", "") or "",
+                artist=track.get("artist", "") or "",
+                album=track.get("album", "") or "",
+                album_art_url=track.get("album_art", "") or "",
+                uri=track.get("uri", "") or "",
+                duration_seconds=_parse_hms(track.get("duration", "")),
+                position_seconds=_parse_hms(track.get("position", "")),
+            )
+
+        return await asyncio.to_thread(_fetch)
 
     async def get_volume(self, speaker_id: str) -> int:
         device = _find_device(self._devices, speaker_id)

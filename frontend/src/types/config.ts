@@ -12,6 +12,32 @@ export interface ConfigParamMeta {
   backend_param: boolean;
 }
 
+export interface ConfigActionMeta {
+  key: string;
+  label: string;
+  description: string;
+  backend_action: boolean;
+  /** Name of the backend this action belongs to; empty means service-level. */
+  backend: string;
+  confirm: string;
+  required_role: string;
+  hidden: boolean;
+}
+
+export interface ConfigActionResult {
+  status: "ok" | "error" | "pending";
+  message: string;
+  open_url: string;
+  followup_action: string;
+  data: Record<string, unknown>;
+}
+
+export interface ConfigActionInvokeResponse {
+  namespace: string;
+  key: string;
+  result: ConfigActionResult;
+}
+
 export interface ConfigSection {
   namespace: string;
   service_name: string;
@@ -20,6 +46,7 @@ export interface ConfigSection {
   failed: boolean;
   params: ConfigParamMeta[];
   values: Record<string, unknown>;
+  actions?: ConfigActionMeta[];
 }
 
 export interface ConfigCategory {

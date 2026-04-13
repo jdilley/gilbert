@@ -16,6 +16,7 @@ from gilbert.interfaces.ai import (
     StopReason,
     TokenUsage,
 )
+from gilbert.interfaces.configuration import ConfigAction, ConfigActionResult
 from gilbert.interfaces.tools import ToolCall, ToolDefinition, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,57 @@ class AnthropicAI(AIBackend):
                 default=0.7,
             ),
         ]
+
+    @classmethod
+    def backend_actions(cls) -> list[ConfigAction]:
+        return [
+            ConfigAction(
+                key="test_connection",
+                label="Test connection",
+                description=(
+                    "Send a tiny 'hi' message to the Anthropic API to "
+                    "verify the API key and model."
+                ),
+            ),
+        ]
+
+    async def invoke_backend_action(
+        self, key: str, payload: dict,
+    ) -> ConfigActionResult:
+        if key == "test_connection":
+            return await self._action_test_connection()
+        return ConfigActionResult(
+            status="error",
+            message=f"Unknown action: {key}",
+        )
+
+    async def _action_test_connection(self) -> ConfigActionResult:
+        if self._client is None:
+            return ConfigActionResult(
+                status="error",
+                message="Anthropic backend is not initialized — save settings first.",
+            )
+        try:
+            request = AIRequest(
+                messages=[Message(role=MessageRole.USER, content="hi")],
+                system_prompt="Reply with a single word.",
+                tools=[],
+            )
+            response = await self.generate(request)
+        except AIBackendError as exc:
+            return ConfigActionResult(
+                status="error",
+                message=f"Anthropic API error: {exc}",
+            )
+        except Exception as exc:
+            return ConfigActionResult(
+                status="error",
+                message=f"Connection failed: {exc}",
+            )
+        return ConfigActionResult(
+            status="ok",
+            message=f"Connected to Anthropic (model: {response.model}).",
+        )
 
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None

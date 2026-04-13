@@ -49,6 +49,33 @@ class PlayRequest:
     volume: int | None = None
     title: str = ""
     position_seconds: float | None = None
+    didl_meta: str = ""
+    """Optional DIDL-Lite metadata envelope for items that need one.
+
+    Sonos radio stations and some favorites can't be played from just a
+    URI — they require a matching ``<DIDL-Lite>`` blob that carries the
+    item's class, service credentials, and parent container. Passed
+    through to ``SoCo.play_uri(meta=...)`` when non-empty.
+    """
+
+
+@dataclass(frozen=True)
+class NowPlaying:
+    """What a speaker is currently playing.
+
+    Backends that can't introspect the current track return a NowPlaying
+    with ``state`` set (from ``get_playback_state``) and the metadata
+    fields empty.
+    """
+
+    state: PlaybackState = PlaybackState.STOPPED
+    title: str = ""
+    artist: str = ""
+    album: str = ""
+    album_art_url: str = ""
+    uri: str = ""
+    duration_seconds: float = 0.0
+    position_seconds: float = 0.0
 
 
 class SpeakerBackend(ABC):
@@ -137,6 +164,16 @@ class SpeakerBackend(ABC):
         transport state queries.
         """
         return PlaybackState.STOPPED
+
+    async def get_now_playing(self, speaker_id: str) -> NowPlaying:
+        """Get metadata about the track/stream currently playing on a speaker.
+
+        The default implementation only reports the transport state — subclasses
+        that can read track metadata from the device should override to populate
+        title/artist/album/uri/duration/position.
+        """
+        state = await self.get_playback_state(speaker_id)
+        return NowPlaying(state=state)
 
     async def list_groups(self) -> list[SpeakerGroup]:
         """List current speaker groups."""

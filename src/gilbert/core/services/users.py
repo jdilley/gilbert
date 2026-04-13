@@ -1,11 +1,17 @@
 """User service — manages local user accounts with external provider sync."""
 
+import contextlib
 import json
 import logging
 import time
 import uuid
 from typing import Any
 
+from gilbert.core.services._backend_actions import (
+    invoke_backend_action,
+    merge_backend_actions,
+)
+from gilbert.interfaces.configuration import ConfigAction, ConfigActionResult
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.storage import StorageBackend, StorageProvider
 from gilbert.interfaces.tools import (
@@ -364,6 +370,33 @@ class UserService(Service):
         ttl = config.get("sync_ttl_seconds")
         if ttl is not None:
             self._sync_ttl = int(ttl)
+
+    # --- ConfigActionProvider ---
+    #
+    # Exposes actions from the google_directory provider (the only
+    # pluggable user provider today). Falls back to the registered class
+    # when the provider isn't live yet.
+
+    def config_actions(self) -> list[ConfigAction]:
+        with contextlib.suppress(ImportError):
+            import gilbert.integrations.google_directory  # noqa: F401
+        live: Any = None
+        for provider in getattr(self, "_provider_backends", []):
+            if getattr(provider, "provider_type", "") == "google":
+                live = provider
+                break
+        fallback_cls = UserProviderBackend.registered_backends().get("google_directory")
+        return merge_backend_actions(live, fallback_cls)
+
+    async def invoke_config_action(
+        self, key: str, payload: dict[str, Any],
+    ) -> ConfigActionResult:
+        live: Any = None
+        for provider in getattr(self, "_provider_backends", []):
+            if getattr(provider, "provider_type", "") == "google":
+                live = provider
+                break
+        return await invoke_backend_action(live, key, payload)
 
     # --- WebSocket RPC handlers ---
 
