@@ -48,8 +48,18 @@ dev = [
 packages = ["src/gilbert"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# Include any ``plugins/<name>/tests`` directories so plugin-specific
+# tests (which live in the briandilley/gilbert-plugins repo) run
+# automatically when the plugin is installed under ``plugins/``.
+testpaths = ["tests", "plugins"]
+python_files = ["test_*.py"]
 asyncio_mode = "auto"
+# ``importlib`` mode — avoids the duplicate ``tests.conftest`` clash
+# we'd hit otherwise, because every plugin has its own ``tests/``
+# directory with its own ``conftest.py``. The legacy ``prepend`` mode
+# would import all of them as ``tests.conftest`` and collide on the
+# second one.
+addopts = "--import-mode=importlib"
 
 [tool.mypy]
 python_version = "3.12"
