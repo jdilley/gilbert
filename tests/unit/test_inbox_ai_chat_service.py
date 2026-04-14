@@ -33,16 +33,20 @@ class FakeInboxService:
 
     async def reply_to_message(
         self,
+        mailbox_id: str,
         message_id: str,
         body_html: str,
+        user_ctx: UserContext,
         body_text: str = "",
         attachments: list[EmailAttachment] | None = None,
     ) -> str:
         self.replies.append({
+            "mailbox_id": mailbox_id,
             "message_id": message_id,
             "body_html": body_html,
             "body_text": body_text,
             "attachments": attachments,
+            "user_ctx": user_ctx,
         })
         return f"reply_{message_id}"
 
@@ -306,10 +310,12 @@ def _make_event(
     thread_id: str = "thread_001",
     sender_email: str = "alice@example.com",
     is_inbound: bool = True,
+    mailbox_id: str = "mbx_default",
 ) -> Event:
     return Event(
         event_type="inbox.message.received",
         data={
+            "mailbox_id": mailbox_id,
             "message_id": message_id,
             "thread_id": thread_id,
             "subject": "Hey Gilbert",

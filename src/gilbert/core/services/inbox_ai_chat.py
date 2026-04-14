@@ -172,6 +172,10 @@ class InboxAIChatService(Service):
         if not data.get("is_inbound", True):
             return
 
+        mailbox_id = data.get("mailbox_id", "")
+        if not mailbox_id:
+            return
+
         sender_email = data.get("sender_email", "")
 
         # When an email was forwarded through a Google Groups alias
@@ -201,15 +205,15 @@ class InboxAIChatService(Service):
             return
 
         try:
-            await self._process_message(message_id, thread_id, sender_email)
+            await self._process_message(mailbox_id, message_id, thread_id, sender_email)
         except Exception:
             logger.exception(
-                "Failed to process email AI chat: message=%s sender=%s",
-                message_id, sender_email,
+                "Failed to process email AI chat: message=%s sender=%s mailbox=%s",
+                message_id, sender_email, mailbox_id,
             )
 
     async def _process_message(
-        self, message_id: str, thread_id: str, sender_email: str,
+        self, mailbox_id: str, message_id: str, thread_id: str, sender_email: str,
     ) -> None:
         """Process a single inbound message: AI chat + reply.
 
@@ -217,12 +221,21 @@ class InboxAIChatService(Service):
         between concurrent message processing tasks.
         """
         async with self._process_lock:
-            await self._process_message_locked(message_id, thread_id, sender_email)
+            await self._process_message_locked(
+                mailbox_id, message_id, thread_id, sender_email,
+            )
 
     async def _process_message_locked(
-        self, message_id: str, thread_id: str, sender_email: str,
+        self, mailbox_id: str, message_id: str, thread_id: str, sender_email: str,
     ) -> None:
         """Inner processing — must be called under ``_process_lock``."""
+        # Propagate SYSTEM identity so InboxProvider's read methods
+        # (which pull the current user from the async context) don't
+        # apply per-user visibility filters to this background handler.
+        from gilbert.core.context import set_current_user
+
+        set_current_user(UserContext.SYSTEM)
+
         # Get full message
         record = await self._inbox.get_message(message_id)
         if not record:
@@ -271,11 +284,16 @@ class InboxAIChatService(Service):
         # Store thread → conversation mapping
         await self._set_conversation_id(thread_id, conv_id, sender_email)
 
-        # Convert response to HTML and reply
+        # Convert response to HTML and reply. The AI chat service acts
+        # on behalf of the system — use UserContext.SYSTEM as the actor
+        # so the reply bypasses per-user mailbox access checks (the
+        # external sender is not typically a Gilbert user).
         body_html = markdown_to_html(response_text)
         await self._inbox.reply_to_message(
+            mailbox_id=mailbox_id,
             message_id=message_id,
             body_html=body_html,
+            user_ctx=UserContext.SYSTEM,
             body_text=response_text,
             attachments=attachments or None,
         )
