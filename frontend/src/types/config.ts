@@ -1,5 +1,11 @@
 /** Configuration system types for the Settings UI. */
 
+/** A single dropdown option — either a plain string (label = value) or an
+ * object with distinct ``value`` (stored) and ``label`` (displayed). The
+ * labeled form is used by dynamic ``choices_from`` sources that have a
+ * friendly display name (e.g. mailbox name vs. mailbox id). */
+export type ConfigChoice = string | { value: string; label: string };
+
 export interface ConfigParamMeta {
   key: string;
   type: "string" | "integer" | "number" | "boolean" | "array" | "object";
@@ -7,9 +13,14 @@ export interface ConfigParamMeta {
   default: unknown;
   restart_required: boolean;
   sensitive: boolean;
-  choices: string[] | null;
+  choices: ConfigChoice[] | null;
   multiline: boolean;
   backend_param: boolean;
+}
+
+/** Normalize a ConfigChoice to its {value, label} form. */
+export function normalizeChoice(c: ConfigChoice): { value: string; label: string } {
+  return typeof c === "string" ? { value: c, label: c } : c;
 }
 
 export interface ConfigActionMeta {

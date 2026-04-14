@@ -104,9 +104,20 @@ class InboxService(Service):
         self._access_control: AccessControlProvider | None = None
 
         self._runtimes: dict[str, _MailboxRuntime] = {}
+        self._cached_mailboxes: list[Mailbox] = []
         self._max_body_length: int = 50000
         self._enabled: bool = True
         self._outbox_busy: bool = False
+
+    @property
+    def cached_mailboxes(self) -> list[Mailbox]:
+        """Sync snapshot of all mailboxes — used by config dynamic choices.
+
+        Maintained by ``_refresh_cache``, called from ``_boot_runtimes``
+        and after every mailbox CRUD operation. Returns a copy so the
+        caller can iterate freely.
+        """
+        return list(self._cached_mailboxes)
 
     # ── Service metadata ─────────────────────────────────────────────
 
@@ -247,6 +258,8 @@ class InboxService(Service):
             logger.exception("Inbox boot: failed to load mailboxes")
             return
 
+        self._cached_mailboxes = list(mailboxes)
+
         for mailbox in mailboxes:
             if mailbox.poll_enabled:
                 try:
@@ -257,6 +270,13 @@ class InboxService(Service):
                     )
 
         logger.info("Inbox boot: %d runtime(s) started", len(self._runtimes))
+
+    async def _refresh_cache(self) -> None:
+        """Refresh ``_cached_mailboxes`` from storage. Cheap — one query."""
+        try:
+            self._cached_mailboxes = await self._load_mailboxes()
+        except Exception:
+            logger.exception("Inbox: failed to refresh mailbox cache")
 
     async def _start_runtime(self, mailbox: Mailbox) -> None:
         """Instantiate a backend + register a poll job for one mailbox."""
@@ -432,6 +452,7 @@ class InboxService(Service):
         await self._storage.put(
             _MAILBOXES_COLLECTION, mailbox.id, mailbox.to_dict(),
         )
+        await self._refresh_cache()
 
         if self._enabled and mailbox.poll_enabled:
             try:
@@ -476,6 +497,7 @@ class InboxService(Service):
         await self._storage.put(
             _MAILBOXES_COLLECTION, mailbox.id, mailbox.to_dict(),
         )
+        await self._refresh_cache()
 
         if self._enabled and needs_restart:
             try:
@@ -536,6 +558,7 @@ class InboxService(Service):
             await self._storage.delete(_OUTBOX_COLLECTION, o["_id"])
 
         await self._storage.delete(_MAILBOXES_COLLECTION, mailbox_id)
+        await self._refresh_cache()
         await self._publish_mailbox_event("inbox.mailbox.deleted", mailbox)
 
     async def share_user(

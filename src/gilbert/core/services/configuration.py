@@ -393,12 +393,18 @@ class ConfigurationService(Service):
     # --- Param serialization ---
 
     def _serialize_param(self, p: ConfigParam, values: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Serialize a ConfigParam for the WS response, resolving dynamic choices."""
-        choices = list(p.choices) if p.choices else None
+        """Serialize a ConfigParam for the WS response, resolving dynamic choices.
+
+        ``choices`` may be a list of plain strings (label = value) or a
+        list of ``{"value": str, "label": str}`` objects when a dynamic
+        source wants to show a friendly label distinct from the stored
+        value (e.g. mailbox name vs. mailbox id).
+        """
+        choices: list[Any] | None = list(p.choices) if p.choices else None
         if p.choices_from:
             resolved = self._resolve_dynamic_choices(p.choices_from)
             if resolved is not None:
-                choices = resolved
+                choices = resolved  # may be list[str] or list[dict]
             elif values is not None and p.type.value == "array":
                 # Fallback: use currently stored values as choices so the UI
                 # can at least show what's selected (e.g., before backend starts)
@@ -445,8 +451,16 @@ class ConfigurationService(Service):
             "data": r.data,
         }
 
-    def _resolve_dynamic_choices(self, source: str) -> list[str] | None:
-        """Resolve a dynamic choices source to a list of values."""
+    def _resolve_dynamic_choices(
+        self, source: str,
+    ) -> list[str] | list[dict[str, str]] | None:
+        """Resolve a dynamic choices source to a list of values or labeled options.
+
+        Returns either a list of plain strings (label = value) or a list
+        of ``{"value": ..., "label": ...}`` dicts when the source wants
+        the dropdown to show a friendly label distinct from the stored
+        value.
+        """
         if self._resolver is None:
             return None
         if source == "speakers":
@@ -474,6 +488,29 @@ class ConfigurationService(Service):
                         return [str(s) for s in linked]
                 except Exception:
                     logger.debug("music_services dynamic choices failed", exc_info=True)
+        elif source == "inbox_mailboxes":
+            # Returns labeled choices: the dropdown shows the friendly
+            # name + email but stores the bare mailbox id as the value.
+            # InboxService maintains a sync-readable ``cached_mailboxes``
+            # property that's refreshed at boot and on every CRUD op.
+            svc = self._resolver.get_capability("inbox")
+            if svc is not None:
+                try:
+                    cached = getattr(svc, "cached_mailboxes", None)
+                    if cached is None:
+                        return None
+                    return [
+                        {
+                            "value": m.id,
+                            "label": (
+                                f"{m.name} ({m.email_address})"
+                                if m.email_address else m.name
+                            ),
+                        }
+                        for m in cached
+                    ]
+                except Exception:
+                    logger.debug("inbox_mailboxes dynamic choices failed", exc_info=True)
         return None
 
     # --- Sensitive field masking ---

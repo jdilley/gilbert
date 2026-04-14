@@ -20,8 +20,10 @@ import {
 } from "@/components/ui/select";
 import { ConfigField } from "@/components/settings/ConfigField";
 import { useWsApi } from "@/hooks/useWsApi";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import type { InboxMailbox, EmailBackendInfo } from "@/types/inbox";
-import { PlusIcon, XIcon, Trash2Icon, CheckIcon, AlertTriangleIcon } from "lucide-react";
+import type { UserRoleAssignment } from "@/types/roles";
+import { Trash2Icon, CheckIcon, AlertTriangleIcon, SearchIcon } from "lucide-react";
 
 interface MailboxEditorProps {
   /** If null, editor is in "create" mode. */
@@ -52,10 +54,6 @@ export function MailboxEditor({
   const [pollEnabled, setPollEnabled] = useState(true);
   const [pollInterval, setPollInterval] = useState(60);
 
-  // Sharing state (edit-mode only)
-  const [newUserShare, setNewUserShare] = useState("");
-  const [newRoleShare, setNewRoleShare] = useState("");
-
   // Test connection feedback
   const [testResult, setTestResult] = useState<
     { ok: boolean; error: string } | null
@@ -82,12 +80,25 @@ export function MailboxEditor({
     setTestResult(null);
   }, [mailbox, open]);
 
+  const { connected } = useWebSocket();
+
   // Available backends (for select + config param schema)
   const { data: backends = [] } = useQuery<EmailBackendInfo[]>({
     queryKey: ["email-backends"],
     queryFn: api.listEmailBackends,
     enabled: open,
   });
+
+  // Users + role names for the sharing picker (edit-mode only).
+  // Lists every user in Gilbert + every named role; the picker filters
+  // them in-memory.
+  const { data: userRoles } = useQuery({
+    queryKey: ["roles-user-list"],
+    queryFn: api.listUserRoles,
+    enabled: open && connected && !!mailbox && (mailbox?.can_admin ?? false),
+  });
+  const allUsers: UserRoleAssignment[] = userRoles?.users ?? [];
+  const allRoles: string[] = userRoles?.role_names ?? [];
 
   const activeBackend = useMemo(
     () => backends.find((b) => b.name === backendName),
@@ -143,10 +154,8 @@ export function MailboxEditor({
 
   const shareUser = useMutation({
     mutationFn: (userId: string) => api.shareMailboxUser(mailbox!.id, userId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["inbox-mailboxes"] });
-      setNewUserShare("");
-    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["inbox-mailboxes"] }),
   });
 
   const unshareUser = useMutation({
@@ -157,10 +166,8 @@ export function MailboxEditor({
 
   const shareRole = useMutation({
     mutationFn: (role: string) => api.shareMailboxRole(mailbox!.id, role),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["inbox-mailboxes"] });
-      setNewRoleShare("");
-    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["inbox-mailboxes"] }),
   });
 
   const unshareRole = useMutation({
@@ -168,6 +175,22 @@ export function MailboxEditor({
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["inbox-mailboxes"] }),
   });
+
+  const toggleUser = (userId: string, currentlyShared: boolean) => {
+    if (currentlyShared) {
+      unshareUser.mutate(userId);
+    } else {
+      shareUser.mutate(userId);
+    }
+  };
+
+  const toggleRole = (role: string, currentlyShared: boolean) => {
+    if (currentlyShared) {
+      unshareRole.mutate(role);
+    } else {
+      shareRole.mutate(role);
+    }
+  };
 
   const handleBackendConfigChange = (key: string, value: unknown) => {
     setBackendConfig((prev) => ({ ...prev, [key]: value }));
@@ -297,23 +320,24 @@ export function MailboxEditor({
                   cannot edit settings or sharing.
                 </p>
 
-                <SharePanel
+                <CheckboxPicker
                   label="Users"
-                  items={mailbox.shared_with_users}
-                  input={newUserShare}
-                  setInput={setNewUserShare}
-                  onAdd={(v) => shareUser.mutate(v)}
-                  onRemove={(v) => unshareUser.mutate(v)}
-                  placeholder="user_id"
+                  options={allUsers.map((u) => ({
+                    value: u.user_id,
+                    label: u.display_name || u.username || u.user_id,
+                    sublabel: u.email,
+                  }))}
+                  selected={mailbox.shared_with_users}
+                  onToggle={toggleUser}
+                  emptyText="No users found."
                 />
-                <SharePanel
+
+                <CheckboxPicker
                   label="Roles"
-                  items={mailbox.shared_with_roles}
-                  input={newRoleShare}
-                  setInput={setNewRoleShare}
-                  onAdd={(v) => shareRole.mutate(v)}
-                  onRemove={(v) => unshareRole.mutate(v)}
-                  placeholder="role name"
+                  options={allRoles.map((r) => ({ value: r, label: r }))}
+                  selected={mailbox.shared_with_roles}
+                  onToggle={toggleRole}
+                  emptyText="No roles found."
                 />
               </section>
             </>
@@ -394,59 +418,96 @@ export function MailboxEditor({
   );
 }
 
-function SharePanel({
-  label, items, input, setInput, onAdd, onRemove, placeholder,
+interface CheckboxPickerOption {
+  value: string;
+  label: string;
+  sublabel?: string;
+}
+
+/** A filterable list of checkboxes for picking which users / roles a
+ * mailbox is shared with. Filter matches against label and sublabel
+ * case-insensitively; selected items always remain visible regardless
+ * of the filter so the user can uncheck them. */
+function CheckboxPicker({
+  label,
+  options,
+  selected,
+  onToggle,
+  emptyText,
 }: {
   label: string;
-  items: string[];
-  input: string;
-  setInput: (v: string) => void;
-  onAdd: (v: string) => void;
-  onRemove: (v: string) => void;
-  placeholder: string;
+  options: CheckboxPickerOption[];
+  selected: string[];
+  onToggle: (value: string, currentlyShared: boolean) => void;
+  emptyText: string;
 }) {
-  const submit = () => {
-    const v = input.trim();
-    if (v) onAdd(v);
-  };
+  const [filter, setFilter] = useState("");
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+
+  const visible = useMemo(() => {
+    const f = filter.trim().toLowerCase();
+    if (!f) return options;
+    return options.filter((o) => {
+      if (selectedSet.has(o.value)) return true; // never hide checked items
+      return (
+        o.label.toLowerCase().includes(f) ||
+        (o.sublabel?.toLowerCase().includes(f) ?? false) ||
+        o.value.toLowerCase().includes(f)
+      );
+    });
+  }, [filter, options, selectedSet]);
+
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs">{label}</Label>
-      {items.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {items.map((v) => (
-            <span
-              key={v}
-              className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs"
-            >
-              {v}
-              <button
-                type="button"
-                onClick={() => onRemove(v)}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <XIcon className="size-3" />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-      <div className="flex gap-1.5">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs">{label}</Label>
+        <span className="text-[10px] text-muted-foreground">
+          {selected.length} selected
+        </span>
+      </div>
+      <div className="relative">
+        <SearchIcon className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder={placeholder}
-          className="text-sm"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder={`Filter ${label.toLowerCase()}...`}
+          className="pl-7 text-sm"
         />
-        <Button variant="outline" size="sm" onClick={submit} disabled={!input.trim()}>
-          <PlusIcon className="size-3.5" />
-        </Button>
+      </div>
+      <div className="max-h-48 overflow-y-auto rounded-md border bg-background">
+        {visible.length === 0 ? (
+          <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+            {options.length === 0 ? emptyText : "No matches."}
+          </div>
+        ) : (
+          <ul className="divide-y">
+            {visible.map((opt) => {
+              const checked = selectedSet.has(opt.value);
+              return (
+                <li key={opt.value}>
+                  <label
+                    className="flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-accent/40"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => onToggle(opt.value, checked)}
+                      className="h-4 w-4 rounded border-input accent-primary"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm">{opt.label}</div>
+                      {opt.sublabel && (
+                        <div className="truncate text-[11px] text-muted-foreground">
+                          {opt.sublabel}
+                        </div>
+                      )}
+                    </div>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
     </div>
   );

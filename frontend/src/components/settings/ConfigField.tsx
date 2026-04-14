@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { EyeIcon, EyeOffIcon, RotateCcwIcon, PlusIcon, XIcon } from "lucide-react";
 import type { ConfigParamMeta } from "@/types/config";
+import { normalizeChoice } from "@/types/config";
 
 interface ConfigFieldProps {
   param: ConfigParamMeta;
@@ -113,19 +114,21 @@ function FieldControl({
     );
   }
 
-  // String + choices → dropdown
+  // String + choices → dropdown. Choices may be plain strings or
+  // {value, label} objects for friendly labels (e.g. mailbox dropdown).
   if (param.type === "string" && param.choices && param.choices.length > 0) {
+    const options = param.choices.map(normalizeChoice);
     return (
       <Select
         value={String(value ?? "")}
-        onValueChange={(v) => onChange(param.key, v)}
+        onValueChange={(v) => onChange(param.key, v ?? "")}
       >
         <SelectTrigger className="w-full">
           <SelectValue placeholder="Select..." />
         </SelectTrigger>
         <SelectContent>
-          {param.choices.map((choice) => (
-            <SelectItem key={choice} value={choice}>{choice}</SelectItem>
+          {options.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
           ))}
         </SelectContent>
       </Select>
@@ -375,33 +378,33 @@ function CheckboxMultiSelect({
   onChange: (key: string, value: unknown) => void;
 }) {
   const selected = new Set(Array.isArray(value) ? (value as string[]) : []);
-  const choices = param.choices ?? [];
+  const options = (param.choices ?? []).map(normalizeChoice);
 
-  const toggle = (item: string) => {
+  const toggle = (val: string) => {
     const next = new Set(selected);
-    if (next.has(item)) {
-      next.delete(item);
+    if (next.has(val)) {
+      next.delete(val);
     } else {
-      next.add(item);
+      next.add(val);
     }
     onChange(param.key, [...next]);
   };
 
-  if (choices.length === 0) {
+  if (options.length === 0) {
     return <p className="text-xs text-muted-foreground italic">No options available</p>;
   }
 
   return (
     <div className="space-y-1.5">
-      {choices.map((item) => (
-        <label key={item} className="flex items-center gap-2 cursor-pointer">
+      {options.map((opt) => (
+        <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
           <input
             type="checkbox"
-            checked={selected.has(item)}
-            onChange={() => toggle(item)}
+            checked={selected.has(opt.value)}
+            onChange={() => toggle(opt.value)}
             className="rounded border-input h-4 w-4 accent-primary"
           />
-          <span className="text-sm">{item}</span>
+          <span className="text-sm">{opt.label}</span>
         </label>
       ))}
     </div>
