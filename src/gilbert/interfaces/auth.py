@@ -123,6 +123,34 @@ class AuthBackend(ABC):
         return {}
 
 
+@runtime_checkable
+class UserBackendAware(Protocol):
+    """Protocol for auth backends that need the users backend injected.
+
+    Local auth verifies credentials against the user store, so the
+    AuthService injects its UserBackend after ``initialize()``. OAuth
+    backends don't need this. Implement this protocol to opt in.
+    """
+
+    def set_user_backend(self, user_backend: Any) -> None:
+        """Receive the user storage backend for password verification etc."""
+        ...
+
+
+@runtime_checkable
+class TunnelAwareAuthBackend(Protocol):
+    """Protocol for auth backends that need the tunnel service injected.
+
+    OAuth backends need the public tunnel URL to build valid redirect
+    URIs. The AuthService injects a ``TunnelProvider`` after
+    ``initialize()`` on any backend that satisfies this protocol.
+    """
+
+    def set_tunnel(self, tunnel: Any) -> None:
+        """Receive the tunnel provider for building public callback URLs."""
+        ...
+
+
 @dataclass
 class LoginMethod:
     """Describes a login option to render on the login page.

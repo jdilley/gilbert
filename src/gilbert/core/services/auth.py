@@ -6,21 +6,21 @@ authentication to them. Manages sessions centrally.
 
 import logging
 import secrets
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from gilbert.config import AuthConfig
-from gilbert.core.services._backend_actions import (
-    invoke_backend_action,
-    merge_backend_actions,
-)
 from gilbert.interfaces.auth import (
     AuthBackend,
     AuthInfo,
     LoginMethod,
+    TunnelAwareAuthBackend,
+    UserBackendAware,
     UserContext,
 )
 from gilbert.interfaces.configuration import (
+    BackendActionProvider,
     ConfigAction,
     ConfigActionResult,
     ConfigParam,
@@ -28,6 +28,12 @@ from gilbert.interfaces.configuration import (
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.storage import StorageBackend
 from gilbert.interfaces.tools import ToolParameterType
+
+# Name of the built-in local auth backend — always enabled, no toggle,
+# no per-backend config section. Every other registered AuthBackend is
+# treated generically: its params come from ``backend_config_params()``
+# and it's gated by an ``<backend_name>.enabled`` flag.
+_LOCAL_BACKEND = "local"
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +66,7 @@ class AuthService(Service):
         )
 
     async def start(self, resolver: ServiceResolver) -> None:
+        from gilbert.interfaces.configuration import ConfigurationReader
         from gilbert.interfaces.storage import StorageProvider
 
         self._user_service = resolver.require_capability("users")
@@ -69,51 +76,74 @@ class AuthService(Service):
         self._storage = storage_svc.backend
         self._resolver = resolver
 
-        # Load config for auth backends
-        google_oauth_config: dict[str, Any] = {}
-        config_svc = resolver.get_capability("configuration")
-        if config_svc is not None:
-            from gilbert.interfaces.configuration import ConfigurationReader
-
-            if isinstance(config_svc, ConfigurationReader):
-                section = config_svc.get_section("auth")
-                google_oauth_config = section.get("google_oauth", {})
-                if not isinstance(google_oauth_config, dict):
-                    google_oauth_config = {}
-
         # Register local auth backend (bundled with core).
-        # Google/other auth backends register themselves via plugins.
+        # Other auth backends register themselves via plugins.
         try:
             import gilbert.integrations.local_auth  # noqa: F401
         except ImportError:
             pass
 
-        backends = AuthBackend.registered_backends()
+        # Load the auth config section once; each non-local backend
+        # gets a subsection keyed on its ``backend_name``.
+        auth_section: dict[str, Any] = {}
+        config_svc = resolver.get_capability("configuration")
+        if isinstance(config_svc, ConfigurationReader):
+            await self._migrate_legacy_keys(config_svc)
+            auth_section = config_svc.get_section("auth")
 
-        # Local auth backend — always enabled
-        local_cls = backends.get("local")
-        if local_cls:
-            local = local_cls()
-            await local.initialize({})
-            local.set_user_backend(self._user_service.backend)
-            self._backends["local"] = local
+        tunnel = resolver.get_capability("tunnel")
+        registry = AuthBackend.registered_backends()
 
-        # Google OAuth backend — if enabled and configured
-        if google_oauth_config.get("enabled") and google_oauth_config.get("client_id"):
-            google_cls = backends.get("google")
-            if google_cls:
-                google = google_cls()
-                await google.initialize(google_oauth_config)
-                tunnel = resolver.get_capability("tunnel")
-                if tunnel:
-                    google.set_tunnel(tunnel)
-                self._backends["google"] = google
+        for name, cls in registry.items():
+            if name == _LOCAL_BACKEND:
+                # Always enabled; no config section, but needs the user
+                # backend injected for password verification.
+                instance = cls()
+                await instance.initialize({})
+                if isinstance(instance, UserBackendAware):
+                    instance.set_user_backend(self._user_service.backend)
+                self._backends[name] = instance
+                continue
+
+            sub = auth_section.get(name, {})
+            if not isinstance(sub, dict) or not sub.get("enabled"):
+                continue
+
+            instance = cls()
+            await instance.initialize(sub)
+            if tunnel is not None and isinstance(instance, TunnelAwareAuthBackend):
+                instance.set_tunnel(tunnel)
+            self._backends[name] = instance
 
         logger.info(
             "Auth service started — %d backend(s): %s",
             len(self._backends),
             ", ".join(self._backends.keys()),
         )
+
+    async def _migrate_legacy_keys(self, config_svc: Any) -> None:
+        """One-time rename of legacy config subsections.
+
+        The pre-refactor auth service stored Google OAuth under
+        ``auth.google_oauth.*`` because core hard-coded that namespace.
+        Post-refactor, each backend's config lives under its
+        ``backend_name`` — which for Google is just ``google``. Copy
+        any surviving legacy values over and drop the old key so
+        existing installs keep their credentials without manual action.
+        """
+        section = config_svc.get_section("auth")
+        legacy = section.get("google_oauth")
+        if not isinstance(legacy, dict) or not legacy:
+            return
+        # Don't clobber a newer "google" section if one already exists.
+        existing = section.get("google")
+        if isinstance(existing, dict) and existing:
+            await config_svc.set("auth.google_oauth", None)
+            return
+        for key, value in legacy.items():
+            await config_svc.set(f"auth.google.{key}", value)
+        await config_svc.set("auth.google_oauth", None)
+        logger.info("Migrated legacy auth.google_oauth.* config to auth.google.*")
 
     async def stop(self) -> None:
         pass
@@ -129,7 +159,7 @@ class AuthService(Service):
         return "Security"
 
     def config_params(self) -> list[ConfigParam]:
-        return [
+        params: list[ConfigParam] = [
             ConfigParam(
                 key="session_ttl_seconds", type=ToolParameterType.INTEGER,
                 description="Session time-to-live in seconds.",
@@ -150,28 +180,28 @@ class AuthService(Service):
                 description="Root admin password.",
                 default="", restart_required=True, sensitive=True,
             ),
-            # Google OAuth backend
-            ConfigParam(
-                key="google_oauth.enabled", type=ToolParameterType.BOOLEAN,
-                description="Enable Google OAuth sign-in.",
-                default=False, restart_required=True, backend_param=True,
-            ),
-            ConfigParam(
-                key="google_oauth.client_id", type=ToolParameterType.STRING,
-                description="Google OAuth client ID.",
-                restart_required=True, sensitive=True, backend_param=True,
-            ),
-            ConfigParam(
-                key="google_oauth.client_secret", type=ToolParameterType.STRING,
-                description="Google OAuth client secret.",
-                restart_required=True, sensitive=True, backend_param=True,
-            ),
-            ConfigParam(
-                key="google_oauth.domain", type=ToolParameterType.STRING,
-                description="Restrict Google login to this domain (empty = any).",
-                default="", restart_required=True, backend_param=True,
-            ),
         ]
+        # Per-backend params: discovered from the registry so adding a
+        # new auth backend (local, google, github, ldap, …) needs zero
+        # changes in core. Local is always on and gets no enabled
+        # toggle or config section.
+        for name, cls in AuthBackend.registered_backends().items():
+            if name == _LOCAL_BACKEND:
+                continue
+            params.append(ConfigParam(
+                key=f"{name}.enabled", type=ToolParameterType.BOOLEAN,
+                description=f"Enable the {name} auth backend.",
+                default=False, restart_required=True, backend_param=True,
+            ))
+            for bp in cls.backend_config_params():
+                params.append(ConfigParam(
+                    key=f"{name}.{bp.key}", type=bp.type,
+                    description=bp.description, default=bp.default,
+                    restart_required=bp.restart_required,
+                    sensitive=bp.sensitive, choices=bp.choices,
+                    multiline=bp.multiline, backend_param=True,
+                ))
+        return params
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
         ttl = config.get("session_ttl_seconds")
@@ -180,20 +210,62 @@ class AuthService(Service):
 
     # --- ConfigActionProvider ---
     #
-    # Auth service hosts multiple backends (e.g. local + google). Expose
-    # the google backend's actions since local auth has nothing upstream
-    # to test. If no google backend is live, fall back to the registry
-    # class so the action still appears on the settings page.
+    # Auth hosts multiple live backends at once (local + any number of
+    # plugin-provided ones). Each backend's actions are surfaced with
+    # the key prefixed by ``<backend_name>.`` so they're routable back
+    # on invoke and so two backends can legitimately declare the same
+    # leaf name (e.g. ``test_connection``) without colliding.
 
     def config_actions(self) -> list[ConfigAction]:
-        google_backend = self._backends.get("google")
-        fallback_cls = AuthBackend.registered_backends().get("google")
-        return merge_backend_actions(google_backend, fallback_cls)
+        actions: list[ConfigAction] = []
+        for name, cls in AuthBackend.registered_backends().items():
+            source: BackendActionProvider | None = None
+            live = self._backends.get(name)
+            if isinstance(live, BackendActionProvider):
+                source = live
+            else:
+                try:
+                    probe = cls()
+                except Exception:
+                    continue
+                if isinstance(probe, BackendActionProvider):
+                    source = probe
+            if source is None:
+                continue
+            try:
+                raw = source.backend_actions()
+            except Exception:
+                continue
+            for a in raw:
+                actions.append(replace(
+                    a,
+                    key=f"{name}.{a.key}",
+                    backend_action=True,
+                    backend=name,
+                ))
+        return actions
 
     async def invoke_config_action(
         self, key: str, payload: dict[str, Any],
     ) -> ConfigActionResult:
-        return await invoke_backend_action(self._backends.get("google"), key, payload)
+        backend_name, _, action_key = key.partition(".")
+        if not backend_name or not action_key:
+            return ConfigActionResult(
+                status="error",
+                message=f"Malformed auth action key '{key}' — expected '<backend>.<action>'",
+            )
+        backend = self._backends.get(backend_name)
+        if backend is None:
+            return ConfigActionResult(
+                status="error",
+                message=f"Auth backend '{backend_name}' is not running — enable it first.",
+            )
+        if not isinstance(backend, BackendActionProvider):
+            return ConfigActionResult(
+                status="error",
+                message=f"Auth backend '{backend_name}' does not support actions.",
+            )
+        return await backend.invoke_backend_action(action_key, payload)
 
     # ---- Backend access ----
 

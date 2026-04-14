@@ -4,13 +4,11 @@ import json
 import logging
 import time
 import uuid
+from dataclasses import replace
 from typing import Any
 
-from gilbert.core.services._backend_actions import (
-    invoke_backend_action,
-    merge_backend_actions,
-)
 from gilbert.interfaces.configuration import (
+    BackendActionProvider,
     ConfigAction,
     ConfigActionResult,
     ConfigParam,
@@ -56,6 +54,11 @@ class UserService(Service):
         self._backend: UserBackend | None = None
         self._resolver: ServiceResolver | None = None
         self._last_sync: float = 0.0  # monotonic timestamp of last provider sync
+        # Live provider backends, keyed on ``backend_name`` from the
+        # registry (e.g. ``"google_directory"``). Populated in start()
+        # by discovering every registered UserProviderBackend whose
+        # per-backend ``enabled`` flag is set.
+        self._provider_backends: dict[str, UserProviderBackend] = {}
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
@@ -77,6 +80,8 @@ class UserService(Service):
         return self._backend
 
     async def start(self, resolver: ServiceResolver) -> None:
+        from gilbert.interfaces.configuration import ConfigurationReader
+
         storage_svc = resolver.require_capability("entity_storage")
         if not isinstance(storage_svc, StorageProvider):
             raise RuntimeError("entity_storage capability does not provide StorageProvider")
@@ -89,37 +94,32 @@ class UserService(Service):
         self._backend = backend
         self._resolver = resolver
 
-        # Load sync TTL from configuration if available
+        # Load config — sync TTL, allow_user_creation, and each
+        # registered provider backend's per-backend subsection.
+        users_section: dict[str, Any] = {}
         config_svc = resolver.get_capability("configuration")
-        if config_svc is not None:
-            from gilbert.interfaces.configuration import ConfigurationReader
+        if isinstance(config_svc, ConfigurationReader):
+            users_section = config_svc.get_section("users")
+            ttl = users_section.get("sync_ttl_seconds")
+            if ttl is not None:
+                self._sync_ttl = int(ttl)
 
-            if isinstance(config_svc, ConfigurationReader):
-                section = config_svc.get_section("users")
-                ttl = section.get("sync_ttl_seconds")
-                if ttl is not None:
-                    self._sync_ttl = int(ttl)
+            auth_section = config_svc.get_section("auth")
+            allow = auth_section.get("allow_user_creation")
+            if allow is not None:
+                self._allow_user_creation = bool(allow)
 
-                auth_section = config_svc.get_section("auth")
-                allow = auth_section.get("allow_user_creation")
-                if allow is not None:
-                    self._allow_user_creation = bool(allow)
-
-        # Initialize user provider backends from config
-        self._provider_backends: list[UserProviderBackend] = []
-        if config_svc is not None:
-            from gilbert.interfaces.configuration import ConfigurationReader
-
-            if isinstance(config_svc, ConfigurationReader):
-                section = config_svc.get_section("users")
-                gdir = section.get("google_directory", {})
-                if isinstance(gdir, dict) and gdir.get("enabled"):
-                    provider_cls = UserProviderBackend.registered_backends().get("google_directory")
-                    if provider_cls:
-                        provider = provider_cls()
-                        await provider.initialize(gdir)
-                        self._provider_backends.append(provider)
-                        logger.info("Google Directory user provider initialized")
+        # Discover and initialize every user provider whose
+        # ``<backend_name>.enabled`` flag is set. Adding a new provider
+        # plugin (LDAP, Okta, …) works with zero core changes.
+        for name, cls in UserProviderBackend.registered_backends().items():
+            sub = users_section.get(name, {})
+            if not isinstance(sub, dict) or not sub.get("enabled"):
+                continue
+            provider = cls()
+            await provider.initialize(sub)
+            self._provider_backends[name] = provider
+            logger.info("User provider '%s' initialized", name)
 
         await self._ensure_root_user()
 
@@ -167,7 +167,7 @@ class UserService(Service):
 
     def _get_providers(self) -> list[UserProviderBackend]:
         """Return all initialized user provider backends."""
-        return list(self._provider_backends)
+        return list(self._provider_backends.values())
 
     # ---- Sync from providers ----
 
@@ -346,34 +346,31 @@ class UserService(Service):
         return "Security"
 
     def config_params(self) -> list[ConfigParam]:
-        return [
+        params: list[ConfigParam] = [
             ConfigParam(
                 key="sync_ttl_seconds", type=ToolParameterType.INTEGER,
                 description="How often to refresh users from external providers (seconds).",
                 default=3600,
             ),
-            # Google Directory user provider
-            ConfigParam(
-                key="google_directory.enabled", type=ToolParameterType.BOOLEAN,
-                description="Enable Google Workspace directory sync.",
-                default=False, restart_required=True, backend_param=True,
-            ),
-            ConfigParam(
-                key="google_directory.sa_json", type=ToolParameterType.STRING,
-                description="Google service account key for directory sync (paste JSON).",
-                sensitive=True, restart_required=True, multiline=True, backend_param=True,
-            ),
-            ConfigParam(
-                key="google_directory.delegated_user", type=ToolParameterType.STRING,
-                description="Admin email to impersonate for directory API.",
-                restart_required=True, backend_param=True,
-            ),
-            ConfigParam(
-                key="google_directory.domain", type=ToolParameterType.STRING,
-                description="Google Workspace domain to sync users from.",
-                restart_required=True, backend_param=True,
-            ),
         ]
+        # Per-provider params: discovered from the registry so adding
+        # a new user-provider plugin (google_directory, ldap, okta, …)
+        # needs zero changes in core.
+        for name, cls in UserProviderBackend.registered_backends().items():
+            params.append(ConfigParam(
+                key=f"{name}.enabled", type=ToolParameterType.BOOLEAN,
+                description=f"Enable the {name} user provider.",
+                default=False, restart_required=True, backend_param=True,
+            ))
+            for bp in cls.backend_config_params():
+                params.append(ConfigParam(
+                    key=f"{name}.{bp.key}", type=bp.type,
+                    description=bp.description, default=bp.default,
+                    restart_required=bp.restart_required,
+                    sensitive=bp.sensitive, choices=bp.choices,
+                    multiline=bp.multiline, backend_param=True,
+                ))
+        return params
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
         ttl = config.get("sync_ttl_seconds")
@@ -382,28 +379,62 @@ class UserService(Service):
 
     # --- ConfigActionProvider ---
     #
-    # Exposes actions from the google_directory provider (the only
-    # pluggable user provider today). Falls back to the registered class
-    # when the provider isn't live yet.
+    # UserService can host multiple live provider backends at once,
+    # so each backend's actions are surfaced with the key prefixed by
+    # ``<backend_name>.`` — routable back on invoke, and two providers
+    # can legitimately declare the same leaf name (e.g.
+    # ``test_connection``) without colliding.
 
     def config_actions(self) -> list[ConfigAction]:
-        live: Any = None
-        for provider in getattr(self, "_provider_backends", []):
-            if getattr(provider, "provider_type", "") == "google":
-                live = provider
-                break
-        fallback_cls = UserProviderBackend.registered_backends().get("google_directory")
-        return merge_backend_actions(live, fallback_cls)
+        actions: list[ConfigAction] = []
+        for name, cls in UserProviderBackend.registered_backends().items():
+            source: BackendActionProvider | None = None
+            live = self._provider_backends.get(name)
+            if isinstance(live, BackendActionProvider):
+                source = live
+            else:
+                try:
+                    probe = cls()
+                except Exception:
+                    continue
+                if isinstance(probe, BackendActionProvider):
+                    source = probe
+            if source is None:
+                continue
+            try:
+                raw = source.backend_actions()
+            except Exception:
+                continue
+            for a in raw:
+                actions.append(replace(
+                    a,
+                    key=f"{name}.{a.key}",
+                    backend_action=True,
+                    backend=name,
+                ))
+        return actions
 
     async def invoke_config_action(
         self, key: str, payload: dict[str, Any],
     ) -> ConfigActionResult:
-        live: Any = None
-        for provider in getattr(self, "_provider_backends", []):
-            if getattr(provider, "provider_type", "") == "google":
-                live = provider
-                break
-        return await invoke_backend_action(live, key, payload)
+        backend_name, _, action_key = key.partition(".")
+        if not backend_name or not action_key:
+            return ConfigActionResult(
+                status="error",
+                message=f"Malformed provider action key '{key}' — expected '<backend>.<action>'",
+            )
+        provider = self._provider_backends.get(backend_name)
+        if provider is None:
+            return ConfigActionResult(
+                status="error",
+                message=f"User provider '{backend_name}' is not running — enable it first.",
+            )
+        if not isinstance(provider, BackendActionProvider):
+            return ConfigActionResult(
+                status="error",
+                message=f"User provider '{backend_name}' does not support actions.",
+            )
+        return await provider.invoke_backend_action(action_key, payload)
 
     # --- WebSocket RPC handlers ---
 

@@ -15,12 +15,12 @@ Multi-user support with local accounts, external provider syncing, role-based ac
 - `UserBackend` (ABC) — user CRUD, provider links, roles, remote user cache.
 
 ### Concrete Backends
-- `LocalAuthBackend` — email/password auth with argon2. Renders form on login page.
-- `GoogleAuthBackend` — Google OAuth redirect flow. Renders "Sign in with Google" button.
-- `GoogleDirectoryBackend` — reads users/groups from Google Admin Directory API. User provider backend.
+- `LocalAuthBackend` — bundled in core at `src/gilbert/integrations/local_auth.py`. Email/password auth with argon2. Renders form on login page. Satisfies `UserBackendAware` so AuthService can inject the user backend after `initialize()`.
+- `GoogleAuthBackend` — lives in `std-plugins/google/google_auth.py`. Google OAuth redirect flow. Renders "Sign in with Google" button. Satisfies `TunnelAwareAuthBackend` so AuthService injects the tunnel provider for public callback URLs.
+- `GoogleDirectoryBackend` — lives in `std-plugins/google/google_directory.py`. Reads users/groups from Google Admin Directory API. User provider backend.
 
 ### Services
-- `UserService` — capability: `users`, `ai_tools`. Always registered. Wraps `StorageUserBackend`. Creates root user on startup. Owns `UserProviderBackend` instances and syncs on demand during `list_users()`.
+- `UserService` — capability: `users`, `ai_tools`. Always registered. Wraps `StorageUserBackend`. Creates root user on startup. Owns `UserProviderBackend` instances (as a dict keyed on `backend_name`) and syncs on demand during `list_users()`.
 - `AuthService` — capability: `authentication`. Owns `AuthBackend` instances internally (no separate services per backend). Manages sessions in `auth_sessions` collection. Methods: `authenticate()`, `handle_callback()`, `get_login_methods()`, `validate_session()`, `invalidate_session()`.
 
 ### Storage
@@ -33,16 +33,28 @@ Multi-user support with local accounts, external provider syncing, role-based ac
 - Routes: GET `/auth/login`, POST `/auth/login/local`, GET `/auth/login/google/start`, GET `/auth/login/google/callback`, POST `/auth/logout`, GET `/auth/me`.
 - Logout button in nav header.
 
-### Configuration
-Auth and user config is stored in entity storage (not YAML). Auth backends declare their own `backend_config_params()` which are merged into the auth service's config params. Credentials (OAuth client ID/secret, API keys) are inline in backend settings, not referenced by name.
+### Configuration — Generic Backend Discovery
+Auth and user config is stored in entity storage (not YAML).
+
+Neither `AuthService` nor `UserService` hard-codes any backend name. Both services iterate their respective backend registry at `start()` and `config_params()` time:
+
+- **`config_params()`** appends service-level params, then for each registered backend emits `<backend_name>.enabled` plus a copy of each param from `cls.backend_config_params()` namespaced as `<backend_name>.<key>` with `backend_param=True`. `LocalAuthBackend` is the only exception — it's always on, so AuthService skips it in the loop (no `enabled` toggle, no config subsection).
+
+- **`start()`** iterates the registry and enables any non-local backend whose `<backend_name>.enabled` flag is set, initializing it with its own subsection. Capability injection is protocol-driven: `isinstance(instance, UserBackendAware)` → inject user backend (local auth); `isinstance(instance, TunnelAwareAuthBackend)` → inject tunnel provider (OAuth).
+
+- **`config_actions()`** iterates the registry, using the live instance if present or a fresh probe otherwise, and prefixes every action key with `<backend_name>.` so the UI can disambiguate and `invoke_config_action()` can route back by splitting on the first `.`.
+
+Adding a new auth backend or user provider plugin requires zero changes in `src/gilbert/core/services/auth.py` or `users.py` — the service discovers it via the registry.
+
+**Legacy migration:** pre-refactor, `auth.google_oauth.*` was the hard-coded config section for Google OAuth. `AuthService._migrate_legacy_keys()` runs once on startup, copies any surviving values from `auth.google_oauth.*` into `auth.google.*` (matching `GoogleAuthBackend.backend_name`), and drops the old subsection. Users don't need to re-enter credentials.
 
 ## Related
-- `src/gilbert/interfaces/auth.py` — UserContext, AuthInfo, AuthBackend, LoginMethod
+- `src/gilbert/interfaces/auth.py` — UserContext, AuthInfo, AuthBackend, LoginMethod, `UserBackendAware` and `TunnelAwareAuthBackend` runtime-checkable protocols
 - `src/gilbert/interfaces/users.py` — UserBackend, UserProviderBackend, ExternalUser
-- `src/gilbert/core/services/auth.py` — AuthService (session mgmt, owns auth backends)
+- `src/gilbert/core/services/auth.py` — AuthService (session mgmt, owns auth backends, legacy key migration)
 - `src/gilbert/core/services/users.py` — UserService (owns user provider backends)
-- `src/gilbert/integrations/local_auth.py` — LocalAuthBackend
-- `src/gilbert/integrations/google_auth.py` — GoogleAuthBackend
-- `src/gilbert/integrations/google_directory.py` — GoogleDirectoryBackend
+- `src/gilbert/integrations/local_auth.py` — LocalAuthBackend (bundled in core)
+- `std-plugins/google/google_auth.py` — GoogleAuthBackend
+- `std-plugins/google/google_directory.py` — GoogleDirectoryBackend
 - `src/gilbert/web/auth.py` — middleware and dependencies
 - `src/gilbert/web/routes/auth.py` — auth routes
