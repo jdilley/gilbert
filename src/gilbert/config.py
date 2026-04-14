@@ -163,28 +163,18 @@ class PresenceConfig(BaseConfig):
 
 
 
-class KnowledgeLocalConfig(BaseConfig):
-    """Local filesystem knowledge backend configuration."""
-
-    enabled: bool = False
-    name: str = "local"
-    path: str = ""
-
-
-class KnowledgeGDriveConfig(BaseConfig):
-    """Google Drive knowledge backend configuration."""
-
-    enabled: bool = False
-    name: str = "gdrive"
-    folder_id: str = ""
-
-
 class KnowledgeConfig(BaseConfig):
-    """Document knowledge store configuration."""
+    """Document knowledge store configuration.
+
+    Per-backend sub-sections (``local``, ``gdrive``, …) are not
+    declared here — ``KnowledgeService`` discovers document backends
+    from the ``DocumentBackend`` registry and reads each backend's
+    config by dynamic section lookup. ``BaseConfig`` has
+    ``extra="allow"`` so any backend sub-sections in the raw YAML
+    or entity store pass through unchanged.
+    """
 
     enabled: bool = False
-    local: KnowledgeLocalConfig = KnowledgeLocalConfig()
-    gdrive: KnowledgeGDriveConfig = KnowledgeGDriveConfig()
     sync_interval_seconds: int = 300
     chunk_size: int = 800
     chunk_overlap: int = 200

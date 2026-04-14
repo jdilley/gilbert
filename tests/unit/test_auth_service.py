@@ -7,7 +7,12 @@ import pytest
 from gilbert.config import AuthConfig
 from gilbert.core.services.auth import AuthService
 from gilbert.core.services.users import UserService
-from gilbert.interfaces.auth import AuthBackend, AuthInfo, LoginMethod
+from gilbert.interfaces.auth import (
+    AuthBackend,
+    AuthInfo,
+    LoginMethod,
+    OAuthLoginBackend,
+)
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.storage import StorageBackend
 
@@ -257,3 +262,37 @@ async def test_authenticate_does_not_link_root(
     root = await user_service.get_user("root")
     assert root is not None
     assert root["provider_links"] == []
+
+
+# ---- OAuthLoginBackend protocol ----
+#
+# The generic /auth/login/<provider_type>/start and .../callback routes
+# in web/routes/auth.py use ``isinstance(backend, OAuthLoginBackend)``
+# to decide whether a backend can drive a redirect-based login. A
+# backend that defines the two structural methods must satisfy the
+# protocol; one missing either must not.
+
+
+class _StubOAuthBackend:
+    """Minimal backend that structurally satisfies OAuthLoginBackend."""
+
+    def get_callback_url(self, request_base_url: str) -> str:
+        return f"{request_base_url}/cb"
+
+    def get_authorization_url(self, redirect_uri: str, state: str) -> str:
+        return f"https://provider/auth?r={redirect_uri}&s={state}"
+
+
+class _StubPartialBackend:
+    """Only has ``get_callback_url`` — should NOT satisfy the protocol."""
+
+    def get_callback_url(self, request_base_url: str) -> str:
+        return ""
+
+
+def test_oauth_login_backend_protocol_satisfied() -> None:
+    assert isinstance(_StubOAuthBackend(), OAuthLoginBackend)
+
+
+def test_oauth_login_backend_protocol_not_satisfied_when_incomplete() -> None:
+    assert not isinstance(_StubPartialBackend(), OAuthLoginBackend)

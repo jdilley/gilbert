@@ -124,7 +124,7 @@ class UserService(Service):
         await self._ensure_root_user()
 
     async def _ensure_root_user(self) -> None:
-        """Create or update the root user on every startup."""
+        """Create the root user if missing, or sync its password hash."""
         assert self._backend is not None
         existing = await self._backend.get_user(_ROOT_USER_ID)
         if existing is None:
@@ -142,26 +142,16 @@ class UserService(Service):
             )
             return
 
-        # Heal identity fields on existing root users. The username column
-        # was added after some installations created their root user, so
-        # older rows have ``username=None`` and LocalAuthBackend can't look
-        # them up by username. Same guard for is_root and the admin role.
-        updates: dict[str, Any] = {}
-        if not existing.get("username"):
-            updates["username"] = _ROOT_USERNAME
-        if not existing.get("is_root"):
-            updates["is_root"] = True
-        if "admin" not in set(existing.get("roles", [])):
-            updates["roles"] = sorted(set(existing.get("roles", [])) | {"admin"})
-        # Update password hash if it changed in config.
+        # Keep the root password in sync with what's in config.
         if (
             self._root_password_hash
             and existing.get("password_hash") != self._root_password_hash
         ):
-            updates["password_hash"] = self._root_password_hash
             logger.info("Updating root user password hash")
-        if updates:
-            await self._backend.update_user(_ROOT_USER_ID, updates)
+            await self._backend.update_user(
+                _ROOT_USER_ID,
+                {"password_hash": self._root_password_hash},
+            )
 
     # ---- Provider discovery ----
 

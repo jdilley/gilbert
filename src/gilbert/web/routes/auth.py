@@ -1,5 +1,6 @@
 """Auth routes — login page, provider-specific login, OAuth callbacks, logout."""
 
+import base64
 import logging
 import urllib.parse
 from typing import Any
@@ -8,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from starlette.responses import JSONResponse, RedirectResponse
 
 from gilbert.core.app import Gilbert
-from gilbert.interfaces.auth import UserContext
+from gilbert.interfaces.auth import OAuthLoginBackend, UserContext
 from gilbert.web.auth import get_user_context
 
 logger = logging.getLogger(__name__)
@@ -54,75 +55,89 @@ async def login_local(request: Request) -> Any:
     return _build_auth_response(user_ctx, is_form)
 
 
-# ---- Google OAuth ----
+# ---- Generic external (OAuth-shaped) login flow ----
+#
+# Any AuthBackend that satisfies the ``OAuthLoginBackend`` protocol
+# lights up these routes automatically — the path's ``<provider_type>``
+# segment is the backend's registered name. Core never mentions any
+# specific provider; plugins bring their own.
 
 
-def _get_google_provider(request: Request) -> Any:
-    """Get the Google auth backend or raise 503."""
+def _get_oauth_backend(request: Request, provider_type: str) -> Any:
+    """Resolve an OAuth-shaped auth backend by name, or raise 503."""
     auth_svc = _get_auth_service(request)
-    backend = auth_svc.get_backend("google")
-    if backend is None:
-        raise HTTPException(status_code=503, detail="Google auth not available")
+    backend = auth_svc.get_backend(provider_type)
+    if backend is None or not isinstance(backend, OAuthLoginBackend):
+        raise HTTPException(
+            status_code=503,
+            detail=f"{provider_type} login is not available",
+        )
     return backend
 
 
-def _get_google_callback_url(request: Request, provider: Any) -> str:
-    """Get the callback URL — tunnel if available, otherwise local."""
-    local_url = str(request.base_url).rstrip("/")
-    return provider.get_callback_url(local_url)
+def _login_error_redirect(local_origin: str, message: str) -> RedirectResponse:
+    """Redirect back to the login page with an error query string."""
+    quoted = urllib.parse.quote(message)
+    base = local_origin if local_origin else ""
+    return RedirectResponse(
+        url=f"{base}/auth/login?error={quoted}",
+        status_code=303,
+    )
 
 
-@router.get("/login/google/start")
-async def google_oauth_start(request: Request) -> Any:
-    """Redirect to Google's OAuth consent screen."""
-    import base64
+@router.get("/login/{provider_type}/start")
+async def external_login_start(provider_type: str, request: Request) -> Any:
+    """Kick off a redirect-based external login for ``provider_type``.
 
-    provider = _get_google_provider(request)
-    redirect_uri = _get_google_callback_url(request, provider)
-
-    # Encode the local origin so the callback can redirect back to it.
+    Looks up the auth backend by name, asks it for the authorization
+    URL, and redirects the browser there. The current browser origin
+    is stashed in the ``state`` parameter so the callback can hand
+    the session back to the local domain if the OAuth round-trip
+    went through a tunnel.
+    """
+    backend = _get_oauth_backend(request, provider_type)
     local_origin = str(request.base_url).rstrip("/")
+    redirect_uri = backend.get_callback_url(local_origin)
     state = base64.urlsafe_b64encode(local_origin.encode()).decode()
-
-    url = provider.get_authorization_url(redirect_uri, state)
+    url = backend.get_authorization_url(redirect_uri, state)
     return RedirectResponse(url=url)
 
 
-@router.get("/login/google/callback")
-async def google_oauth_callback(request: Request) -> Any:
-    """Handle the Google OAuth callback."""
-    import base64
-
+@router.get("/login/{provider_type}/callback")
+async def external_login_callback(provider_type: str, request: Request) -> Any:
+    """Handle the callback from a redirect-based external login."""
     auth_svc = _get_auth_service(request)
-    provider = _get_google_provider(request)
+    backend = _get_oauth_backend(request, provider_type)
 
-    # Decode the local origin from state.
-    state = request.query_params.get("state", "")
+    # Decode the local origin from ``state`` — set by ``/start``.
+    raw_state = request.query_params.get("state", "")
     try:
-        local_origin = base64.urlsafe_b64decode(state.encode()).decode() if state else ""
+        local_origin = (
+            base64.urlsafe_b64decode(raw_state.encode()).decode()
+            if raw_state else ""
+        )
     except Exception:
         local_origin = ""
 
     error = request.query_params.get("error")
     if error:
-        login_url = f"{local_origin}/auth/login?error={urllib.parse.quote(error)}" if local_origin else f"/auth/login?error={urllib.parse.quote(error)}"
-        return RedirectResponse(url=login_url, status_code=303)
+        return _login_error_redirect(local_origin, error)
 
     code = request.query_params.get("code", "")
     if not code:
-        login_url = f"{local_origin}/auth/login?error=Missing+authorization+code" if local_origin else "/auth/login?error=Missing+authorization+code"
-        return RedirectResponse(url=login_url, status_code=303)
+        return _login_error_redirect(local_origin, "Missing authorization code")
 
-    redirect_uri = _get_google_callback_url(request, provider)
+    redirect_uri = backend.get_callback_url(str(request.base_url).rstrip("/"))
 
     user_ctx = await auth_svc.handle_callback(
-        "google",
+        provider_type,
         {"code": code, "redirect_uri": redirect_uri},
     )
 
     if user_ctx is None:
-        login_url = f"{local_origin}/auth/login?error=Google+authentication+failed" if local_origin else "/auth/login?error=Google+authentication+failed"
-        return RedirectResponse(url=login_url, status_code=303)
+        return _login_error_redirect(
+            local_origin, f"{provider_type} authentication failed",
+        )
 
     if local_origin and user_ctx.session_id:
         # Redirect to local origin with session token so we can set the

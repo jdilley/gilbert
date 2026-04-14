@@ -88,7 +88,6 @@ class AuthService(Service):
         auth_section: dict[str, Any] = {}
         config_svc = resolver.get_capability("configuration")
         if isinstance(config_svc, ConfigurationReader):
-            await self._migrate_legacy_keys(config_svc)
             auth_section = config_svc.get_section("auth")
 
         tunnel = resolver.get_capability("tunnel")
@@ -120,30 +119,6 @@ class AuthService(Service):
             len(self._backends),
             ", ".join(self._backends.keys()),
         )
-
-    async def _migrate_legacy_keys(self, config_svc: Any) -> None:
-        """One-time rename of legacy config subsections.
-
-        The pre-refactor auth service stored Google OAuth under
-        ``auth.google_oauth.*`` because core hard-coded that namespace.
-        Post-refactor, each backend's config lives under its
-        ``backend_name`` — which for Google is just ``google``. Copy
-        any surviving legacy values over and drop the old key so
-        existing installs keep their credentials without manual action.
-        """
-        section = config_svc.get_section("auth")
-        legacy = section.get("google_oauth")
-        if not isinstance(legacy, dict) or not legacy:
-            return
-        # Don't clobber a newer "google" section if one already exists.
-        existing = section.get("google")
-        if isinstance(existing, dict) and existing:
-            await config_svc.set("auth.google_oauth", None)
-            return
-        for key, value in legacy.items():
-            await config_svc.set(f"auth.google.{key}", value)
-        await config_svc.set("auth.google_oauth", None)
-        logger.info("Migrated legacy auth.google_oauth.* config to auth.google.*")
 
     async def stop(self) -> None:
         pass

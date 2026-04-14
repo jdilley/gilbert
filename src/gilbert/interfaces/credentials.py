@@ -10,7 +10,6 @@ class CredentialType(StrEnum):
     API_KEY = "api_key"
     API_KEY_PAIR = "api_key_pair"
     USERNAME_PASSWORD = "username_password"
-    GOOGLE_SERVICE_ACCOUNT = "google_service_account"
 
 
 class ApiKeyCredential(BaseModel):
@@ -36,17 +35,7 @@ class UsernamePasswordCredential(BaseModel):
     password: str
 
 
-class GoogleServiceAccountCredential(BaseModel):
-    """A Google service account credential referencing a JSON key file."""
-
-    type: Literal[CredentialType.GOOGLE_SERVICE_ACCOUNT] = (
-        CredentialType.GOOGLE_SERVICE_ACCOUNT
-    )
-    service_account_file: str
-    scopes: list[str] = []
-
-
 AnyCredential = Annotated[
-    Union[ApiKeyCredential, ApiKeyPairCredential, UsernamePasswordCredential, GoogleServiceAccountCredential],
+    Union[ApiKeyCredential, ApiKeyPairCredential, UsernamePasswordCredential],
     Field(discriminator="type"),
 ]

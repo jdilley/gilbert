@@ -125,10 +125,14 @@ class TestConfig:
         config = GilbertConfig.model_validate({})
         assert config.knowledge.enabled is False
         assert config.knowledge.chunk_size == 800
-        assert config.knowledge.local.enabled is False
-        assert config.knowledge.gdrive.enabled is False
 
     def test_knowledge_full(self) -> None:
+        # Per-backend sub-sections (``local``, ``gdrive``, …) are not
+        # typed on the core model — ``KnowledgeService`` reads them by
+        # dynamic section lookup against the DocumentBackend registry.
+        # BaseConfig has ``extra="allow"``, so they pass through as
+        # raw dicts on ``model_extra`` and the service parses them at
+        # runtime.
         raw = {
             "knowledge": {
                 "enabled": True,
@@ -139,9 +143,10 @@ class TestConfig:
         }
         config = GilbertConfig.model_validate(raw)
         assert config.knowledge.enabled is True
-        assert config.knowledge.local.enabled is True
-        assert config.knowledge.local.path == "/tmp/docs"
-        assert config.knowledge.gdrive.folder_id == "abc123"
+        assert config.knowledge.sync_interval_seconds == 120
+        extra = config.knowledge.model_extra or {}
+        assert extra.get("local", {}).get("path") == "/tmp/docs"
+        assert extra.get("gdrive", {}).get("folder_id") == "abc123"
 
 
 # --- SearchResult / SearchResponse ---

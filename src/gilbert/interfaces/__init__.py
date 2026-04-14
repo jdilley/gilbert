@@ -28,7 +28,6 @@ from gilbert.interfaces.credentials import (
     AnyCredential,
     ApiKeyCredential,
     CredentialType,
-    GoogleServiceAccountCredential,
     UsernamePasswordCredential,
 )
 from gilbert.interfaces.events import Event, EventBus, EventHandler
@@ -80,7 +79,6 @@ __all__ = [
     "EventHandler",
     "Filter",
     "FilterOp",
-    "GoogleServiceAccountCredential",
     "IndexDefinition",
     "Message",
     "MessageRole",

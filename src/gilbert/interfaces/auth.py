@@ -151,6 +151,38 @@ class TunnelAwareAuthBackend(Protocol):
         ...
 
 
+@runtime_checkable
+class OAuthLoginBackend(Protocol):
+    """Protocol for auth backends that drive a redirect-based external
+    login flow (OAuth2 authorization code grant, or anything shaped
+    the same way: an authorization URL, a callback URL, and a code
+    that the backend exchanges for user identity).
+
+    The generic ``/auth/login/<provider_type>/start`` and
+    ``/auth/login/<provider_type>/callback`` routes in
+    ``web/routes/auth.py`` use this protocol to dispatch — core knows
+    nothing about any specific provider. Plugins that implement OAuth
+    auth (Google, GitHub, Okta, …) just satisfy this protocol and
+    their flow lights up automatically.
+    """
+
+    def get_callback_url(self, request_base_url: str) -> str:
+        """Return the URL the external service should redirect back to.
+
+        Implementations typically prefer the public tunnel URL (for
+        reachability from the OAuth provider's servers) and fall back
+        to ``request_base_url`` — the origin of the current browser
+        request — when no tunnel is available.
+        """
+        ...
+
+    def get_authorization_url(self, redirect_uri: str, state: str) -> str:
+        """Return the external service's authorization URL for the
+        browser to be redirected to. ``state`` is an opaque token
+        that must round-trip back unchanged."""
+        ...
+
+
 @dataclass
 class LoginMethod:
     """Describes a login option to render on the login page.
