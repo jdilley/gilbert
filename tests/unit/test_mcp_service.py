@@ -8,6 +8,7 @@ slug-uniqueness lookups.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from typing import Any
 
@@ -1346,3 +1347,257 @@ class TestMarshalling:
         assert restored.allowed_roles == original.allowed_roles
         assert restored.scope == original.scope
         assert restored.command == original.command
+
+
+# ── browser bridge (session-ephemeral) ─────────────────────────────
+
+
+class FakeBridgeConn:
+    """A fake ``WsConnectionBase`` that pipes ``call_client`` to a stub
+    browser, records close callbacks, and exposes a ``user_ctx``."""
+
+    def __init__(self, user_ctx: UserContext) -> None:
+        self.user_ctx = user_ctx
+        self.user_level = 100
+        self.shared_conv_ids: set[str] = set()
+        self.queue: Any = None
+        self.manager: Any = None
+        self._close_callbacks: list[Any] = []
+        # Pluggable responder — the test sets this to shape replies.
+        self.responder: Any = None
+        self.call_log: list[dict[str, Any]] = []
+
+    @property
+    def user_id(self) -> str:
+        return self.user_ctx.user_id
+
+    def enqueue(self, msg: dict[str, Any]) -> None:
+        raise AssertionError("unused in bridge tests")
+
+    async def call_client(
+        self, frame: dict[str, Any], timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        self.call_log.append(frame)
+        if self.responder is None:
+            raise RuntimeError("no responder configured")
+        return await self.responder(frame)
+
+    def cancel_pending_outbound(self) -> None:
+        pass
+
+    def add_close_callback(self, callback: Any) -> None:
+        self._close_callbacks.append(callback)
+
+    def run_close_callbacks(self) -> None:
+        for cb in self._close_callbacks:
+            cb()
+        self._close_callbacks.clear()
+
+
+def _bridge_reply(tools: list[dict[str, Any]] | None = None,
+                  tool_results: dict[str, dict[str, Any]] | None = None) -> Any:
+    """Build a responder that answers tools/list and tools/call."""
+    tool_results = tool_results or {}
+
+    async def responder(frame: dict[str, Any]) -> dict[str, Any]:
+        method = frame.get("method")
+        if method == "tools/list":
+            return {"ok": True, "result": {"tools": tools or []}}
+        if method == "tools/call":
+            name = frame.get("params", {}).get("name", "")
+            if name in tool_results:
+                return {"ok": True, "result": tool_results[name]}
+            return {
+                "ok": True,
+                "result": {
+                    "content": [{"type": "text", "text": f"called {name}"}],
+                    "isError": False,
+                },
+            }
+        return {"ok": False, "error": f"unknown method {method}"}
+
+    return responder
+
+
+class TestBrowserBridge:
+    async def test_announce_registers_session_tools(
+        self, svc: MCPService, alice: UserContext,
+    ) -> None:
+        conn = FakeBridgeConn(alice)
+        conn.responder = _bridge_reply(
+            tools=[
+                {
+                    "name": "read_file",
+                    "description": "Read a file",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    },
+                },
+            ],
+        )
+
+        result = await svc._ws_bridge_announce(
+            conn,
+            {"id": "a1", "servers": [{"slug": "fs", "name": "Filesystem"}]},
+        )
+        assert result is not None
+        assert result["type"] == "mcp.bridge.announce.result"
+        assert result["results"] == [
+            {"slug": "fs", "ok": True, "tool_count": 1},
+        ]
+
+        # Session registry populated, conn registered as owner, close
+        # callback wired in.
+        assert "fs" in svc._session_clients["alice"]
+        assert svc._session_conn["alice"] is conn
+        assert len(conn._close_callbacks) == 1
+
+        # get_tools sees the session tool, nobody else does.
+        tools = svc.get_tools(alice)
+        assert [t.name for t in tools] == ["mcp__fs__read_file"]
+        other = UserContext(
+            user_id="carol", email="", display_name="Carol",
+            roles=frozenset({"user"}),
+        )
+        assert svc.get_tools(other) == []
+
+    async def test_execute_session_tool_round_trips(
+        self, svc: MCPService, alice: UserContext,
+    ) -> None:
+        conn = FakeBridgeConn(alice)
+        conn.responder = _bridge_reply(
+            tools=[{"name": "echo", "description": "", "inputSchema": {}}],
+            tool_results={
+                "echo": {
+                    "content": [{"type": "text", "text": "hi!"}],
+                    "isError": False,
+                },
+            },
+        )
+        await svc._ws_bridge_announce(
+            conn, {"id": "a1", "servers": [{"slug": "tool", "name": "Tool"}]},
+        )
+        set_current_user(alice)
+        result = await svc.execute_tool(
+            "mcp__tool__echo", {"message": "hello"},
+        )
+        assert "hi!" in result
+        # Two bridge calls: tools/list (announce probe) + tools/call.
+        methods = [c["method"] for c in conn.call_log]
+        assert methods == ["tools/list", "tools/call"]
+        assert conn.call_log[1]["params"] == {
+            "name": "echo", "arguments": {"message": "hello"},
+        }
+
+    async def test_disconnect_tears_down_session(
+        self, svc: MCPService, alice: UserContext,
+    ) -> None:
+        conn = FakeBridgeConn(alice)
+        conn.responder = _bridge_reply(
+            tools=[{"name": "t", "description": "", "inputSchema": {}}],
+        )
+        await svc._ws_bridge_announce(
+            conn, {"id": "a", "servers": [{"slug": "fs", "name": "FS"}]},
+        )
+        assert svc.get_tools(alice)
+
+        # Simulate disconnect: the close callback should drop the session.
+        conn.run_close_callbacks()
+        # Give any scheduled teardown tasks a chance to run.
+        await asyncio.sleep(0)
+        assert "alice" not in svc._session_clients
+        assert "alice" not in svc._session_conn
+        assert svc.get_tools(alice) == []
+
+    async def test_second_tab_replaces_first(
+        self, svc: MCPService, alice: UserContext,
+    ) -> None:
+        tab_one = FakeBridgeConn(alice)
+        tab_one.responder = _bridge_reply(
+            tools=[{"name": "a", "description": "", "inputSchema": {}}],
+        )
+        await svc._ws_bridge_announce(
+            tab_one, {"id": "1", "servers": [{"slug": "fs", "name": "FS"}]},
+        )
+
+        tab_two = FakeBridgeConn(alice)
+        tab_two.responder = _bridge_reply(
+            tools=[{"name": "b", "description": "", "inputSchema": {}}],
+        )
+        await svc._ws_bridge_announce(
+            tab_two, {"id": "2", "servers": [{"slug": "fs", "name": "FS"}]},
+        )
+
+        # Session now belongs to tab_two with its own tool set.
+        assert svc._session_conn["alice"] is tab_two
+        tools = [t.name for t in svc.get_tools(alice)]
+        assert tools == ["mcp__fs__b"]
+
+        # Tab one disconnecting late must NOT clobber the live session.
+        tab_one.run_close_callbacks()
+        await asyncio.sleep(0)
+        assert svc._session_conn.get("alice") is tab_two
+        assert [t.name for t in svc.get_tools(alice)] == ["mcp__fs__b"]
+
+        # Tab two disconnecting does clean up.
+        tab_two.run_close_callbacks()
+        await asyncio.sleep(0)
+        assert "alice" not in svc._session_conn
+
+    async def test_slug_collision_with_persisted_rejected(
+        self, svc: MCPService, alice: UserContext,
+        register_fake_backend: type[FakeMCPBackend],
+    ) -> None:
+        # Install a persisted shared record visible to alice.
+        shared = make_record(
+            id="shared", slug="fs", owner_id="root",
+            scope="shared", allowed_roles=("user",),
+        )
+        _install_client(svc, shared)
+
+        conn = FakeBridgeConn(alice)
+        conn.responder = _bridge_reply(
+            tools=[{"name": "read", "description": "", "inputSchema": {}}],
+        )
+        result = await svc._ws_bridge_announce(
+            conn, {"id": "a", "servers": [{"slug": "fs", "name": "Mine"}]},
+        )
+        assert result is not None
+        assert result["results"][0]["ok"] is False
+        assert "conflicts" in result["results"][0]["error"]
+        # Session was opened (owner set) but fs was rejected.
+        assert svc._session_conn.get("alice") is conn
+        assert "fs" not in svc._session_clients.get("alice", {})
+
+    async def test_invalid_slug_rejected(
+        self, svc: MCPService, alice: UserContext,
+    ) -> None:
+        conn = FakeBridgeConn(alice)
+        result = await svc._ws_bridge_announce(
+            conn,
+            {"id": "a", "servers": [{"slug": "Not Valid!", "name": "Bad"}]},
+        )
+        assert result is not None
+        assert result["results"][0]["ok"] is False
+        assert "invalid slug" in result["results"][0]["error"]
+        # No responder was needed because validation failed pre-probe.
+        assert conn.call_log == []
+
+    async def test_probe_failure_surfaced(
+        self, svc: MCPService, alice: UserContext,
+    ) -> None:
+        conn = FakeBridgeConn(alice)
+
+        async def responder(frame: dict[str, Any]) -> dict[str, Any]:
+            return {"ok": False, "error": "localhost:9999 unreachable"}
+
+        conn.responder = responder
+        result = await svc._ws_bridge_announce(
+            conn, {"id": "a", "servers": [{"slug": "fs", "name": "FS"}]},
+        )
+        assert result is not None
+        assert result["results"][0]["ok"] is False
+        assert "unreachable" in result["results"][0]["error"]
+        assert "fs" not in svc._session_clients.get("alice", {})

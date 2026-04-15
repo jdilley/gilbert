@@ -23,6 +23,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import gilbert.integrations.mcp_browser  # noqa: F401
 import gilbert.integrations.mcp_http  # noqa: F401
 
 # Side-effect imports: trigger backend registration on MCPBackend._registry
@@ -35,6 +36,7 @@ from gilbert.core.services.mcp_oauth import (
     OAuthFlowManager,
     auth_for_stored_tokens,
 )
+from gilbert.integrations.mcp_browser import BrowserMCPBackend
 from gilbert.integrations.mcp_http import _RemoteMCPBackend
 from gilbert.interfaces.auth import AccessControlProvider, UserContext
 from gilbert.interfaces.configuration import ConfigParam, ConfigurationReader
@@ -179,6 +181,24 @@ class MCPService(Service):
         rebuilt on each record change so budget parameters stay in
         sync with the stored config. In-memory only — budgets reset
         on process restart."""
+        self._session_clients: dict[str, dict[str, _ClientEntry]] = {}
+        """Ephemeral per-user MCP clients fed by a browser bridge.
+
+        Keyed by ``user_id → slug → entry``. Populated when a user's
+        WebSocket sends ``mcp.bridge.announce`` and torn down when
+        the owning connection closes. Never touches entity storage.
+        Visibility is strictly private to the owning user — admins
+        do not see another user's browser-hosted MCP servers.
+        """
+        self._session_conn: dict[str, Any] = {}
+        """The WS connection that currently owns each user's session.
+
+        If a second tab announces for the same user, the old session
+        is torn down immediately (last-tab-wins). Disconnect cleanup
+        only fires if the disconnecting connection is still the
+        registered owner, so a stale teardown from a previous tab
+        can't wipe the active session.
+        """
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
@@ -257,6 +277,12 @@ class MCPService(Service):
         for slug, err in errors:
             logger.warning("MCP backend %s close failed: %s", slug, err)
         self._clients.clear()
+        # Tear down any remaining browser-hosted sessions. On a clean
+        # shutdown these are normally already gone (their owning WS
+        # connections closed first), but a hard stop may leave entries
+        # behind — close them explicitly so the registry is empty.
+        for user_id in list(self._session_clients.keys()):
+            self._teardown_session(user_id)
 
     async def _load_and_autostart(self) -> None:
         assert self._storage is not None
@@ -656,10 +682,15 @@ class MCPService(Service):
         return False
 
     def _visible_clients(self, user_ctx: UserContext) -> list[_ClientEntry]:
-        return [
+        out = [
             entry for entry in self._clients.values()
             if entry.connected and self._can_see_server(entry.record, user_ctx)
         ]
+        # Browser-hosted session entries are strictly private to the
+        # owning user — never shown to anyone else, not even admins.
+        session = self._session_clients.get(user_ctx.user_id) or {}
+        out.extend(entry for entry in session.values() if entry.connected)
+        return out
 
     # ── ToolProvider ──────────────────────────────────────────────────
 
@@ -727,6 +758,14 @@ class MCPService(Service):
         return slug, tool
 
     def _find_client_for(self, slug: str, user_ctx: UserContext) -> _ClientEntry | None:
+        # Session entries are checked first: they're user-private, so a
+        # hit here belongs to the caller by construction. The announce
+        # handler also rejects slugs that would collide with a visible
+        # persisted server, so there's no ambiguity to resolve.
+        session = self._session_clients.get(user_ctx.user_id) or {}
+        entry = session.get(slug)
+        if entry is not None:
+            return entry
         for entry in self._clients.values():
             if entry.record.slug != slug:
                 continue
@@ -928,6 +967,7 @@ class MCPService(Service):
             "mcp.servers.resources.read": self._ws_resources_read,
             "mcp.servers.prompts.list": self._ws_prompts_list,
             "mcp.servers.prompts.get": self._ws_prompts_get,
+            "mcp.bridge.announce": self._ws_bridge_announce,
         }
 
     # --- handlers ----------------------------------------------------
@@ -1707,6 +1747,180 @@ class MCPService(Service):
             stopReason=stop_reason,
         )
 
+    # ── Browser bridge (session-ephemeral MCP servers) ────────────────
+
+    async def _ws_bridge_announce(
+        self, conn: WsConnectionBase, frame: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Register a set of browser-hosted MCP servers for this session.
+
+        The frame shape is ``{servers: [{slug, name}, ...]}``. For each
+        entry we build an in-memory ``MCPServerRecord``, wrap it in a
+        ``BrowserMCPBackend`` bound to the calling connection, probe
+        the browser with a ``tools/list`` round-trip to validate the
+        local server is reachable, and register the entry in
+        ``_session_clients[user_id]``.
+
+        Returns a per-slug status list so the UI can surface which
+        servers came up, which were rejected for collisions, and which
+        failed the initial probe.
+        """
+        if not self._enabled:
+            return _ws_error(frame, "MCP service is disabled")
+        servers_raw = frame.get("servers") or []
+        if not isinstance(servers_raw, list):
+            return _ws_error(frame, "'servers' must be a list")
+
+        user_ctx = conn.user_ctx
+        user_id = user_ctx.user_id
+
+        # Replace any existing session for this user. If the old
+        # session is owned by a different conn, tear it down so the
+        # newest tab wins. If it's owned by the same conn (re-announce
+        # from a single tab after the user edits their local config),
+        # same behaviour — start fresh.
+        self._teardown_session(user_id)
+        self._session_conn[user_id] = conn
+        conn.add_close_callback(self._make_session_close_callback(user_id, conn))
+
+        results: list[dict[str, Any]] = []
+        for item in servers_raw:
+            if not isinstance(item, dict):
+                results.append(
+                    {"ok": False, "error": "server entry must be an object"}
+                )
+                continue
+            slug = str(item.get("slug") or "").strip().lower()
+            name = str(item.get("name") or slug).strip()
+            if not slug:
+                results.append({"ok": False, "error": "slug is required"})
+                continue
+            if not SLUG_RE.match(slug):
+                results.append(
+                    {"slug": slug, "ok": False, "error": f"invalid slug {slug!r}"}
+                )
+                continue
+            if TOOL_NAME_SEP in slug:
+                results.append(
+                    {"slug": slug, "ok": False, "error": "slug must not contain '__'"}
+                )
+                continue
+            # Collision with a persisted server the user can already see.
+            if self._user_sees_persisted_slug(user_ctx, slug):
+                results.append(
+                    {
+                        "slug": slug,
+                        "ok": False,
+                        "error": (
+                            f"slug {slug!r} conflicts with an existing MCP server "
+                            "visible to your account — pick a different name for "
+                            "your local server"
+                        ),
+                    }
+                )
+                continue
+
+            record = MCPServerRecord(
+                id=f"browser:{user_id}:{slug}",
+                name=name,
+                slug=slug,
+                transport="browser",
+                scope="private",
+                owner_id=user_id,
+                # Effectively disable background cache refresh —
+                # browser entries are session-ephemeral and refreshed
+                # via explicit re-announce from the settings page. A
+                # TTL of zero means "always expired", which would fire
+                # a refresh on every get_tools() call (once per chat
+                # turn), flooding the bridge with tools/list round-
+                # trips. One day is effectively never for a tab that
+                # lives on the order of hours.
+                tool_cache_ttl_seconds=86_400,
+            )
+            backend = BrowserMCPBackend()
+            backend.bind(conn, slug, call_timeout=self._call_timeout)
+            entry = _ClientEntry(record, backend)
+            try:
+                await backend.connect(record)
+                entry.tools = await backend.list_tools()
+                entry.tools_fetched_at = time.monotonic()
+                entry.connected = True
+            except Exception as exc:  # noqa: BLE001
+                # Include the exception class because some exception
+                # types (notably ``asyncio.TimeoutError``) have an
+                # empty ``str()``, which renders the log useless for
+                # diagnosis. Log the full repr at info level too.
+                exc_label = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+                logger.info(
+                    "Browser MCP %s announce failed for %s: %s",
+                    slug, user_id, exc_label,
+                )
+                results.append({"slug": slug, "ok": False, "error": exc_label})
+                continue
+
+            self._session_clients.setdefault(user_id, {})[slug] = entry
+            results.append(
+                {
+                    "slug": slug,
+                    "ok": True,
+                    "tool_count": len(entry.tools),
+                }
+            )
+
+        return {
+            "type": "mcp.bridge.announce.result",
+            "ref": frame.get("id"),
+            "results": results,
+        }
+
+    def _user_sees_persisted_slug(
+        self, user_ctx: UserContext, slug: str,
+    ) -> bool:
+        """Would the user see a persisted server with this slug?"""
+        for entry in self._clients.values():
+            if entry.record.slug != slug:
+                continue
+            if self._can_see_server(entry.record, user_ctx):
+                return True
+        return False
+
+    def _make_session_close_callback(
+        self, user_id: str, conn: Any,
+    ) -> Callable[[], None]:
+        """Build a close callback bound to a specific user+conn pair.
+
+        The callback is synchronous (WS unregister is sync), so it
+        schedules an async teardown if a loop is running. If the
+        session has been replaced by a newer tab before this fires,
+        the owner check rejects the teardown so the active session
+        survives.
+        """
+        def _cb() -> None:
+            if self._session_conn.get(user_id) is not conn:
+                return
+            self._teardown_session(user_id)
+        return _cb
+
+    def _teardown_session(self, user_id: str) -> None:
+        """Drop every session entry for a user and forget the owner."""
+        session = self._session_clients.pop(user_id, None)
+        self._session_conn.pop(user_id, None)
+        if not session:
+            return
+        for entry in session.values():
+            # BrowserMCPBackend.close is sync-safe (just drops the conn
+            # ref); schedule the await so we don't block if a loop is
+            # running, otherwise run it synchronously via new loop.
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            coro = entry.backend.close()
+            if loop is not None:
+                loop.create_task(coro)
+            else:  # pragma: no cover — only in sync test paths
+                asyncio.run(coro)
+
     async def complete_oauth_callback(
         self, state: str, code: str, received_state: str | None,
     ) -> bool:
@@ -1877,6 +2091,14 @@ class MCPService(Service):
                 raise ValueError(
                     "MCP server URL must start with http:// or https://"
                 )
+        elif record.transport == "browser":
+            # Browser-hosted MCP servers are session-ephemeral and never
+            # reach the persisted-create path. Rejecting them here keeps
+            # the UI and entity storage free of transport="browser" rows.
+            raise ValueError(
+                "Browser-hosted MCP servers are session-only and cannot "
+                "be created via the standard CRUD flow",
+            )
         else:
             raise ValueError(f"Invalid transport: {record.transport}")
         if record.auth.kind not in ("none", "bearer", "oauth"):

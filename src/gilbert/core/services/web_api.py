@@ -113,6 +113,17 @@ class WebApiService(Service):
                         "required_role": "admin",
                         "requires_capability": "mcp_server",
                     },
+                    {
+                        "label": "Local",
+                        "description": (
+                            "MCP servers running on your own machine, "
+                            "bridged through this browser tab"
+                        ),
+                        "url": "/mcp/local",
+                        "icon": "plug",
+                        "required_role": "user",
+                        "requires_capability": "mcp",
+                    },
                 ],
             },
             {

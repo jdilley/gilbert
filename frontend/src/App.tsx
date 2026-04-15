@@ -17,6 +17,7 @@ import { SchedulerPage } from "@/components/scheduler/SchedulerPage";
 import { PluginsPage } from "@/components/plugins/PluginsPage";
 import { McpPage } from "@/components/mcp/McpPage";
 import { McpClientsPage } from "@/components/mcp/McpClientsPage";
+import { McpLocalPage } from "@/components/mcp/McpLocalPage";
 
 export default function App() {
   return (
@@ -40,6 +41,7 @@ export default function App() {
           <Route path="/mcp" element={<Navigate to="/mcp/servers" replace />} />
           <Route path="/mcp/servers" element={<McpPage />} />
           <Route path="/mcp/clients" element={<McpClientsPage />} />
+          <Route path="/mcp/local" element={<McpLocalPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/plugins" element={<PluginsPage />} />
           <Route path="/system" element={<SystemPage />} />

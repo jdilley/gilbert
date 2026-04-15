@@ -78,6 +78,9 @@ class WsConnection:
         self.shared_conv_ids: set[str] = set()
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=200)
         self.last_ping: float = time.monotonic()
+        self._pending_outbound: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self._outbound_counter: int = 0
+        self._close_callbacks: list[Callable[[], None]] = []
 
     @property
     def user_id(self) -> str:
@@ -179,6 +182,64 @@ class WsConnection:
             "timestamp": event.timestamp.isoformat() if event.timestamp else "",
         })
 
+    async def call_client(
+        self,
+        frame: dict[str, Any],
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        """Send a server-initiated RPC to the browser and await its reply.
+
+        The server stamps a unique ``id`` onto ``frame``, enqueues it, and
+        waits for a frame from the client whose ``ref`` matches that id.
+        ``dispatch_frame`` intercepts replies before handler lookup and
+        resolves the pending future.
+
+        Raises ``asyncio.TimeoutError`` if no reply arrives within
+        ``timeout`` seconds, or ``ConnectionError`` if the connection is
+        closed while waiting.
+        """
+        self._outbound_counter += 1
+        outbound_id = f"s{self._outbound_counter}"
+        stamped = {**frame, "id": outbound_id}
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict[str, Any]] = loop.create_future()
+        self._pending_outbound[outbound_id] = future
+        self.enqueue(stamped)
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        finally:
+            self._pending_outbound.pop(outbound_id, None)
+
+    def cancel_pending_outbound(self) -> None:
+        """Cancel all pending outbound RPCs, e.g. on disconnect."""
+        pending = list(self._pending_outbound.values())
+        self._pending_outbound.clear()
+        for future in pending:
+            if not future.done():
+                future.set_exception(ConnectionError("WebSocket closed"))
+
+    def add_close_callback(self, callback: Callable[[], None]) -> None:
+        """Register a callback invoked once when the connection closes.
+
+        Services use this to tear down per-connection state (e.g. an
+        MCP session registry tied to a browser tab). Callbacks run
+        synchronously from ``WsConnectionManager.unregister``; if the
+        handler needs async work it should schedule a task itself
+        (``asyncio.create_task(...)``) — ``unregister`` cannot await.
+        Exceptions raised by a callback are logged and do not block
+        the others from running.
+        """
+        self._close_callbacks.append(callback)
+
+    def run_close_callbacks(self) -> None:
+        """Invoke all registered close callbacks, swallowing errors."""
+        for cb in self._close_callbacks:
+            try:
+                cb()
+            except Exception:  # noqa: BLE001
+                logger.warning("WS close callback failed", exc_info=True)
+        self._close_callbacks.clear()
+
 
 class WsConnectionManager:
     """Manages all WebSocket connections and dispatches events.
@@ -243,6 +304,8 @@ class WsConnectionManager:
 
     def unregister(self, conn: WsConnection) -> None:
         self._connections.discard(conn)
+        conn.cancel_pending_outbound()
+        conn.run_close_callbacks()
 
     @property
     def connection_count(self) -> int:
@@ -335,6 +398,14 @@ async def dispatch_frame(conn: WsConnection, frame: dict[str, Any]) -> dict[str,
     Checks permissions (hardcoded defaults + entity store overrides),
     then dispatches to the handler from the combined registry.
     """
+    # Reply to a server-initiated RPC: resolve the pending future and stop.
+    ref = frame.get("ref")
+    if isinstance(ref, str) and ref in conn._pending_outbound:
+        future = conn._pending_outbound.pop(ref)
+        if not future.done():
+            future.set_result(frame)
+        return None
+
     frame_type = frame.get("type", "")
 
     # Look up handler

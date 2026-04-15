@@ -90,6 +90,7 @@ Gilbert is designed for households and small teams, not a single desktop user. E
 - **MCP multi-user support.**
   - **Client side (Gilbert → external servers):** each MCP server record has a `scope` (`private` / `shared` / `public`) and an optional `allowed_users` list. The rule is "if you can see it, you can use it" — discovery and invocation are gated by the same visibility check.
   - **Server side (external clients → Gilbert):** Gilbert exposes its own tools as an MCP server at `/api/mcp`. Admins register external clients under **MCP → Clients**, pick an owner user and an AI profile, and hand the client a one-time bearer token. Every tool call from that client runs under the owner's `UserContext` with the profile's tool allowlist applied, so external agents can't see or call anything their owner couldn't.
+  - **Browser-bridged local servers (user → their own machine):** any user can point Gilbert at MCP servers running on their own laptop (or their LAN) under **MCP → Local** without opening firewall holes. The browser tab acts as a transport proxy — Gilbert sends MCP JSON-RPC calls over the authenticated WebSocket, the tab POSTs them to a URL the user configured locally, and the results flow back the same way. These entries are session-ephemeral, strictly private to the owning user (invisible to admins), and disappear the moment the tab closes. No server-side config, no tunnel, no extra process to run.
 - **Consistent across surfaces.** The same authorization layer filters the web UI nav (items you can't access simply don't appear), the tool set the AI sees in chat, the commands available in slash-command autocomplete, the events streamed over WebSocket, and the tool list returned to an MCP client's `tools/list` call.
 
 ## What Can It Do?
@@ -135,7 +136,7 @@ UserProviderBackend  →  google plugin → GoogleDirectoryBackend
 WebSearchBackend     →  tavily plugin → TavilySearch
 OCRBackend           →  tesseract plugin → TesseractOCR
 TunnelBackend        →  ngrok plugin → NgrokTunnel
-MCPBackend           →  core (stdio, http, sse — consume external MCP servers)
+MCPBackend           →  core (stdio, http, sse, browser — consume external MCP servers)
 StorageBackend       →  core → SQLiteStorage
 ```
 
@@ -187,6 +188,7 @@ Gilbert sits on both sides of MCP:
 
 - **As an MCP client**, Gilbert connects out to external MCP servers (stdio subprocesses, HTTP streamable, or SSE) and merges their tools into its own agentic pipeline. Servers are configured per-user with a `scope` (private / shared / public) plus an optional `allowed_users` list; a supervisor loop reconnects with exponential backoff; OAuth 2.1 with dynamic client registration handles authenticated servers; each external server can optionally be allowed to request *sampling* (completions from Gilbert's AI) under a named profile with a token budget cap.
 - **As an MCP server**, Gilbert exposes its own tools at `/api/mcp` for external agents (Claude Desktop, Cursor, etc.). Admins register client tokens under **MCP → Clients**, each bound to an owner user and an AI profile. Tool discovery and invocation run under the owner's `UserContext` through the exact same profile + RBAC pipeline as chat, so an external agent never sees more than what its owner could. The default `mcp_server_client` profile ships empty (include-mode with zero tools) — new clients can authenticate but call nothing until an admin adds tools to the profile, so the fail-safe for untrusted integrations is "no access."
+- **Browser-bridged local servers.** Gilbert can also consume MCP servers running on a user's own machine without any tunnel or inbound firewall hole. A user configures `{slug, name, url}` entries under **MCP → Local** (stored in browser localStorage — the URL never reaches the server), and on every WebSocket connect the tab announces the available slugs. When the AI calls a tool from one of those servers, Gilbert sends an `mcp.bridge.call` frame over the authenticated WebSocket; the browser proxies the JSON-RPC body to the local URL via `fetch` and streams the response back. These session-ephemeral servers live in a per-user in-memory registry, are strictly private to the owner (invisible even to admins), and are torn down the moment the tab disconnects — the perfect shape for personal tools a user wants available only during an active session.
 
 Both sides honour the same "if you can see it, you can use it" principle and the same multi-user ownership model.
 

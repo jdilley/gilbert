@@ -88,6 +88,10 @@ DEFAULT_RPC_PERMISSIONS: dict[str, int] = {
     # allowed_users, is admin-only — the handler layer upgrades the check
     # based on the payload, since the frame type alone can't express it.
     "mcp.servers.": 100,
+    # MCP browser bridge: any authenticated user can announce their
+    # own browser-hosted MCP servers — these are session-ephemeral,
+    # private to the caller, and never touch shared state.
+    "mcp.bridge.": 100,
     # MCP server (Gilbert-as-MCP): managing client registrations is
     # admin-only because creating a client grants an external
     # process permission to impersonate a Gilbert user's identity.

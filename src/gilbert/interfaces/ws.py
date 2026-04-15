@@ -57,6 +57,33 @@ class WsConnectionBase(Protocol):
 
     def enqueue(self, msg: dict[str, Any]) -> None: ...
 
+    async def call_client(
+        self,
+        frame: dict[str, Any],
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        """Send a server-initiated RPC to the browser and await its reply.
+
+        The implementation stamps a unique id onto the frame, enqueues
+        it, and waits for a frame whose ``ref`` matches. Raises
+        ``asyncio.TimeoutError`` on timeout or ``ConnectionError`` if
+        the connection closes while waiting.
+        """
+        ...
+
+    def cancel_pending_outbound(self) -> None:
+        """Cancel all pending server-initiated RPCs on this connection."""
+        ...
+
+    def add_close_callback(self, callback: Callable[[], None]) -> None:
+        """Register a sync callback invoked when the connection closes.
+
+        Services use this to tear down per-connection state (e.g.
+        ephemeral registries tied to a browser tab). Callbacks must be
+        synchronous; if they need async work, schedule a task.
+        """
+        ...
+
 
 # ── Protocols ─────────────────────────────────────────────────────────
 

@@ -1,6 +1,9 @@
 """Tests for WebSocket protocol — visibility, subscriptions, frame dispatch."""
 
+import asyncio
 from unittest.mock import MagicMock
+
+import pytest
 
 from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.events import Event
@@ -245,3 +248,118 @@ class TestFrameDispatch:
             "data": {},
         })
         assert result["code"] == 403
+
+
+# --- Server-initiated outbound RPC (call_client) ---
+
+
+class TestOutboundRpc:
+    def _conn(self, level: int = 100) -> WsConnection:
+        user = UserContext(user_id="test", email="", display_name="Test", roles=frozenset({"user"}))
+        manager = MagicMock(spec=WsConnectionManager)
+        from gilbert.web.ws_protocol import _rpc_handlers
+        manager._handlers = dict(_rpc_handlers)
+        manager.gilbert = None
+        return WsConnection(user, level, manager)
+
+    async def test_call_client_resolves_on_reply(self) -> None:
+        conn = self._conn()
+
+        async def fake_browser() -> None:
+            frame = await conn.queue.get()
+            assert frame["type"] == "mcp.bridge.call"
+            assert frame["id"].startswith("s")
+            # Reply frame carries ref matching the outbound id
+            await dispatch_frame(conn, {
+                "type": "mcp.bridge.result",
+                "ref": frame["id"],
+                "ok": True,
+                "result": {"tools": ["a", "b"]},
+            })
+
+        browser_task = asyncio.create_task(fake_browser())
+        result = await conn.call_client(
+            {"type": "mcp.bridge.call", "server": "fs", "method": "tools/list"},
+            timeout=2.0,
+        )
+        await browser_task
+        assert result["ok"] is True
+        assert result["result"] == {"tools": ["a", "b"]}
+        assert not conn._pending_outbound  # cleaned up
+
+    async def test_call_client_stamps_unique_ids(self) -> None:
+        conn = self._conn()
+
+        ids: list[str] = []
+
+        async def drain_and_reply() -> None:
+            for _ in range(3):
+                frame = await conn.queue.get()
+                ids.append(frame["id"])
+                await dispatch_frame(conn, {
+                    "type": "mcp.bridge.result",
+                    "ref": frame["id"],
+                    "ok": True,
+                })
+
+        drainer = asyncio.create_task(drain_and_reply())
+        results = await asyncio.gather(
+            conn.call_client({"type": "mcp.bridge.call"}, timeout=2.0),
+            conn.call_client({"type": "mcp.bridge.call"}, timeout=2.0),
+            conn.call_client({"type": "mcp.bridge.call"}, timeout=2.0),
+        )
+        await drainer
+        assert len(set(ids)) == 3
+        assert all(r["ok"] for r in results)
+
+    async def test_call_client_times_out(self) -> None:
+        conn = self._conn()
+        with pytest.raises(asyncio.TimeoutError):
+            await conn.call_client(
+                {"type": "mcp.bridge.call"},
+                timeout=0.05,
+            )
+        # Cleaned up even on timeout
+        assert not conn._pending_outbound
+
+    async def test_call_client_cancelled_on_disconnect(self) -> None:
+        manager = WsConnectionManager()
+        user = UserContext(user_id="test", email="", display_name="Test", roles=frozenset({"user"}))
+        conn = WsConnection(user, 100, manager)
+        manager.register(conn)
+
+        async def disconnect_soon() -> None:
+            await asyncio.sleep(0.05)
+            manager.unregister(conn)
+
+        canceller = asyncio.create_task(disconnect_soon())
+        with pytest.raises(ConnectionError):
+            await conn.call_client(
+                {"type": "mcp.bridge.call"},
+                timeout=5.0,
+            )
+        await canceller
+
+    async def test_reply_without_pending_falls_through(self) -> None:
+        """A frame with a ref that doesn't match anything pending is
+        treated as a normal frame (and errors as unknown type here)."""
+        conn = self._conn()
+        result = await dispatch_frame(conn, {
+            "type": "mcp.bridge.result",
+            "ref": "s999",
+            "ok": True,
+        })
+        assert result is not None
+        assert result["type"] == "gilbert.error"
+        assert result["code"] == 400
+
+    async def test_reply_with_non_string_ref_is_ignored(self) -> None:
+        """Non-string ref fields fall through to normal dispatch."""
+        conn = self._conn()
+        # Integer ref, no matching pending entry → unknown type error
+        result = await dispatch_frame(conn, {
+            "type": "unknown.frame",
+            "ref": 42,
+        })
+        assert result is not None
+        assert result["type"] == "gilbert.error"

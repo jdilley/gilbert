@@ -23,11 +23,16 @@ from typing import Any, Literal
 from gilbert.interfaces.configuration import ConfigParam
 
 MCPServerScope = Literal["private", "shared", "public"]
-MCPTransport = Literal["stdio", "http", "sse"]
+MCPTransport = Literal["stdio", "http", "sse", "browser"]
 """Transport kinds. ``stdio`` spawns a subprocess; ``http`` speaks MCP
 over Streamable HTTP; ``sse`` uses the older Server-Sent Events
-transport. ``command``/``env``/``cwd`` are only meaningful for
-``stdio``; ``url``/``auth`` are only meaningful for ``http``/``sse``."""
+transport. ``browser`` proxies requests through the owning user's
+WebSocket to an MCP server running inside their browser's reach
+(localhost or LAN) — these records are session-ephemeral and never
+persisted. ``command``/``env``/``cwd`` are only meaningful for
+``stdio``; ``url``/``auth`` are only meaningful for ``http``/``sse``;
+``browser`` uses neither (the URL lives client-side in the browser
+bridge, never on the server)."""
 
 MCPAuthKind = Literal["none", "bearer", "oauth"]
 

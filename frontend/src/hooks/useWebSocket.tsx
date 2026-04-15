@@ -13,6 +13,16 @@ import { useAuth } from "./useAuth";
 
 type EventHandler = (event: GilbertEvent) => void;
 
+/**
+ * Handler for a server-initiated RPC frame (e.g. mcp.bridge.call).
+ * Returns the payload that will be shipped back to the server as a
+ * reply frame keyed by `ref`. Thrown errors are serialized as
+ * `{ok: false, error: <message>}`.
+ */
+export type ServerRpcHandler = (
+  frame: WsFrame,
+) => Promise<Record<string, unknown>>;
+
 interface PendingRpc {
   resolve: (data: unknown) => void;
   reject: (error: ApiError) => void;
@@ -29,6 +39,16 @@ interface WebSocketContextValue {
     frame: Omit<WsFrame, "id">,
     timeout?: number,
   ) => Promise<T>;
+  /**
+   * Register a handler invoked when the server sends a frame of the
+   * given type that expects a reply. The reply is sent automatically
+   * with `ref` set to the incoming `id`; the handler just returns the
+   * payload fields. Returns an unsubscribe function.
+   */
+  registerServerHandler: (
+    type: string,
+    handler: ServerRpcHandler,
+  ) => () => void;
   connected: boolean;
 }
 
@@ -50,6 +70,7 @@ const defaultValue: WebSocketContextValue = {
   subscribe: () => () => {},
   send: () => "",
   rpc: () => Promise.reject(new ApiError(503, "WebSocket not connected")),
+  registerServerHandler: () => () => {},
   connected: false,
 };
 
@@ -60,6 +81,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
   const handlersRef = useRef<Map<string, Set<EventHandler>>>(new Map());
   const pendingRef = useRef<Map<string, PendingRpc>>(new Map());
+  const serverHandlersRef = useRef<Map<string, ServerRpcHandler>>(new Map());
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
   const pingInterval = useRef<ReturnType<typeof setInterval>>(undefined);
@@ -127,6 +149,18 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           }, 100);
         }
       });
+    },
+    [],
+  );
+
+  const registerServerHandler = useCallback(
+    (type: string, handler: ServerRpcHandler) => {
+      serverHandlersRef.current.set(type, handler);
+      return () => {
+        if (serverHandlersRef.current.get(type) === handler) {
+          serverHandlersRef.current.delete(type);
+        }
+      };
     },
     [],
   );
@@ -199,6 +233,35 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             return;
           }
 
+          // Server-initiated RPC: the server asked us to do something
+          // and expects a reply frame keyed by our id. Dispatch to a
+          // registered handler asynchronously so slow handlers don't
+          // stall the message pump.
+          const serverHandler = serverHandlersRef.current.get(type);
+          if (serverHandler && frame.id) {
+            const frameId: string = frame.id;
+            (async () => {
+              let payload: Record<string, unknown>;
+              try {
+                payload = await serverHandler(frame);
+              } catch (err) {
+                const message =
+                  err instanceof Error ? err.message : String(err);
+                payload = { ok: false, error: message };
+              }
+              const reply: Record<string, unknown> = {
+                type: `${type}.result`,
+                ref: frameId,
+                ...payload,
+              };
+              const w = wsRef.current;
+              if (w && w.readyState === WebSocket.OPEN) {
+                w.send(JSON.stringify(reply));
+              }
+            })();
+            return;
+          }
+
           // Dispatch bus events
           if (type === "gilbert.event") {
             const event: GilbertEvent = {
@@ -230,7 +293,9 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, [user, rejectAllPending]);
 
   return (
-    <WebSocketContext.Provider value={{ subscribe, send, rpc, connected }}>
+    <WebSocketContext.Provider
+      value={{ subscribe, send, rpc, registerServerHandler, connected }}
+    >
       {children}
     </WebSocketContext.Provider>
   );
