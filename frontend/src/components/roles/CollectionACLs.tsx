@@ -41,7 +41,9 @@ export function CollectionACLs() {
   if (isLoading) return <LoadingSpinner text="Loading collections..." className="p-4" />;
 
   return (
-    <Card>
+    <>
+      <h1 className="text-xl sm:text-2xl font-semibold text-center mb-4">Collections</h1>
+      <Card>
       <CardContent className="p-0">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -124,5 +126,6 @@ export function CollectionACLs() {
         </div>
       </CardContent>
     </Card>
+    </>
   );
 }

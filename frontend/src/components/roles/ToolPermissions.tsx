@@ -39,7 +39,9 @@ export function ToolPermissions() {
   if (isLoading) return <LoadingSpinner text="Loading tools..." className="p-4" />;
 
   return (
-    <Card>
+    <>
+      <h1 className="text-xl sm:text-2xl font-semibold text-center mb-4">Tools</h1>
+      <Card>
       <CardContent className="p-0">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -103,5 +105,6 @@ export function ToolPermissions() {
         </div>
       </CardContent>
     </Card>
+    </>
   );
 }

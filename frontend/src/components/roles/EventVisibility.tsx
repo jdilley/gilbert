@@ -40,7 +40,9 @@ export function EventVisibility() {
   if (isLoading) return <LoadingSpinner text="Loading event rules..." className="p-4" />;
 
   return (
-    <Card>
+    <>
+      <h1 className="text-xl sm:text-2xl font-semibold text-center mb-4">Events</h1>
+      <Card>
       <CardContent className="p-0">
         <p className="px-3 py-2 text-xs text-muted-foreground border-b">
           Controls which events each role can see via WebSocket. Longest prefix match wins.
@@ -99,5 +101,6 @@ export function EventVisibility() {
         </div>
       </CardContent>
     </Card>
+    </>
   );
 }

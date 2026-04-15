@@ -49,6 +49,7 @@ export function UserRoles() {
 
   return (
     <div className="space-y-4">
+      <h1 className="text-xl sm:text-2xl font-semibold text-center">Users</h1>
       {data?.allow_user_creation && (
         <div className="flex justify-end">
           <Button size="sm" onClick={() => setShowForm((v) => !v)}>

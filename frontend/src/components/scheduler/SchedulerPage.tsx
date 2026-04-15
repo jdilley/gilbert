@@ -147,11 +147,14 @@ export function SchedulerPage() {
 
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <p className="text-sm text-muted-foreground">
-          {userCount} user {userCount === 1 ? "job" : "jobs"} · {systemCount}{" "}
-          system {systemCount === 1 ? "job" : "jobs"}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold">Scheduler</h1>
+          <p className="text-sm text-muted-foreground">
+            {userCount} user {userCount === 1 ? "job" : "jobs"} · {systemCount}{" "}
+            system {systemCount === 1 ? "job" : "jobs"}
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           <Button
             variant={showSystem ? "secondary" : "outline"}

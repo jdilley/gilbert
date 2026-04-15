@@ -89,6 +89,7 @@ export function AIProfiles() {
 
   return (
     <>
+      <h1 className="text-xl sm:text-2xl font-semibold text-center mb-4">AI Profiles</h1>
       <div className="flex justify-end mb-4">
         <Button size="sm" onClick={openNew}>
           <PlusIcon className="size-4 mr-1" />

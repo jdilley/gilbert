@@ -64,6 +64,8 @@ export function SettingsPage() {
 
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-4xl mx-auto">
+      <h1 className="text-xl sm:text-2xl font-semibold text-center">Settings</h1>
+
       {/* Category selector */}
       <div className="flex justify-center">
         <Select value={activeCategory} onValueChange={(v) => { if (v) setCategory(v); }}>

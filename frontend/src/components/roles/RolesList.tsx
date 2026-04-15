@@ -52,6 +52,7 @@ export function RolesList() {
 
   return (
     <>
+      <h1 className="text-xl sm:text-2xl font-semibold text-center mb-4">Roles</h1>
       <div className="flex justify-end mb-4">
         <Button size="sm" onClick={() => setShowCreate(true)}>
           <PlusIcon className="size-4 mr-1" />

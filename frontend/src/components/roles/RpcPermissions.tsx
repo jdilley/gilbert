@@ -40,7 +40,9 @@ export function RpcPermissions() {
   if (isLoading) return <LoadingSpinner text="Loading RPC rules..." className="p-4" />;
 
   return (
-    <Card>
+    <>
+      <h1 className="text-xl sm:text-2xl font-semibold text-center mb-4">RPC</h1>
+      <Card>
       <CardContent className="p-0">
         <p className="px-3 py-2 text-xs text-muted-foreground border-b">
           Controls which WebSocket RPC operations each role can call. Longest prefix match wins.
@@ -99,5 +101,6 @@ export function RpcPermissions() {
         </div>
       </CardContent>
     </Card>
+    </>
   );
 }
