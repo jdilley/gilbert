@@ -1,10 +1,31 @@
 import type { UIBlock } from "./ui";
 
+export type FileAttachment =
+  | {
+      kind: "image";
+      name?: string;
+      media_type: string;
+      data: string;
+    }
+  | {
+      kind: "document";
+      name: string;
+      media_type: string;
+      data: string;
+    }
+  | {
+      kind: "text";
+      name: string;
+      media_type: string;
+      text: string;
+    };
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   author_id?: string;
   author_name?: string;
+  attachments?: FileAttachment[];
 }
 
 export interface ConversationSummary {

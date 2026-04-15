@@ -9,13 +9,14 @@ Central AI service that orchestrates conversations with tool use. Uses the AIBac
 - **`interfaces/tools.py`** — `ToolProvider` protocol (runtime_checkable), `ToolDefinition`, `ToolCall`, `ToolResult`, `ToolParameterType`
 - **`interfaces/ai.py`** — `AIBackend` ABC (with registry pattern), `Message`, `MessageRole`, `AIRequest`, `AIResponse`, `StopReason`, `TokenUsage`
 - **`core/services/ai.py`** — `AIService(Service)` — the orchestrator, plus `_PersonaHelper` and `_MemoryHelper`
-- **`integrations/anthropic_ai.py`** — `AnthropicAI(AIBackend)` — Claude via httpx
+- **`std-plugins/anthropic/anthropic_ai.py`** — `AnthropicAI(AIBackend)` — Claude via httpx (lives in the `anthropic` std-plugin, not in core)
 
 ### AIService
 - **Capabilities:** `ai_chat`, `ai_tools`, `ws_handlers`, `persona`, `user_memory`
 - **Requires:** `entity_storage`
 - **Optional:** `ai_tools`, `configuration`, `access_control`
-- **Main method:** `chat(user_message, conversation_id=None) -> (response_text, conversation_id, ui_blocks, tool_usage)`
+- **Main method:** `chat(user_message, conversation_id=None, attachments=None) -> (response_text, conversation_id, ui_blocks, tool_usage)`
+- **Attachments:** `FileAttachment` (in `interfaces/ai.py`) with `kind` ∈ {`image`, `document`, `text`}. Images and documents carry base64 `data` + `media_type`; text attachments carry decoded `text`. Frame parser in `ai.py` (`_parse_frame_attachments`) enforces per-item and total size caps, validates media types, and converts xlsx documents into markdown text attachments at parse time (so binary xlsx never hits storage or the AI). Backends translate attachments to provider blocks — Anthropic emits `image`/`document`/`text` content blocks ordered images → documents → text → user prompt.
 - **Agentic loop:** Calls backend.generate(), executes tool calls, feeds results back, repeats up to `max_tool_rounds`
 - **Lazy tool discovery:** Tools discovered at each chat() call via `resolver.get_all("ai_tools")`, not during start()
 - **Conversation persistence:** Stored in `ai_conversations` collection
@@ -49,4 +50,4 @@ Backend params are merged under `settings.*` prefix with `backend_param=True`.
 - [Configuration Service](memory-configuration-service.md)
 - `src/gilbert/interfaces/ai.py`, `src/gilbert/interfaces/tools.py`
 - `src/gilbert/core/services/ai.py`
-- `src/gilbert/integrations/anthropic_ai.py`
+- `std-plugins/anthropic/anthropic_ai.py`

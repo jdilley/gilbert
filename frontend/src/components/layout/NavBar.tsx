@@ -37,10 +37,18 @@ import {
   SparklesIcon,
   FolderLockIcon,
   RadioIcon,
+  RotateCcwIcon,
   TerminalIcon,
   ChevronDownIcon,
   type LucideIcon,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type { NavGroup, NavItem } from "@/types/dashboard";
 
 /** Map of icon names returned by the backend to lucide components. */
@@ -62,6 +70,7 @@ const ICONS: Record<string, LucideIcon> = {
   "sparkles": SparklesIcon,
   "folder-lock": FolderLockIcon,
   "radio": RadioIcon,
+  "rotate-ccw": RotateCcwIcon,
   "terminal": TerminalIcon,
 };
 
@@ -84,6 +93,28 @@ export function NavBar() {
   const api = useWsApi();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+
+  const handleItemAction = (action: NonNullable<NavItem["action"]>) => {
+    setMobileOpen(false);
+    if (action === "restart_host") {
+      setRestartConfirmOpen(true);
+    }
+  };
+
+  const confirmRestart = async () => {
+    setRestarting(true);
+    try {
+      await api.restartHost();
+    } catch {
+      // Socket will drop mid-request when the host exits; swallow and
+      // let the connection indicator show the reconnect.
+    } finally {
+      setRestartConfirmOpen(false);
+      setRestarting(false);
+    }
+  };
 
   // Key the dashboard query on the user id so a login / logout
   // swap refetches automatically — otherwise the previous user's
@@ -111,8 +142,9 @@ export function NavBar() {
     }
     return group.items.some(
       (i) =>
-        location.pathname === i.url ||
-        location.pathname.startsWith(i.url + "/"),
+        !!i.url &&
+        (location.pathname === i.url ||
+          location.pathname.startsWith(i.url + "/")),
     );
   };
 
@@ -141,6 +173,7 @@ export function NavBar() {
               key={group.key}
               group={group}
               active={isGroupActive(group)}
+              onAction={handleItemAction}
             />
           ))}
         </nav>
@@ -189,12 +222,41 @@ export function NavBar() {
                 key={group.key}
                 group={group}
                 onNavigate={() => setMobileOpen(false)}
+                onAction={handleItemAction}
                 active={isGroupActive(group)}
               />
             ))}
           </nav>
         </SheetContent>
       </Sheet>
+
+      <Dialog
+        open={restartConfirmOpen}
+        onOpenChange={(o) => !restarting && setRestartConfirmOpen(o)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Restart Gilbert?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            The Gilbert host process will exit and the supervisor will
+            relaunch it. Active conversations and WebSocket connections
+            will be briefly disconnected and should reconnect automatically.
+          </p>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRestartConfirmOpen(false)}
+              disabled={restarting}
+            >
+              Cancel
+            </Button>
+            <Button onClick={confirmRestart} disabled={restarting}>
+              {restarting ? "Restarting…" : "Restart"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </header>
   );
 }
@@ -204,9 +266,11 @@ export function NavBar() {
 function DesktopNavGroup({
   group,
   active,
+  onAction,
 }: {
   group: NavGroup;
   active: boolean;
+  onAction: (action: NonNullable<NavItem["action"]>) => void;
 }) {
   const color = GROUP_COLORS[group.key] ?? "text-muted-foreground";
   const Icon = iconFor(group.icon);
@@ -246,7 +310,12 @@ function DesktopNavGroup({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-48">
         {group.items.map((item) => (
-          <DropdownSubItem key={item.url} item={item} color={color} />
+          <DropdownSubItem
+            key={item.url ?? `action:${item.action}:${item.label}`}
+            item={item}
+            color={color}
+            onAction={onAction}
+          />
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -256,17 +325,23 @@ function DesktopNavGroup({
 function DropdownSubItem({
   item,
   color,
+  onAction,
 }: {
   item: NavItem;
   color: string;
+  onAction: (action: NonNullable<NavItem["action"]>) => void;
 }) {
   const Icon = iconFor(item.icon);
   const navigate = useNavigate();
+  const handleClick = () => {
+    if (item.action) {
+      onAction(item.action);
+    } else if (item.url) {
+      navigate(item.url);
+    }
+  };
   return (
-    <DropdownMenuItem
-      onClick={() => navigate(item.url)}
-      className="cursor-pointer"
-    >
+    <DropdownMenuItem onClick={handleClick} className="cursor-pointer">
       <div className="flex items-start gap-2">
         {Icon && <Icon className={`size-4 mt-0.5 ${color}`} />}
         <div className="flex-1 min-w-0">
@@ -287,10 +362,12 @@ function DropdownSubItem({
 function MobileNavGroup({
   group,
   onNavigate,
+  onAction,
   active,
 }: {
   group: NavGroup;
   onNavigate: () => void;
+  onAction: (action: NonNullable<NavItem["action"]>) => void;
   active: boolean;
 }) {
   const color = GROUP_COLORS[group.key] ?? "text-muted-foreground";
@@ -324,12 +401,27 @@ function MobileNavGroup({
       <div className="flex flex-col">
         {group.items.map((item) => {
           const ItemIcon = iconFor(item.icon);
+          const rowClass =
+            "flex items-center gap-3 rounded-md px-3 py-2 pl-6 text-sm transition-colors text-foreground/80 hover:bg-accent hover:text-foreground";
+          if (item.action) {
+            return (
+              <button
+                key={`action:${item.action}:${item.label}`}
+                type="button"
+                onClick={() => onAction(item.action!)}
+                className={`${rowClass} text-left`}
+              >
+                {ItemIcon && <ItemIcon className={`size-4 ${color}`} />}
+                <span>{item.label}</span>
+              </button>
+            );
+          }
           return (
             <Link
               key={item.url}
-              to={item.url}
+              to={item.url!}
               onClick={onNavigate}
-              className="flex items-center gap-3 rounded-md px-3 py-2 pl-6 text-sm transition-colors text-foreground/80 hover:bg-accent hover:text-foreground"
+              className={rowClass}
             >
               {ItemIcon && <ItemIcon className={`size-4 ${color}`} />}
               <span>{item.label}</span>

@@ -2,10 +2,19 @@ import { useMemo, useState } from "react";
 import hljs from "highlight.js/lib/core";
 import DOMPurify from "dompurify";
 import { MarkdownContent } from "@/components/ui/MarkdownContent";
-import type { ChatMessageWithMeta, ToolUsageEntry } from "@/types/chat";
+import type {
+  ChatMessageWithMeta,
+  FileAttachment,
+  ToolUsageEntry,
+} from "@/types/chat";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { ChevronRightIcon, WrenchIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  FileIcon,
+  FileTextIcon,
+  WrenchIcon,
+} from "lucide-react";
 
 interface MessageBubbleProps {
   message: ChatMessageWithMeta;
@@ -37,6 +46,9 @@ export function MessageBubble({
   if (isShared && message.role === "user") {
     displayContent = displayContent.replace(/^\[.*?\]:\s*/, "");
   }
+
+  const userAttachments =
+    message.role === "user" ? message.attachments : undefined;
 
   const initials = isAssistant
     ? "G"
@@ -71,20 +83,34 @@ export function MessageBubble({
         <span className="text-[11px] text-muted-foreground px-0.5">
           {authorLabel}
         </span>
-        <div
-          className={cn(
-            "rounded-2xl px-3.5 py-2 text-sm leading-relaxed",
-            isUser
-              ? "bg-primary text-primary-foreground rounded-tr-sm"
-              : "bg-muted rounded-tl-sm",
-          )}
-        >
-          {isAssistant ? (
-            <MarkdownContent content={message.content} />
-          ) : (
-            <p className="whitespace-pre-wrap break-words">{displayContent}</p>
-          )}
-        </div>
+        {userAttachments && userAttachments.length > 0 && (
+          <div
+            className={cn(
+              "flex flex-wrap gap-1.5 max-w-full",
+              isUser ? "justify-end" : "justify-start",
+            )}
+          >
+            {userAttachments.map((att, idx) => (
+              <AttachmentView key={idx} attachment={att} index={idx} />
+            ))}
+          </div>
+        )}
+        {(displayContent || isAssistant) && (
+          <div
+            className={cn(
+              "rounded-2xl px-3.5 py-2 text-sm leading-relaxed",
+              isUser
+                ? "bg-primary text-primary-foreground rounded-tr-sm"
+                : "bg-muted rounded-tl-sm",
+            )}
+          >
+            {isAssistant ? (
+              <MarkdownContent content={message.content} />
+            ) : (
+              <p className="whitespace-pre-wrap break-words">{displayContent}</p>
+            )}
+          </div>
+        )}
         {toolUsage && toolUsage.length > 0 && (
           <ToolUsageFooter tools={toolUsage} />
         )}
@@ -336,5 +362,80 @@ function HighlightedContent({
       )}
       dangerouslySetInnerHTML={{ __html: detected.html }}
     />
+  );
+}
+
+// ─── Attachment rendering ─────────────────────────────────────────────
+
+function formatAttachmentBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function AttachmentView({
+  attachment,
+  index,
+}: {
+  attachment: FileAttachment;
+  index: number;
+}) {
+  if (attachment.kind === "image") {
+    const src = `data:${attachment.media_type};base64,${attachment.data}`;
+    return (
+      <a
+        href={src}
+        target="_blank"
+        rel="noreferrer"
+        className="block overflow-hidden rounded-lg border bg-muted"
+      >
+        <img
+          src={src}
+          alt={attachment.name || `attachment ${index + 1}`}
+          className="max-h-60 max-w-[16rem] object-cover"
+        />
+      </a>
+    );
+  }
+
+  if (attachment.kind === "document") {
+    const bytes = Math.floor((attachment.data.length * 3) / 4);
+    const href = `data:${attachment.media_type};base64,${attachment.data}`;
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className="flex max-w-xs items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 no-underline hover:bg-muted"
+      >
+        <div className="flex size-9 shrink-0 items-center justify-center rounded bg-background">
+          <FileIcon className="size-5 text-muted-foreground" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-medium">
+            {attachment.name}
+          </div>
+          <div className="truncate text-[10px] text-muted-foreground">
+            PDF · {formatAttachmentBytes(bytes)}
+          </div>
+        </div>
+      </a>
+    );
+  }
+
+  // Text attachment — not a link; content is inlined into the prompt.
+  const bytes = new Blob([attachment.text]).size;
+  return (
+    <div className="flex max-w-xs items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2">
+      <div className="flex size-9 shrink-0 items-center justify-center rounded bg-background">
+        <FileTextIcon className="size-5 text-muted-foreground" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-xs font-medium">{attachment.name}</div>
+        <div className="truncate text-[10px] text-muted-foreground">
+          Text · {formatAttachmentBytes(bytes)}
+        </div>
+      </div>
+    </div>
   );
 }

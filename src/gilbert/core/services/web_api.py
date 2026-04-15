@@ -217,6 +217,13 @@ class WebApiService(Service):
                         "icon": "monitor",
                         "required_role": "admin",
                     },
+                    {
+                        "label": "Restart",
+                        "description": "Restart the Gilbert host process",
+                        "icon": "rotate-ccw",
+                        "required_role": "admin",
+                        "action": "restart_host",
+                    },
                 ],
             },
         ]
@@ -250,11 +257,17 @@ class WebApiService(Service):
                 # Group: hide if every child was filtered out.
                 if not visible_items:
                     continue
-                # Fall back to the first visible child's URL when the
-                # hard-coded default is unreachable for this user.
+                # Fall back to the first visible navigable child's URL
+                # when the hard-coded default is unreachable for this
+                # user. Action items (which have no ``url``) are skipped
+                # — a group can't default-land on an RPC trigger.
                 default_url = group["url"]
-                if default_url not in {i["url"] for i in visible_items}:
-                    default_url = visible_items[0]["url"]
+                navigable_urls = {i["url"] for i in visible_items if i.get("url")}
+                if default_url not in navigable_urls:
+                    default_url = next(
+                        (i["url"] for i in visible_items if i.get("url")),
+                        default_url,
+                    )
                 visible_nav.append({
                     "key": group["key"],
                     "label": group["label"],

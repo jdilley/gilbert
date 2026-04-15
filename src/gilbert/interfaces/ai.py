@@ -52,13 +52,43 @@ class TokenUsage:
     output_tokens: int
 
 
+@dataclass(frozen=True)
+class FileAttachment:
+    """A file attached to a user message.
+
+    ``kind`` is the discriminator — it controls how backends translate the
+    attachment to a provider-specific content block:
+
+    - ``"image"``: ``data`` is raw base64 image bytes
+      (``image/png`` / ``image/jpeg`` / ``image/gif`` / ``image/webp``)
+      and ``media_type`` is the MIME type. Anthropic emits an ``image``
+      block.
+    - ``"document"``: ``data`` is raw base64 document bytes (currently
+      ``application/pdf``) with ``media_type`` set. Anthropic emits a
+      ``document`` block.
+    - ``"text"``: ``text`` is decoded UTF-8 content (no base64);
+      ``media_type`` is a hint like ``text/markdown``. Text attachments
+      are inlined into the prompt as ``## <name>\\n\\n<body>`` so the
+      model can reference them by filename.
+
+    ``name`` is the user-visible filename, always set for documents and
+    text kinds; for images it's optional (historical images have none).
+    """
+
+    kind: str
+    name: str = ""
+    media_type: str = ""
+    data: str = ""
+    text: str = ""
+
+
 @dataclass
 class Message:
     """A single message in a conversation.
 
     Fields are progressively filled depending on role:
     - SYSTEM: content only
-    - USER: content only
+    - USER: content (+ optional attachments)
     - ASSISTANT: content (text reply) + optional tool_calls
     - TOOL_RESULT: tool_results only
 
@@ -74,6 +104,7 @@ class Message:
     author_id: str = ""
     author_name: str = ""
     visible_to: list[str] | None = None
+    attachments: list[FileAttachment] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -172,6 +203,7 @@ class AIProvider(Protocol):
         user_ctx: UserContext | None = None,
         system_prompt: str | None = None,
         ai_call: str | None = None,
+        attachments: list[FileAttachment] | None = None,
     ) -> tuple[str, str, list[dict[str, Any]], list[dict[str, Any]]]:
         """Run a full AI chat turn. Returns
         ``(response_text, conversation_id, ui_blocks, tool_usage)``."""

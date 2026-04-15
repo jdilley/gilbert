@@ -8,7 +8,13 @@
 
 import { useCallback, useMemo } from "react";
 import { useWebSocket } from "./useWebSocket";
-import type { ConversationSummary, ConversationDetail, ChatResponse, ConversationMember } from "@/types/chat";
+import type {
+  ConversationSummary,
+  ConversationDetail,
+  ChatResponse,
+  ConversationMember,
+  FileAttachment,
+} from "@/types/chat";
 import type { Role, ToolPermission, AIProfile, UserRoleAssignment, CollectionACL } from "@/types/roles";
 import type { DocumentNode, SearchResult } from "@/types/documents";
 import type { DashboardResponse } from "@/types/dashboard";
@@ -60,8 +66,17 @@ export function useWsApi() {
     createConversation: (title: string) =>
       rpc<{ conversation_id: string; title: string }>({ type: "chat.conversation.create", title }),
 
-    sendMessage: (message: string, conversationId: string | null) =>
-      rpc<ChatResponse>({ type: "chat.message.send", message, conversation_id: conversationId }),
+    sendMessage: (
+      message: string,
+      conversationId: string | null,
+      attachments: FileAttachment[] = [],
+    ) =>
+      rpc<ChatResponse>({
+        type: "chat.message.send",
+        message,
+        conversation_id: conversationId,
+        attachments,
+      }),
 
     submitForm: (conversationId: string, blockId: string, values: Record<string, unknown>) =>
       rpc<ChatResponse>({ type: "chat.form.submit", conversation_id: conversationId, block_id: blockId, values }),
@@ -400,6 +415,11 @@ export function useWsApi() {
 
     uninstallPlugin: (name: string) =>
       rpc<{ status: string; name: string }>({ type: "plugins.uninstall", name }),
+
+    restartHost: () =>
+      rpc<{ status: string; pending_plugins: string[] }>({
+        type: "plugins.restart_host",
+      }),
 
     // ── Scheduler ─────────────────────────────────────────────────
 

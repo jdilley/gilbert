@@ -26,6 +26,7 @@ from gilbert.interfaces.ai import (
     AIContextProfile,
     AIRequest,
     AIResponse,
+    FileAttachment,
     Message,
     MessageRole,
     StopReason,
@@ -63,6 +64,230 @@ ai_logger = logging.getLogger("gilbert.ai")
 _COLLECTION = "ai_conversations"
 _PROFILES_COLLECTION = "ai_profiles"
 _ASSIGNMENTS_COLLECTION = "ai_profile_assignments"
+
+# Attachment limits for chat.message.send frames. Keep these tight enough
+# that a single turn can't bloat the conversation entity beyond what
+# WebSocket and storage can comfortably round-trip.
+_MAX_ATTACHMENTS_PER_MESSAGE = 8
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+_MAX_DOCUMENT_BYTES = 32 * 1024 * 1024  # Anthropic's documented PDF cap.
+_MAX_TEXT_BYTES = 512 * 1024  # decoded UTF-8.
+_MAX_TOTAL_ATTACHMENT_BYTES = 40 * 1024 * 1024
+_ALLOWED_IMAGE_MEDIA_TYPES = frozenset({
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+})
+_XLSX_MEDIA_TYPE = (
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+# Documents we accept on the wire as base64 blobs. PDFs flow through to
+# Anthropic's document content block unchanged; xlsx is converted to a
+# markdown text attachment at parse time so the AI sees rows it can
+# actually reason about.
+_ALLOWED_DOCUMENT_MEDIA_TYPES = frozenset({
+    "application/pdf",
+    _XLSX_MEDIA_TYPE,
+})
+
+
+def _convert_xlsx_to_markdown(data: bytes, name: str) -> str:
+    """Render an xlsx workbook as one markdown table per sheet.
+
+    Cells with ``None`` become empty cells; pipes and newlines are
+    escaped so the markdown parses. ``load_workbook`` runs in read-only
+    mode so memory stays bounded for large sheets.
+    """
+    import io
+
+    from openpyxl import load_workbook
+
+    try:
+        wb = load_workbook(io.BytesIO(data), data_only=True, read_only=True)
+    except Exception as exc:
+        raise ValueError(f"could not read xlsx {name!r}: {exc}") from exc
+
+    parts: list[str] = [f"# {name}"]
+    for sheet in wb.worksheets:
+        parts.append("")
+        parts.append(f"## Sheet: {sheet.title}")
+        rows = list(sheet.iter_rows(values_only=True))
+        if not rows:
+            parts.append("_(empty)_")
+            continue
+        max_cols = max((len(r) for r in rows), default=0)
+        if max_cols == 0:
+            parts.append("_(empty)_")
+            continue
+
+        def _cell(v: Any) -> str:
+            if v is None:
+                return ""
+            return str(v).replace("|", "\\|").replace("\n", " ").replace("\r", " ")
+
+        header_row = rows[0]
+        header_cells = [_cell(c) for c in header_row] + [""] * (
+            max_cols - len(header_row)
+        )
+        parts.append("| " + " | ".join(header_cells) + " |")
+        parts.append("| " + " | ".join(["---"] * max_cols) + " |")
+        for row in rows[1:]:
+            cells = [_cell(c) for c in row] + [""] * (max_cols - len(row))
+            parts.append("| " + " | ".join(cells) + " |")
+
+    wb.close()
+    return "\n".join(parts) + "\n"
+
+
+def _parse_frame_attachments(raw: Any) -> list[FileAttachment]:
+    """Validate and coerce the ``attachments`` field of a chat.message.send
+    frame.
+
+    Each entry must be a dict with at least ``kind`` in
+    ``{"image", "document", "text"}``. Raises ``ValueError`` with a
+    user-legible message on any validation failure.
+    """
+    import base64
+
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("attachments must be a list")
+    if len(raw) > _MAX_ATTACHMENTS_PER_MESSAGE:
+        raise ValueError(
+            f"too many attachments (max {_MAX_ATTACHMENTS_PER_MESSAGE})",
+        )
+
+    result: list[FileAttachment] = []
+    total_bytes = 0
+
+    for idx, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"attachments[{idx}] must be an object")
+        kind = str(item.get("kind") or "").lower()
+        name = str(item.get("name") or "")
+        media_type = str(item.get("media_type") or "").lower()
+
+        if kind == "image":
+            data = item.get("data")
+            if media_type not in _ALLOWED_IMAGE_MEDIA_TYPES:
+                raise ValueError(
+                    f"attachments[{idx}] has unsupported image media_type "
+                    f"(allowed: {', '.join(sorted(_ALLOWED_IMAGE_MEDIA_TYPES))})",
+                )
+            if not isinstance(data, str) or not data:
+                raise ValueError(
+                    f"attachments[{idx}] image data must be a non-empty string",
+                )
+            try:
+                decoded_len = len(base64.b64decode(data, validate=True))
+            except Exception as exc:
+                raise ValueError(
+                    f"attachments[{idx}] has invalid base64: {exc}",
+                ) from exc
+            if decoded_len > _MAX_IMAGE_BYTES:
+                raise ValueError(
+                    f"attachments[{idx}] image is too large "
+                    f"({decoded_len} bytes > {_MAX_IMAGE_BYTES} max)",
+                )
+            total_bytes += decoded_len
+            result.append(FileAttachment(
+                kind="image",
+                name=name,
+                media_type=media_type,
+                data=data,
+            ))
+        elif kind == "document":
+            data = item.get("data")
+            if not name:
+                raise ValueError(f"attachments[{idx}] document requires a name")
+            if media_type not in _ALLOWED_DOCUMENT_MEDIA_TYPES:
+                raise ValueError(
+                    f"attachments[{idx}] has unsupported document media_type "
+                    f"(allowed: {', '.join(sorted(_ALLOWED_DOCUMENT_MEDIA_TYPES))})",
+                )
+            if not isinstance(data, str) or not data:
+                raise ValueError(
+                    f"attachments[{idx}] document data must be a non-empty string",
+                )
+            try:
+                decoded_bytes = base64.b64decode(data, validate=True)
+            except Exception as exc:
+                raise ValueError(
+                    f"attachments[{idx}] has invalid base64: {exc}",
+                ) from exc
+            decoded_len = len(decoded_bytes)
+            if decoded_len > _MAX_DOCUMENT_BYTES:
+                raise ValueError(
+                    f"attachments[{idx}] document is too large "
+                    f"({decoded_len} bytes > {_MAX_DOCUMENT_BYTES} max)",
+                )
+
+            if media_type == _XLSX_MEDIA_TYPE:
+                # Excel: decode to a markdown text attachment so the AI
+                # sees row data it can reason about. Binary xlsx never
+                # hits storage or Anthropic.
+                try:
+                    markdown = _convert_xlsx_to_markdown(decoded_bytes, name)
+                except ValueError:
+                    raise
+                text_bytes = len(markdown.encode("utf-8"))
+                if text_bytes > _MAX_TEXT_BYTES:
+                    raise ValueError(
+                        f"attachments[{idx}] xlsx converts to too much text "
+                        f"({text_bytes} bytes > {_MAX_TEXT_BYTES} max) — "
+                        "try a smaller subset",
+                    )
+                total_bytes += text_bytes
+                result.append(FileAttachment(
+                    kind="text",
+                    name=name,
+                    media_type="text/markdown",
+                    text=markdown,
+                ))
+            else:
+                total_bytes += decoded_len
+                result.append(FileAttachment(
+                    kind="document",
+                    name=name,
+                    media_type=media_type,
+                    data=data,
+                ))
+        elif kind == "text":
+            text = item.get("text")
+            if not name:
+                raise ValueError(f"attachments[{idx}] text requires a name")
+            if not isinstance(text, str) or not text:
+                raise ValueError(
+                    f"attachments[{idx}] text must be a non-empty string",
+                )
+            byte_len = len(text.encode("utf-8"))
+            if byte_len > _MAX_TEXT_BYTES:
+                raise ValueError(
+                    f"attachments[{idx}] text is too large "
+                    f"({byte_len} bytes > {_MAX_TEXT_BYTES} max)",
+                )
+            total_bytes += byte_len
+            result.append(FileAttachment(
+                kind="text",
+                name=name,
+                media_type=media_type or "text/plain",
+                text=text,
+            ))
+        else:
+            raise ValueError(
+                f"attachments[{idx}] has unknown kind {kind!r} "
+                "(expected image, document, or text)",
+            )
+
+        if total_bytes > _MAX_TOTAL_ATTACHMENT_BYTES:
+            raise ValueError(
+                f"attachments exceed total size cap "
+                f"({total_bytes} bytes > {_MAX_TOTAL_ATTACHMENT_BYTES} max)",
+            )
+
+    return result
 
 # ── Persona constants and helper ──────────────────────────────
 
@@ -742,6 +967,7 @@ class AIService(Service):
         user_ctx: UserContext | None = None,
         system_prompt: str | None = None,
         ai_call: str | None = None,
+        attachments: list[FileAttachment] | None = None,
     ) -> tuple[str, str, list[dict[str, Any]], list[dict[str, Any]]]:
         """Send a user message and get an AI response (with full agentic loop).
 
@@ -754,6 +980,10 @@ class AIService(Service):
             ai_call: Named AI interaction. Resolved to an AI context profile
                 that controls which tools are available and their role
                 requirements. When ``None``, all tools are available.
+            attachments: Optional files to attach to this turn's user
+                message (images, documents, or text). Backends that
+                support multimodal input forward them to the model;
+                text attachments are inlined into the prompt body.
 
         Returns:
             (response_text, conversation_id, ui_blocks, tool_usage) tuple.
@@ -820,7 +1050,11 @@ class AIService(Service):
             ]
 
         # Append user message
-        messages.append(Message(role=MessageRole.USER, content=user_message))
+        messages.append(Message(
+            role=MessageRole.USER,
+            content=user_message,
+            attachments=list(attachments) if attachments else [],
+        ))
 
         # Resolve profile for this AI call
         profile = self.get_profile(ai_call)
@@ -1701,6 +1935,20 @@ class AIService(Service):
             d["author_name"] = msg.author_name
         if msg.visible_to is not None:
             d["visible_to"] = msg.visible_to
+        if msg.attachments:
+            serialized_attachments: list[dict[str, Any]] = []
+            for att in msg.attachments:
+                entry: dict[str, Any] = {
+                    "kind": att.kind,
+                    "name": att.name,
+                    "media_type": att.media_type,
+                }
+                if att.data:
+                    entry["data"] = att.data
+                if att.text:
+                    entry["text"] = att.text
+                serialized_attachments.append(entry)
+            d["attachments"] = serialized_attachments
         return d
 
     @staticmethod
@@ -1721,6 +1969,31 @@ class AIService(Service):
             )
             for tr in data.get("tool_results", [])
         ]
+        attachments: list[FileAttachment] = []
+        raw_attachments = data.get("attachments")
+        if isinstance(raw_attachments, list):
+            for att in raw_attachments:
+                if not isinstance(att, dict):
+                    continue
+                kind = str(att.get("kind") or "")
+                if not kind:
+                    continue
+                attachments.append(FileAttachment(
+                    kind=kind,
+                    name=str(att.get("name", "")),
+                    media_type=str(att.get("media_type", "")),
+                    data=str(att.get("data", "")),
+                    text=str(att.get("text", "")),
+                ))
+        else:
+            # Legacy: pre-attachments schema stored images under "images".
+            for img in data.get("images", []) or []:
+                if isinstance(img, dict) and img.get("data"):
+                    attachments.append(FileAttachment(
+                        kind="image",
+                        media_type=str(img.get("media_type", "")),
+                        data=str(img.get("data", "")),
+                    ))
         return Message(
             role=MessageRole(data["role"]),
             content=data.get("content", ""),
@@ -1729,6 +2002,7 @@ class AIService(Service):
             author_id=data.get("author_id", ""),
             author_name=data.get("author_name", ""),
             visible_to=data.get("visible_to"),
+            attachments=attachments,
         )
 
     # --- Conversation State ---
@@ -2291,7 +2565,17 @@ class AIService(Service):
     async def _ws_chat_send(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
 
         message = frame.get("message", "").strip()
-        if not message:
+        raw_attachments = frame.get("attachments") or []
+        try:
+            attachments = _parse_frame_attachments(raw_attachments)
+        except ValueError as exc:
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": str(exc),
+                "code": 400,
+            }
+        if not message and not attachments:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "message is required", "code": 400}
 
         conversation_id = frame.get("conversation_id") or None
@@ -2343,6 +2627,7 @@ class AIService(Service):
                         user_ctx=conn.user_ctx,
                         system_prompt=build_room_context(conv_data, conn.user_ctx),
                         ai_call="human_chat",
+                        attachments=attachments,
                     )
                 else:
                     # Store message without invoking AI
@@ -2352,6 +2637,7 @@ class AIService(Service):
                         role=MessageRole.USER, content=tagged_message,
                         author_id=conn.user_ctx.user_id,
                         author_name=conn.user_ctx.display_name,
+                        attachments=list(attachments),
                     ))
                     await self._save_conversation(conv_id, messages, user_ctx=conn.user_ctx)
 
@@ -2373,6 +2659,7 @@ class AIService(Service):
                     conversation_id=conversation_id,
                     user_ctx=conn.user_ctx,
                     ai_call="human_chat",
+                    attachments=attachments,
                 )
         except Exception as exc:
             logger.warning("chat.message.send failed", exc_info=True)
@@ -2608,6 +2895,38 @@ class AIService(Service):
             if is_shared:
                 msg["author_id"] = m.get("author_id", "")
                 msg["author_name"] = m.get("author_name", "")
+            if role == "user":
+                persisted_attachments = m.get("attachments")
+                emitted: list[dict[str, Any]] = []
+                if isinstance(persisted_attachments, list):
+                    for att in persisted_attachments:
+                        if not isinstance(att, dict):
+                            continue
+                        kind = str(att.get("kind") or "")
+                        if not kind:
+                            continue
+                        entry: dict[str, Any] = {
+                            "kind": kind,
+                            "name": att.get("name", ""),
+                            "media_type": att.get("media_type", ""),
+                        }
+                        if att.get("data"):
+                            entry["data"] = att.get("data")
+                        if att.get("text"):
+                            entry["text"] = att.get("text")
+                        emitted.append(entry)
+                else:
+                    # Legacy conversations stored images under "images".
+                    for img in m.get("images") or []:
+                        if isinstance(img, dict) and img.get("data"):
+                            emitted.append({
+                                "kind": "image",
+                                "name": "",
+                                "media_type": img.get("media_type", ""),
+                                "data": img.get("data"),
+                            })
+                if emitted:
+                    msg["attachments"] = emitted
 
             if role == "assistant":
                 _flush_unpaired_calls()

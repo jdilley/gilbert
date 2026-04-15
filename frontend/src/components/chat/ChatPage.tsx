@@ -1,14 +1,19 @@
-import { useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { useEventBus } from "@/hooks/useEventBus";
 import { useWsApi } from "@/hooks/useWsApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import type { ChatMessageWithMeta } from "@/types/chat";
+import type { ChatMessageWithMeta, FileAttachment } from "@/types/chat";
 import type { UIBlock } from "@/types/ui";
 import { ChatSidebarContent } from "./ChatSidebar";
 import { MessageList } from "./MessageList";
-import { ChatInput } from "./ChatInput";
+import {
+  ChatInput,
+  MAX_CHAT_ATTACHMENTS,
+  prepareChatAttachment,
+  type PendingAttachment,
+} from "./ChatInput";
 import { MemberPanelContent } from "./MemberPanel";
 import { InviteModal } from "./InviteModal";
 import { SkillsModal } from "./SkillsModal";
@@ -73,6 +78,140 @@ export function ChatPage() {
     conversationId: string;
     title: string;
   } | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const dragDepthRef = useRef(0);
+  const pendingCountRef = useRef(0);
+  const chatAreaRef = useRef<HTMLDivElement>(null);
+
+  // Keep pendingCountRef in sync so addFiles can read the current count
+  // without taking pendingAttachments as a callback dep (that would
+  // cause the drop listener to tear down on every attach).
+  useEffect(() => {
+    pendingCountRef.current = pendingAttachments.length;
+  }, [pendingAttachments.length]);
+
+  // Release any blob URLs we're still holding when the page unmounts.
+  useEffect(() => {
+    return () => {
+      for (const p of pendingAttachments) {
+        if (p.preview) URL.revokeObjectURL(p.preview);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const addFiles = useCallback(
+    async (files: FileList | File[]) => {
+      const list = Array.from(files);
+      if (list.length === 0) return;
+      setAttachError(null);
+      const remaining = MAX_CHAT_ATTACHMENTS - pendingCountRef.current;
+      if (remaining <= 0) {
+        setAttachError(
+          `You can attach at most ${MAX_CHAT_ATTACHMENTS} files per message.`,
+        );
+        return;
+      }
+      const toAdd = list.slice(0, remaining);
+      if (list.length > remaining) {
+        setAttachError(
+          `Only the first ${remaining} file${remaining === 1 ? "" : "s"} were attached (max ${MAX_CHAT_ATTACHMENTS}).`,
+        );
+      }
+      const prepared: PendingAttachment[] = [];
+      for (const file of toAdd) {
+        try {
+          const att = await prepareChatAttachment(file);
+          prepared.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: file.name || "file",
+            attachment: att,
+            preview: att.kind === "image" ? URL.createObjectURL(file) : undefined,
+          });
+        } catch (exc) {
+          setAttachError(
+            exc instanceof Error ? exc.message : "Failed to read file",
+          );
+        }
+      }
+      if (prepared.length > 0) {
+        setPendingAttachments((prev) => [...prev, ...prepared]);
+      }
+    },
+    [],
+  );
+
+  const removeAttachment = useCallback((id: string) => {
+    setPendingAttachments((prev) => {
+      const victim = prev.find((p) => p.id === id);
+      if (victim?.preview) URL.revokeObjectURL(victim.preview);
+      return prev.filter((p) => p.id !== id);
+    });
+  }, []);
+
+  const clearAttachments = useCallback(() => {
+    setPendingAttachments((prev) => {
+      for (const p of prev) {
+        if (p.preview) URL.revokeObjectURL(p.preview);
+      }
+      return [];
+    });
+    setAttachError(null);
+  }, []);
+
+  // Direct DOM event listeners on the chat area so drag/drop behaves
+  // the same regardless of which child element the cursor is over.
+  // (Earlier this used React synthetic-event handlers on the wrapper
+  // div, and drops on the textarea weren't reliably reaching them.)
+  useEffect(() => {
+    const el = chatAreaRef.current;
+    if (!el) return;
+
+    const hasFiles = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types ?? []).includes("Files");
+
+    const onDragEnter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepthRef.current += 1;
+      setDragActive(true);
+    };
+    const onDragOver = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      // Must preventDefault on dragover for drop events to fire.
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    };
+    const onDragLeave = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (dragDepthRef.current === 0) setDragActive(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dragDepthRef.current = 0;
+      setDragActive(false);
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      // addFiles handles classification and user-visible errors for
+      // unsupported types — don't pre-filter here.
+      if (files.length > 0) void addFiles(files);
+    };
+
+    el.addEventListener("dragenter", onDragEnter);
+    el.addEventListener("dragover", onDragOver);
+    el.addEventListener("dragleave", onDragLeave);
+    el.addEventListener("drop", onDrop);
+    return () => {
+      el.removeEventListener("dragenter", onDragEnter);
+      el.removeEventListener("dragover", onDragOver);
+      el.removeEventListener("dragleave", onDragLeave);
+      el.removeEventListener("drop", onDrop);
+    };
+  }, [addFiles]);
 
   const { data: conversations = [], refetch: refetchConversations } = useQuery({
     queryKey: ["conversations"],
@@ -109,12 +248,19 @@ export function ChatPage() {
   );
 
   const handleSend = useCallback(
-    async (message: string) => {
-      setMessages((prev) => [...prev, { role: "user", content: message }]);
+    async (message: string, attachments: FileAttachment[] = []) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "user",
+          content: message,
+          attachments: attachments.length ? attachments : undefined,
+        },
+      ]);
       setSending(true);
 
       try {
-        const resp = await api.sendMessage(message, activeConvId);
+        const resp = await api.sendMessage(message, activeConvId, attachments);
         setActiveConvId(resp.conversation_id);
 
         if (resp.response) {
@@ -467,7 +613,10 @@ export function ChatPage() {
       </Sheet>
 
       {/* Main chat area */}
-      <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+      <div
+        ref={chatAreaRef}
+        className="relative flex flex-1 flex-col min-w-0 overflow-hidden"
+      >
         {/* Top bar */}
         <div className="flex items-center gap-2 shrink-0 border-b px-3 py-2">
           <Button
@@ -632,7 +781,25 @@ export function ChatPage() {
                 ? "Mention 'Gilbert' for AI help..."
                 : "Type a message..."
             }
+            pendingAttachments={pendingAttachments}
+            attachError={attachError}
+            onAddFiles={addFiles}
+            onRemoveAttachment={removeAttachment}
+            onClearAttachments={clearAttachments}
           />
+        )}
+
+        {/* Drag-and-drop overlay — rendered above the chat area when the
+            user is dragging files in from the OS. */}
+        {dragActive && (
+          <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-background/70 backdrop-blur-sm">
+            <div className="rounded-xl border-2 border-dashed border-primary bg-background px-6 py-5 text-center shadow-lg">
+              <p className="text-sm font-medium">Drop files to attach</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Images, PDFs, or text / code files
+              </p>
+            </div>
+          </div>
         )}
       </div>
 

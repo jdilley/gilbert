@@ -10,13 +10,13 @@ The frontend nav and dashboard are driven by a single RPC (`dashboard.get` in `c
 Declares `nav_groups` as a list of dicts. Each group has:
 - `key`, `label`, `description`, `icon`, `url` (default route when the group is clicked)
 - `required_role` / `requires_capability` for the group itself
-- `items` — list of child NavItems (each with label/description/icon/url/required_role/requires_capability). Empty list = leaf group.
+- `items` — list of child NavItems. Each item has label/description/icon/required_role/requires_capability plus **either** a `url` (navigation) or an `action` (RPC trigger; frontend shows a confirm dialog and invokes a named handler — e.g. `"restart_host"` calls `plugins.restart_host`). Empty items list = leaf group.
 
 Filtering:
 1. Each child's `requires_capability` is checked against the running service manager — if the service is missing or disabled, the child is dropped.
 2. Each child's `required_role` is compared to `conn.user_level` via `AccessControlProvider.get_role_level`.
 3. A non-leaf group whose every child is dropped disappears entirely.
-4. A group's default `url` falls back to the first *visible* child's URL if the hard-coded default points at a child the user can't reach.
+4. A group's default `url` falls back to the first *visible* navigable child's URL if the hard-coded default is unreachable. Action items (no `url`) are skipped for this fallback — a group can't default-land on an RPC trigger.
 
 The RPC returns both:
 - `nav` — the filtered grouped structure (consumed by NavBar)

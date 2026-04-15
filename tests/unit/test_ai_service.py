@@ -5,12 +5,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from gilbert.core.services.ai import AIService
+from gilbert.core.services.ai import AIService, _parse_frame_attachments
 from gilbert.core.services.storage import StorageService
 from gilbert.interfaces.ai import (
     AIBackend,
     AIRequest,
     AIResponse,
+    FileAttachment,
     Message,
     MessageRole,
     StopReason,
@@ -711,6 +712,242 @@ def test_message_serialize_deserialize() -> None:
     assert deserialized.tool_calls[0].tool_call_id == "tc_1"
     assert deserialized.tool_calls[0].tool_name == "search"
     assert deserialized.tool_calls[0].arguments == {"q": "test"}
+
+
+def test_message_with_attachments_serialize_roundtrip() -> None:
+    import base64
+
+    image_payload = base64.b64encode(b"fake png bytes").decode()
+    doc_payload = base64.b64encode(b"fake pdf bytes").decode()
+    original = Message(
+        role=MessageRole.USER,
+        content="summarize please",
+        attachments=[
+            FileAttachment(
+                kind="image", name="shot.png",
+                media_type="image/png", data=image_payload,
+            ),
+            FileAttachment(
+                kind="document", name="report.pdf",
+                media_type="application/pdf", data=doc_payload,
+            ),
+            FileAttachment(
+                kind="text", name="notes.md",
+                media_type="text/markdown", text="# hello",
+            ),
+        ],
+    )
+    serialized = AIService._serialize_message(original)
+    assert serialized["attachments"] == [
+        {
+            "kind": "image", "name": "shot.png",
+            "media_type": "image/png", "data": image_payload,
+        },
+        {
+            "kind": "document", "name": "report.pdf",
+            "media_type": "application/pdf", "data": doc_payload,
+        },
+        {
+            "kind": "text", "name": "notes.md",
+            "media_type": "text/markdown", "text": "# hello",
+        },
+    ]
+    deserialized = AIService._deserialize_message(serialized)
+    assert len(deserialized.attachments) == 3
+    assert deserialized.attachments[0].kind == "image"
+    assert deserialized.attachments[0].data == image_payload
+    assert deserialized.attachments[1].kind == "document"
+    assert deserialized.attachments[1].name == "report.pdf"
+    assert deserialized.attachments[2].kind == "text"
+    assert deserialized.attachments[2].text == "# hello"
+
+
+def test_deserialize_legacy_images_key() -> None:
+    """Pre-attachments conversations stored images under the ``images`` key."""
+    legacy = {
+        "role": "user",
+        "content": "old shot",
+        "images": [
+            {"media_type": "image/png", "data": "AAAA"},
+            {"media_type": "image/jpeg", "data": "BBBB"},
+        ],
+    }
+    msg = AIService._deserialize_message(legacy)
+    assert len(msg.attachments) == 2
+    assert msg.attachments[0].kind == "image"
+    assert msg.attachments[0].data == "AAAA"
+    assert msg.attachments[1].media_type == "image/jpeg"
+
+
+def test_parse_frame_attachments_none_or_empty() -> None:
+    assert _parse_frame_attachments(None) == []
+    assert _parse_frame_attachments([]) == []
+
+
+def test_parse_frame_attachments_accepts_image_document_text() -> None:
+    import base64
+
+    image_payload = base64.b64encode(b"hello image").decode()
+    doc_payload = base64.b64encode(b"%PDF-1.4 fake").decode()
+    result = _parse_frame_attachments([
+        {
+            "kind": "image", "name": "a.png",
+            "media_type": "IMAGE/PNG", "data": image_payload,
+        },
+        {
+            "kind": "document", "name": "r.pdf",
+            "media_type": "application/pdf", "data": doc_payload,
+        },
+        {
+            "kind": "text", "name": "notes.md",
+            "media_type": "text/markdown", "text": "# hi",
+        },
+    ])
+    assert [a.kind for a in result] == ["image", "document", "text"]
+    assert result[0].media_type == "image/png"
+    assert result[1].name == "r.pdf"
+    assert result[2].text == "# hi"
+
+
+def test_parse_frame_attachments_rejects_unknown_kind() -> None:
+    with pytest.raises(ValueError, match="unknown kind"):
+        _parse_frame_attachments([{"kind": "video", "name": "x", "data": "x"}])
+
+
+def test_parse_frame_attachments_rejects_bad_image_media_type() -> None:
+    import base64
+
+    payload = base64.b64encode(b"x").decode()
+    with pytest.raises(ValueError, match="unsupported image media_type"):
+        _parse_frame_attachments([
+            {"kind": "image", "media_type": "image/tiff", "data": payload},
+        ])
+
+
+def test_parse_frame_attachments_rejects_bad_document_media_type() -> None:
+    import base64
+
+    payload = base64.b64encode(b"x").decode()
+    with pytest.raises(ValueError, match="unsupported document media_type"):
+        _parse_frame_attachments([
+            {
+                "kind": "document", "name": "x.doc",
+                "media_type": "application/msword", "data": payload,
+            },
+        ])
+
+
+def test_parse_frame_attachments_rejects_document_without_name() -> None:
+    import base64
+
+    payload = base64.b64encode(b"x").decode()
+    with pytest.raises(ValueError, match="document requires a name"):
+        _parse_frame_attachments([
+            {"kind": "document", "media_type": "application/pdf", "data": payload},
+        ])
+
+
+def test_parse_frame_attachments_rejects_text_without_name() -> None:
+    with pytest.raises(ValueError, match="text requires a name"):
+        _parse_frame_attachments([{"kind": "text", "text": "hi"}])
+
+
+def test_parse_frame_attachments_rejects_empty_text() -> None:
+    with pytest.raises(ValueError, match="text must be a non-empty string"):
+        _parse_frame_attachments([{"kind": "text", "name": "a.md", "text": ""}])
+
+
+def test_parse_frame_attachments_rejects_bad_base64() -> None:
+    with pytest.raises(ValueError, match="invalid base64"):
+        _parse_frame_attachments([
+            {"kind": "image", "media_type": "image/png", "data": "not base64!!!"},
+        ])
+
+
+def test_parse_frame_attachments_rejects_too_many() -> None:
+    import base64
+
+    payload = base64.b64encode(b"x").decode()
+    items = [
+        {"kind": "image", "media_type": "image/png", "data": payload}
+    ] * 9
+    with pytest.raises(ValueError, match="too many attachments"):
+        _parse_frame_attachments(items)
+
+
+def test_parse_frame_attachments_rejects_oversize_image() -> None:
+    import base64
+
+    oversize = base64.b64encode(b"x" * (5 * 1024 * 1024 + 1)).decode()
+    with pytest.raises(ValueError, match="image is too large"):
+        _parse_frame_attachments([
+            {"kind": "image", "media_type": "image/png", "data": oversize},
+        ])
+
+
+def test_parse_frame_attachments_rejects_oversize_text() -> None:
+    big = "x" * (512 * 1024 + 1)
+    with pytest.raises(ValueError, match="text is too large"):
+        _parse_frame_attachments([
+            {"kind": "text", "name": "big.txt", "text": big},
+        ])
+
+
+def test_parse_frame_attachments_converts_xlsx_to_text() -> None:
+    """An xlsx document entry is converted to a markdown text attachment.
+
+    The frontend sends xlsx as a document-kind base64 blob; the parser
+    decodes the workbook, renders each sheet as a markdown table, and
+    returns a ``kind="text"`` attachment so Anthropic sees readable rows.
+    """
+    import base64
+    import io
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "People"
+    ws.append(["Name", "Age", "City"])
+    ws.append(["Alice", 30, "NYC"])
+    ws.append(["Bob", 25, "SF"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    payload = base64.b64encode(buf.getvalue()).decode()
+
+    result = _parse_frame_attachments([
+        {
+            "kind": "document",
+            "name": "roster.xlsx",
+            "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "data": payload,
+        },
+    ])
+    assert len(result) == 1
+    att = result[0]
+    assert att.kind == "text"
+    assert att.name == "roster.xlsx"
+    assert att.media_type == "text/markdown"
+    assert "## Sheet: People" in att.text
+    assert "Name" in att.text and "Age" in att.text and "City" in att.text
+    assert "Alice" in att.text and "30" in att.text and "NYC" in att.text
+    assert "Bob" in att.text
+
+
+def test_parse_frame_attachments_rejects_corrupt_xlsx() -> None:
+    import base64
+
+    bogus = base64.b64encode(b"not a real xlsx").decode()
+    with pytest.raises(ValueError, match="could not read xlsx"):
+        _parse_frame_attachments([
+            {
+                "kind": "document",
+                "name": "bad.xlsx",
+                "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "data": bogus,
+            },
+        ])
 
 
 def test_tool_result_serialize_deserialize() -> None:
