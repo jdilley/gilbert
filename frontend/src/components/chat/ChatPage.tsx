@@ -545,6 +545,38 @@ export function ChatPage() {
 
   const handleDelete = useCallback(
     async (id: string) => {
+      // If the chat has any tool-produced workspace files, warn the
+      // user that deleting the chat will also wipe those files
+      // permanently. Without the warning it's easy to lose generated
+      // PDFs / images / etc. by accident — they live in
+      // ``users/<u>/conversations/<conv>/<skill>/`` and the
+      // ``chat.conversation.destroyed`` event triggers a full
+      // ``rm -rf`` on the conv subtree (see ``SkillService._on_conversation_destroyed``).
+      let hasFiles = false;
+      let fileCount = 0;
+      try {
+        const conv = await api.loadConversation(id);
+        for (const turn of conv.turns) {
+          for (const att of turn.final_attachments) {
+            if (att.workspace_path) {
+              hasFiles = true;
+              fileCount += 1;
+            }
+          }
+        }
+      } catch {
+        // If load fails, fall through to the unconditional delete
+        // path — better to delete than silently swallow the action.
+      }
+      if (hasFiles) {
+        const ok = window.confirm(
+          `This chat has ${fileCount} generated file${fileCount === 1 ? "" : "s"} ` +
+            `(PDFs, images, etc.) attached to its messages. Deleting the chat ` +
+            `will permanently remove ${fileCount === 1 ? "it" : "them"} from disk — ` +
+            `download anything you want to keep first.\n\nDelete anyway?`,
+        );
+        if (!ok) return;
+      }
       await api.deleteConversation(id);
       if (activeConvId === id) clearChat();
       refetchConversations();

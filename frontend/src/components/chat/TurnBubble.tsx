@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import hljs from "highlight.js/lib/core";
 import DOMPurify from "dompurify";
 import { MarkdownContent } from "@/components/ui/MarkdownContent";
@@ -438,11 +438,13 @@ function AttachmentChip({
 }) {
   const api = useWsApi();
   const [busy, setBusy] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const isReference = isReferenceAttachment(attachment);
 
   async function handleReferenceDownload(): Promise<void> {
     if (!isReference || busy) return;
     setBusy(true);
+    setDownloadError(null);
     try {
       const resp = await api.downloadSkillWorkspaceFile(
         attachment.workspace_skill ?? "",
@@ -466,34 +468,69 @@ function AttachmentChip({
       }
     } catch (err) {
       console.error("Workspace file download failed:", err);
+      // Show the error inline on the chip so the user actually sees
+      // it instead of a silent no-op. 404 is the most common case —
+      // the conversation that produced the file was deleted (which
+      // also wipes the per-conversation workspace), or the file got
+      // moved/removed since the chip was rendered.
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : typeof err === "string"
+            ? err
+            : "Download failed";
+      const friendly = /not found|404/i.test(message)
+        ? "File no longer available — the chat that produced it was likely deleted."
+        : message;
+      setDownloadError(friendly);
     } finally {
       setBusy(false);
     }
   }
 
+  // Reusable chip shell for any reference-mode attachment.
+  const refChip = (label: string, sublabel: string, icon: ReactNode) => (
+    <div className="flex flex-col gap-1 max-w-xs">
+      <button
+        type="button"
+        onClick={handleReferenceDownload}
+        disabled={busy}
+        className={cn(
+          "flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-left hover:bg-muted disabled:opacity-60",
+          downloadError && "border-destructive/50 bg-destructive/5",
+        )}
+        title={`Download ${attachment.name ?? "file"}`}
+      >
+        <div className="flex size-9 shrink-0 items-center justify-center rounded bg-background">
+          {icon}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-medium">{label}</div>
+          <div className="truncate text-[10px] text-muted-foreground">
+            {sublabel}
+          </div>
+        </div>
+        {busy ? (
+          <LoaderIcon className="size-4 animate-spin text-muted-foreground shrink-0" />
+        ) : (
+          <DownloadIcon className="size-4 text-muted-foreground shrink-0" />
+        )}
+      </button>
+      {downloadError && (
+        <div className="flex items-start gap-1 text-[10px] text-destructive leading-snug px-0.5">
+          <AlertTriangleIcon className="size-3 shrink-0 mt-px" />
+          <span>{downloadError}</span>
+        </div>
+      )}
+    </div>
+  );
+
   if (attachment.kind === "image") {
     if (isReference) {
-      return (
-        <button
-          type="button"
-          onClick={handleReferenceDownload}
-          disabled={busy}
-          className="flex max-w-xs items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-left hover:bg-muted disabled:opacity-60"
-          title={`Download ${attachment.name ?? "image"}`}
-        >
-          <div className="flex size-9 shrink-0 items-center justify-center rounded bg-background">
-            <FileIcon className="size-5 text-muted-foreground" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-xs font-medium">
-              {attachment.name || `image ${index + 1}`}
-            </div>
-            <div className="truncate text-[10px] text-muted-foreground">
-              {attachment.media_type} · workspace file
-            </div>
-          </div>
-          <DownloadIcon className="size-4 text-muted-foreground shrink-0" />
-        </button>
+      return refChip(
+        attachment.name || `image ${index + 1}`,
+        `${attachment.media_type} · workspace file`,
+        <FileIcon className="size-5 text-muted-foreground" />,
       );
     }
     const src = `data:${attachment.media_type};base64,${attachment.data ?? ""}`;
@@ -515,27 +552,10 @@ function AttachmentChip({
 
   if (attachment.kind === "document") {
     if (isReference) {
-      return (
-        <button
-          type="button"
-          onClick={handleReferenceDownload}
-          disabled={busy}
-          className="flex max-w-xs items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-left hover:bg-muted disabled:opacity-60"
-          title={`Download ${attachment.name ?? "document"}`}
-        >
-          <div className="flex size-9 shrink-0 items-center justify-center rounded bg-background">
-            <FileIcon className="size-5 text-muted-foreground" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-xs font-medium">
-              {attachment.name || "document"}
-            </div>
-            <div className="truncate text-[10px] text-muted-foreground">
-              {mediaTypeLabel(attachment.media_type)} · workspace file
-            </div>
-          </div>
-          <DownloadIcon className="size-4 text-muted-foreground shrink-0" />
-        </button>
+      return refChip(
+        attachment.name || "document",
+        `${mediaTypeLabel(attachment.media_type)} · workspace file`,
+        <FileIcon className="size-5 text-muted-foreground" />,
       );
     }
     const inlineData = attachment.data ?? "";
@@ -564,27 +584,10 @@ function AttachmentChip({
 
   // Text attachment
   if (isReference) {
-    return (
-      <button
-        type="button"
-        onClick={handleReferenceDownload}
-        disabled={busy}
-        className="flex max-w-xs items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-left hover:bg-muted disabled:opacity-60"
-        title={`Download ${attachment.name ?? "file"}`}
-      >
-        <div className="flex size-9 shrink-0 items-center justify-center rounded bg-background">
-          <FileTextIcon className="size-5 text-muted-foreground" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-medium">
-            {attachment.name || "file"}
-          </div>
-          <div className="truncate text-[10px] text-muted-foreground">
-            {mediaTypeLabel(attachment.media_type)} · workspace file
-          </div>
-        </div>
-        <DownloadIcon className="size-4 text-muted-foreground shrink-0" />
-      </button>
+    return refChip(
+      attachment.name || "file",
+      `${mediaTypeLabel(attachment.media_type)} · workspace file`,
+      <FileTextIcon className="size-5 text-muted-foreground" />,
     );
   }
   const inlineText = attachment.text ?? "";

@@ -78,6 +78,7 @@ const ICONS: Record<string, LucideIcon> = {
 const GROUP_COLORS: Record<string, string> = {
   chat: "text-blue-500",
   inbox: "text-green-500",
+  knowledge: "text-amber-500",
   mcp: "text-pink-500",
   security: "text-purple-500",
   system: "text-slate-500",

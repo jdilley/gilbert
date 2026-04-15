@@ -90,6 +90,16 @@ class WebApiService(Service):
                 "items": [],
             },
             {
+                "key": "knowledge",
+                "label": "Knowledge",
+                "description": "Browse, search, and manage indexed documents",
+                "url": "/documents",
+                "icon": "file-text",
+                "required_role": "user",
+                "requires_capability": "knowledge",
+                "items": [],
+            },
+            {
                 "key": "mcp",
                 "label": "MCP",
                 "description": "Model Context Protocol",
