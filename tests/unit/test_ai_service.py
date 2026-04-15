@@ -389,6 +389,128 @@ async def test_chat_with_tool_calls(
     assert "sunny" in tool_result_msg.tool_results[0].content
 
 
+async def test_chat_injects_user_identity_into_tool_args(
+    ai_service: AIService,
+    stub_backend: StubAIBackend,
+    storage_service: StorageService,
+    storage_backend: StorageBackend,
+) -> None:
+    """The injected ``_user_id`` / ``_user_name`` / ``_user_email`` /
+    ``_user_roles`` / ``_conversation_id`` / ``_invocation_source``
+    args land on tool_call arguments so tools (e.g. inbox_send) can
+    reach the active user without having to ask."""
+    captured_args: dict[str, Any] = {}
+
+    class CapturingProvider(StubToolProviderService):
+        async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
+            captured_args.update(arguments)
+            return "ok"
+
+    tool_def = ToolDefinition(name="probe", description="capture args")
+    provider = CapturingProvider(tools=[tool_def], results={"probe": "ok"})
+
+    resolver = AsyncMock(spec=ServiceResolver)
+
+    def require_cap(cap: str) -> Any:
+        if cap == "entity_storage":
+            return storage_service
+        raise LookupError(cap)
+
+    resolver.require_capability = require_cap
+    resolver.get_capability = lambda cap: None
+    resolver.get_all = lambda cap: [provider] if cap == "ai_tools" else []
+
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(
+                role=MessageRole.ASSISTANT,
+                content="probing",
+                tool_calls=[
+                    ToolCall(
+                        tool_call_id="tc_probe",
+                        tool_name="probe",
+                        arguments={},
+                    )
+                ],
+            ),
+            model="stub",
+            stop_reason=StopReason.TOOL_USE,
+        )
+    )
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="done"),
+            model="stub",
+        )
+    )
+
+    await ai_service.start(resolver)
+    user = UserContext(
+        user_id="usr_brian",
+        display_name="Brian Dilley",
+        email="briandilley@current-la.com",
+        roles=frozenset({"admin", "user"}),
+    )
+    await ai_service.chat("hi", user_ctx=user)
+
+    assert captured_args["_user_id"] == "usr_brian"
+    assert captured_args["_user_name"] == "Brian Dilley"
+    assert captured_args["_user_email"] == "briandilley@current-la.com"
+    assert "admin" in captured_args["_user_roles"]
+    assert captured_args["_invocation_source"] == "ai"
+    # _conversation_id is also injected (the chat created one).
+    assert captured_args["_conversation_id"]
+
+
+async def test_system_prompt_includes_user_identity_block(
+    ai_service: AIService,
+    stub_backend: StubAIBackend,
+    resolver: ServiceResolver,
+) -> None:
+    """For non-system callers the system prompt should include a
+    'You're talking to' block with name + email so the AI doesn't have
+    to ask for what the user record already answers."""
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="hi back"),
+            model="stub",
+        )
+    )
+    await ai_service.start(resolver)
+    user = UserContext(
+        user_id="usr_brian",
+        display_name="Brian Dilley",
+        email="briandilley@current-la.com",
+        roles=frozenset({"user"}),
+    )
+    await ai_service.chat("hi", user_ctx=user)
+
+    sent_prompt = stub_backend.requests[0].system_prompt
+    assert "You're talking to" in sent_prompt
+    assert "Brian Dilley" in sent_prompt
+    assert "briandilley@current-la.com" in sent_prompt
+
+
+async def test_system_prompt_omits_identity_block_for_system_calls(
+    ai_service: AIService,
+    stub_backend: StubAIBackend,
+    resolver: ServiceResolver,
+) -> None:
+    """System callers (scheduler, greeting, etc.) shouldn't see a
+    user identity block — they don't have a real one."""
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="ok"),
+            model="stub",
+        )
+    )
+    await ai_service.start(resolver)
+    await ai_service.chat("hi", user_ctx=UserContext.SYSTEM)
+
+    sent_prompt = stub_backend.requests[0].system_prompt
+    assert "You're talking to" not in sent_prompt
+
+
 async def test_chat_ui_block_response_index_skips_empty_assistant_rows(
     ai_service: AIService,
     stub_backend: StubAIBackend,

@@ -1643,6 +1643,30 @@ class AIService(Service):
                     "in subsequent messages or conversations."
                 )
 
+        # Inject the active user's identity so the AI knows who it's
+        # talking to without having to ask. Skipped for system/guest
+        # callers (no real identity) and shared rooms (multiple users
+        # in flight; the per-message [Name]: prefix already attributes
+        # each utterance). When this is set, the AI can reference the
+        # user by name, address email "to the user" using the email
+        # below, and avoid asking questions like "what's your email?"
+        # that the user record already answers.
+        if user_ctx and user_ctx.user_id not in ("system", "guest"):
+            identity_lines: list[str] = ["## You're talking to"]
+            if user_ctx.display_name:
+                identity_lines.append(f"- **Name:** {user_ctx.display_name}")
+            if user_ctx.email:
+                identity_lines.append(f"- **Email:** {user_ctx.email}")
+            identity_lines.append(f"- **User ID:** {user_ctx.user_id}")
+            identity_lines.append(
+                "Use these details when the request implies the user themself "
+                "as the recipient, sender, or subject (e.g. 'email me the file' "
+                "→ send to the email above, 'what's my schedule' → look up "
+                "this user's id). Don't ask the user for information already "
+                "listed here."
+            )
+            parts.append("\n".join(identity_lines))
+
         # Inject user memory summaries if available
         if user_ctx and user_ctx.user_id not in ("system", "guest"):
             if self._memory is not None and self._memory_enabled:
@@ -1868,6 +1892,8 @@ class AIService(Service):
                 tc.arguments["_user_id"] = user_ctx.user_id
                 tc.arguments["_user_name"] = user_ctx.display_name
                 tc.arguments["_user_roles"] = list(user_ctx.roles)
+                if user_ctx.email:
+                    tc.arguments["_user_email"] = user_ctx.email
 
             # Inject conversation id + invocation source so tools can
             # gate behavior on the active conversation (e.g. SkillService
@@ -2234,6 +2260,8 @@ class AIService(Service):
             arguments["_user_id"] = user_ctx.user_id
             arguments["_user_name"] = user_ctx.display_name
             arguments["_user_roles"] = list(user_ctx.roles)
+            if user_ctx.email:
+                arguments["_user_email"] = user_ctx.email
 
         # Slash-command source tag so SkillService (and any other tool
         # that wants to gate on activation) can let the call through —

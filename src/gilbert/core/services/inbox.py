@@ -14,6 +14,7 @@ Authorization is centralized in ``interfaces/inbox.py`` —
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -100,6 +101,7 @@ class InboxService(Service):
         self._storage: Any = None  # StorageBackend
         self._event_bus: Any = None  # EventBus
         self._knowledge: Any = None  # KnowledgeService (optional)
+        self._skills: Any = None  # SkillService (optional, for workspace attachments)
         self._scheduler: Any = None  # SchedulerProvider
         self._access_control: AccessControlProvider | None = None
 
@@ -205,6 +207,7 @@ class InboxService(Service):
             self._event_bus = event_bus_svc.bus
 
         self._knowledge = resolver.get_capability("knowledge")
+        self._skills = resolver.get_capability("skills")
 
         acl_svc = resolver.get_capability("access_control")
         if isinstance(acl_svc, AccessControlProvider):
@@ -1311,7 +1314,19 @@ class InboxService(Service):
                 draft_data = {}
             draft = OutboxDraft.from_dict(draft_data)
 
-            attachments = await self._resolve_attachments(draft.attach_documents)
+            attachments, attach_errors = await self._resolve_attachments(
+                draft.attach_documents
+            )
+            if attach_errors:
+                # If any attachment failed to resolve at flush time, fail
+                # the send loudly. The user already saw success at tool-
+                # call time (where we eagerly resolve), so reaching this
+                # branch means the file was deleted between then and
+                # now — surface that instead of sending a half-empty
+                # email.
+                raise RuntimeError(
+                    "attachment resolution failed: " + "; ".join(attach_errors)
+                )
 
             sent_id = await runtime.backend.send(
                 to=draft.to,
@@ -1395,50 +1410,145 @@ class InboxService(Service):
     async def _resolve_attachments(
         self,
         document_ids: list[str] | None,
-    ) -> list[EmailAttachment]:
-        """Resolve knowledge store document IDs to email attachments."""
-        if not document_ids or self._knowledge is None:
-            return []
+    ) -> tuple[list[EmailAttachment], list[str]]:
+        """Resolve attachment refs to email attachments.
+
+        Accepts two URI formats:
+
+        - **Knowledge document ref** — ``<source_id>:<path>``, e.g.
+          ``local_docs:reports/march.pdf``. Resolved via the active
+          ``KnowledgeService`` backend that owns that source_id. Same
+          shape as before; existing knowledge attachments still work.
+
+        - **Workspace file ref** — ``workspace:<user_id>/<conv_id>/<skill>/<path>``,
+          e.g. ``workspace:usr_28ff/cc2b54.../pdf/po-00006567.pdf``. Resolved
+          via ``SkillService._resolve_workspace_file`` (which tries the
+          per-conversation workspace first, then falls back to the legacy
+          per-(user, skill) path). Self-contained on purpose so the outbox
+          processor — which runs decoupled from the original tool call's
+          user context — can still resolve the file at flush time.
+
+        Returns a tuple ``(attachments, errors)``. ``errors`` is a list
+        of human-readable strings describing why each unresolved ref
+        failed; the calling tool surfaces them as a ``ToolResult`` error
+        so the AI sees the failure instead of silently shipping an
+        attachment-less email.
+        """
+        if not document_ids:
+            return [], []
 
         attachments: list[EmailAttachment] = []
+        errors: list[str] = []
         for doc_id in document_ids:
             try:
-                parts = doc_id.split(":", 1)
-                if len(parts) != 2:
-                    logger.warning("Invalid document ID format: %s", doc_id)
-                    continue
-                source_id_prefix, path = parts[0], parts[1]
-
-                backend = None
-                for sid, b in self._knowledge.backends.items():
-                    if sid == doc_id[: len(sid)]:
-                        backend = b
-                        path = doc_id[len(sid) + 1 :]
-                        break
-                if backend is None:
-                    for sid, b in self._knowledge.backends.items():
-                        if sid.endswith(source_id_prefix):
-                            backend = b
-                            break
-                if backend is None:
-                    logger.warning("No backend found for document: %s", doc_id)
-                    continue
-
-                content = await backend.get_document(path)
-                if content is None:
-                    logger.warning("Document not found: %s", doc_id)
-                    continue
-
-                attachments.append(
-                    EmailAttachment(
-                        filename=content.meta.name,
-                        data=content.data,
-                        mime_type=content.meta.mime_type,
-                    )
+                if doc_id.startswith("workspace:"):
+                    att, err = await self._resolve_workspace_attachment(doc_id)
+                else:
+                    att, err = await self._resolve_knowledge_attachment(doc_id)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to resolve attachment %s",
+                    doc_id,
+                    exc_info=True,
                 )
-            except Exception:
-                logger.warning("Failed to resolve attachment: %s", doc_id, exc_info=True)
-        return attachments
+                att, err = None, f"{doc_id}: {exc}"
+            if att is not None:
+                attachments.append(att)
+            elif err is not None:
+                errors.append(err)
+        return attachments, errors
+
+    async def _resolve_knowledge_attachment(
+        self,
+        doc_id: str,
+    ) -> tuple[EmailAttachment | None, str | None]:
+        """Look up a knowledge-store ref and read its bytes."""
+        if self._knowledge is None:
+            return None, f"{doc_id}: knowledge service not available"
+        parts = doc_id.split(":", 1)
+        if len(parts) != 2:
+            return None, f"{doc_id}: invalid document ID format"
+        source_id_prefix, path = parts[0], parts[1]
+
+        backend = None
+        for sid, b in self._knowledge.backends.items():
+            if sid == doc_id[: len(sid)]:
+                backend = b
+                path = doc_id[len(sid) + 1 :]
+                break
+        if backend is None:
+            for sid, b in self._knowledge.backends.items():
+                if sid.endswith(source_id_prefix):
+                    backend = b
+                    break
+        if backend is None:
+            return None, f"{doc_id}: no knowledge backend matches"
+
+        content = await backend.get_document(path)
+        if content is None:
+            return None, f"{doc_id}: document not found in knowledge store"
+
+        return (
+            EmailAttachment(
+                filename=content.meta.name,
+                data=content.data,
+                mime_type=content.meta.mime_type,
+            ),
+            None,
+        )
+
+    async def _resolve_workspace_attachment(
+        self,
+        doc_id: str,
+    ) -> tuple[EmailAttachment | None, str | None]:
+        """Look up a ``workspace:<user>/<conv>/<skill>/<path>`` ref and
+        read the file's bytes off disk via ``SkillService``."""
+        if self._skills is None:
+            return None, f"{doc_id}: skills service not available"
+        # Strip the scheme.
+        body = doc_id[len("workspace:") :]
+        # Expect at least 4 path segments: user / conv / skill / path...
+        parts = body.split("/", 3)
+        if len(parts) < 4:
+            return (
+                None,
+                (
+                    f"{doc_id}: invalid workspace ref — expected "
+                    "'workspace:<user_id>/<conv_id>/<skill>/<path>'"
+                ),
+            )
+        user_id, conv_id, skill_name, rel_path = parts
+        if not user_id or not skill_name or not rel_path:
+            return None, f"{doc_id}: workspace ref has empty segments"
+
+        # Resolve via SkillService — handles conv-scoped + legacy
+        # fallback + path traversal check.
+        target, err = self._skills._resolve_workspace_file(
+            user_id=user_id,
+            skill_name=skill_name,
+            rel_path=rel_path,
+            conversation_id=conv_id or None,
+        )
+        if err is not None or target is None:
+            return None, f"{doc_id}: {err or 'not found'}"
+
+        try:
+            data = await asyncio.to_thread(target.read_bytes)
+        except OSError as exc:
+            return None, f"{doc_id}: cannot read file: {exc}"
+
+        # Mime sniff + filename from the path basename.
+        import mimetypes
+
+        mime_type, _enc = mimetypes.guess_type(target.name)
+        return (
+            EmailAttachment(
+                filename=target.name,
+                data=data,
+                mime_type=mime_type or "application/octet-stream",
+            ),
+            None,
+        )
 
     # ── ToolProvider ─────────────────────────────────────────────────
 
@@ -1531,9 +1641,10 @@ class InboxService(Service):
                 name="inbox_reply",
                 description=(
                     "Reply to an email message in a specific mailbox. The "
-                    "reply is threaded in the same conversation. Provide the "
-                    "body as HTML. Optionally attach documents from the "
-                    "knowledge store by document ID."
+                    "reply is threaded in the same conversation. Provide "
+                    "the body as HTML. Optionally attach files via "
+                    "``attach_documents`` — see that parameter for the "
+                    "two supported reference formats."
                 ),
                 parameters=[
                     ToolParameter(
@@ -1561,8 +1672,18 @@ class InboxService(Service):
                         name="attach_documents",
                         type=ToolParameterType.ARRAY,
                         description=(
-                            "List of knowledge store document IDs to attach "
-                            "(e.g., ['local:docs/report.pdf']). Optional."
+                            "Optional list of attachment refs. Two formats:\n"
+                            "1. **Knowledge store**: ``<source_id>:<path>`` "
+                            "(e.g. ``local_docs:reports/march.pdf``).\n"
+                            "2. **Skill workspace file**: "
+                            "``workspace:<skill>/<path>`` (e.g. "
+                            "``workspace:pdf/po-00006567.pdf``). Resolves "
+                            "in the current conversation's workspace, so "
+                            "you can attach files you generated this turn "
+                            "via write_skill_workspace_file + "
+                            "run_workspace_script. If any ref fails to "
+                            "resolve the email is NOT sent — fix or remove "
+                            "the failing ref and retry."
                         ),
                         required=False,
                     ),
@@ -1573,8 +1694,8 @@ class InboxService(Service):
                 name="inbox_send",
                 description=(
                     "Compose and send a new email from a specific mailbox. "
-                    "Optionally attach documents from the knowledge store by "
-                    "document ID."
+                    "Optionally attach files via ``attach_documents`` — see "
+                    "that parameter for the two supported reference formats."
                 ),
                 parameters=[
                     ToolParameter(
@@ -1613,8 +1734,18 @@ class InboxService(Service):
                         name="attach_documents",
                         type=ToolParameterType.ARRAY,
                         description=(
-                            "List of knowledge store document IDs to attach "
-                            "(e.g., ['local:docs/report.pdf']). Optional."
+                            "Optional list of attachment refs. Two formats:\n"
+                            "1. **Knowledge store**: ``<source_id>:<path>`` "
+                            "(e.g. ``local_docs:reports/march.pdf``).\n"
+                            "2. **Skill workspace file**: "
+                            "``workspace:<skill>/<path>`` (e.g. "
+                            "``workspace:pdf/po-00006567.pdf``). Resolves "
+                            "in the current conversation's workspace, so "
+                            "you can attach files you generated this turn "
+                            "via write_skill_workspace_file + "
+                            "run_workspace_script. If any ref fails to "
+                            "resolve the email is NOT sent — fix or remove "
+                            "the failing ref and retry."
                         ),
                         required=False,
                     ),
@@ -1738,6 +1869,52 @@ class InboxService(Service):
             indent=2,
         )
 
+    @staticmethod
+    def _normalize_attach_refs(
+        refs: Any,
+        injected_user_id: str,
+        injected_conv_id: str,
+    ) -> list[str]:
+        """Expand short workspace refs to the self-contained URI form.
+
+        AI-friendly form: ``workspace:<skill>/<path>`` (omits user_id and
+        conv_id since the AI has them implicitly via the injected args).
+        Outbox-storable form: ``workspace:<user_id>/<conv_id>/<skill>/<path>``
+        (self-contained so the outbox processor can resolve at flush
+        time without any caller context).
+
+        Knowledge document refs (``<source>:<path>``) and already-full
+        workspace URIs pass through untouched.
+        """
+        if not isinstance(refs, list):
+            return []
+        out: list[str] = []
+        for raw in refs:
+            ref = str(raw or "").strip()
+            if not ref:
+                continue
+            if not ref.startswith("workspace:"):
+                out.append(ref)
+                continue
+            body = ref[len("workspace:") :]
+            parts = body.split("/", 3)
+            # Already 4+ segments → self-contained URI, keep as-is.
+            if len(parts) >= 4:
+                out.append(ref)
+                continue
+            # Short form ``workspace:<skill>/<path>`` → expand using
+            # the injected user_id + conv_id.
+            if len(parts) >= 2 and injected_user_id and injected_conv_id:
+                skill_path = body  # everything after "workspace:"
+                out.append(
+                    f"workspace:{injected_user_id}/{injected_conv_id}/{skill_path}"
+                )
+                continue
+            # Couldn't expand — pass through and let the resolver
+            # reject it with a helpful error.
+            out.append(ref)
+        return out
+
     async def _tool_reply(self, args: dict[str, Any]) -> str:
         user_ctx = get_current_user()
         mailbox_id = str(args.get("mailbox_id") or "")
@@ -1753,7 +1930,19 @@ class InboxService(Service):
         if not body_html:
             return "body_html is required."
 
-        attachments = await self._resolve_attachments(args.get("attach_documents"))
+        attach_refs = self._normalize_attach_refs(
+            args.get("attach_documents"),
+            str(args.get("_user_id") or ""),
+            str(args.get("_conversation_id") or ""),
+        )
+        attachments, attach_errors = await self._resolve_attachments(attach_refs)
+        if attach_errors:
+            return (
+                "Could not attach: "
+                + "; ".join(attach_errors)
+                + ". The reply was NOT sent. Fix or remove the failing "
+                "attachments and retry."
+            )
 
         try:
             sent_id = await self.reply_to_message(
@@ -1799,7 +1988,19 @@ class InboxService(Service):
         to = [EmailAddress(email=addr) for addr in to_raw]
         cc_raw = args.get("cc") or []
         cc = [EmailAddress(email=addr) for addr in cc_raw] if cc_raw else None
-        attachments = await self._resolve_attachments(args.get("attach_documents"))
+        attach_refs = self._normalize_attach_refs(
+            args.get("attach_documents"),
+            str(args.get("_user_id") or ""),
+            str(args.get("_conversation_id") or ""),
+        )
+        attachments, attach_errors = await self._resolve_attachments(attach_refs)
+        if attach_errors:
+            return (
+                "Could not attach: "
+                + "; ".join(attach_errors)
+                + ". The email was NOT sent. Fix or remove the failing "
+                "attachments and retry."
+            )
 
         try:
             sent_id = await self.send_message(

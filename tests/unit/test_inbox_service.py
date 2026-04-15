@@ -994,3 +994,147 @@ class TestAiTools:
         )
         assert "don't have access" in result
         assert "/inbox mailboxes" in result
+
+
+# ── Workspace attachment resolution ───────────────────────────────
+
+
+class TestWorkspaceAttachments:
+    """The inbox tools should accept ``workspace:<skill>/<path>`` refs in
+    addition to knowledge document IDs, resolve them via SkillService,
+    and surface failures explicitly so the AI can't claim a successful
+    send when an attachment failed to attach."""
+
+    @pytest.mark.asyncio
+    async def test_normalize_short_workspace_ref_expanded(self) -> None:
+        """A short ``workspace:<skill>/<path>`` ref is rewritten to the
+        full self-contained URI form using injected user/conv ids."""
+        out = InboxService._normalize_attach_refs(
+            ["workspace:pdf/po-1.pdf"],
+            injected_user_id="usr_brian",
+            injected_conv_id="conv_xyz",
+        )
+        assert out == ["workspace:usr_brian/conv_xyz/pdf/po-1.pdf"]
+
+    @pytest.mark.asyncio
+    async def test_normalize_full_uri_passthrough(self) -> None:
+        """Already-full workspace URIs and knowledge IDs pass through
+        the normalizer untouched."""
+        out = InboxService._normalize_attach_refs(
+            [
+                "workspace:usr_a/conv_b/pdf/file.pdf",
+                "local_docs:reports/march.pdf",
+            ],
+            injected_user_id="usr_brian",
+            injected_conv_id="conv_xyz",
+        )
+        assert out == [
+            "workspace:usr_a/conv_b/pdf/file.pdf",
+            "local_docs:reports/march.pdf",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_resolve_workspace_attachment_reads_bytes(
+        self,
+        inbox_service: InboxService,
+        tmp_path: Any,
+    ) -> None:
+        """Pointing a workspace ref at a real file on disk produces an
+        EmailAttachment with the right filename, bytes, and mime type."""
+        # Build a minimal fake SkillService whose
+        # ``_resolve_workspace_file`` returns the staged file.
+        staged = tmp_path / "po.pdf"
+        staged.write_bytes(b"%PDF-1.4 fake")
+
+        class FakeSkills:
+            def _resolve_workspace_file(
+                self, user_id, skill_name, rel_path, conversation_id
+            ):
+                return staged, None
+
+        inbox_service._skills = FakeSkills()
+
+        atts, errs = await inbox_service._resolve_attachments(
+            ["workspace:usr_a/conv_b/pdf/po.pdf"]
+        )
+        assert errs == []
+        assert len(atts) == 1
+        assert atts[0].filename == "po.pdf"
+        assert atts[0].data == b"%PDF-1.4 fake"
+        assert atts[0].mime_type == "application/pdf"
+
+    @pytest.mark.asyncio
+    async def test_resolve_workspace_attachment_missing_file(
+        self,
+        inbox_service: InboxService,
+    ) -> None:
+        """A workspace ref that doesn't resolve produces an error
+        string instead of silently dropping."""
+
+        class FakeSkills:
+            def _resolve_workspace_file(
+                self, user_id, skill_name, rel_path, conversation_id
+            ):
+                return None, "File not found: po.pdf"
+
+        inbox_service._skills = FakeSkills()
+
+        atts, errs = await inbox_service._resolve_attachments(
+            ["workspace:usr_a/conv_b/pdf/po.pdf"]
+        )
+        assert atts == []
+        assert len(errs) == 1
+        assert "po.pdf" in errs[0]
+        assert "not found" in errs[0].lower()
+
+    @pytest.mark.asyncio
+    async def test_resolve_workspace_attachment_invalid_uri(
+        self,
+        inbox_service: InboxService,
+    ) -> None:
+        """A workspace URI with too few segments errors out instead of
+        crashing."""
+        inbox_service._skills = object()  # any non-None
+        atts, errs = await inbox_service._resolve_attachments(
+            ["workspace:not_enough_segments"]
+        )
+        assert atts == []
+        assert len(errs) == 1
+        assert "invalid" in errs[0].lower()
+
+    @pytest.mark.asyncio
+    async def test_inbox_send_fails_loudly_on_unresolved_attachment(
+        self,
+        inbox_service: InboxService,
+    ) -> None:
+        """If any attachment in inbox_send fails to resolve, the email
+        is NOT sent and the tool returns an error so the AI sees it."""
+        mb = _make_mailbox(mailbox_id="mbx_send")
+        await _attach_runtime(inbox_service, mb, FakeEmailBackend())
+
+        class FakeSkills:
+            def _resolve_workspace_file(
+                self, user_id, skill_name, rel_path, conversation_id
+            ):
+                return None, "File not found: missing.pdf"
+
+        inbox_service._skills = FakeSkills()
+        set_current_user(_owner())
+
+        result = await inbox_service.execute_tool(
+            "inbox_send",
+            {
+                "mailbox_id": mb.id,
+                "to": ["recipient@example.com"],
+                "subject": "Here it is",
+                "body_html": "<p>Attached.</p>",
+                "attach_documents": ["workspace:pdf/missing.pdf"],
+                "_user_id": "owner",
+                "_conversation_id": "conv_xyz",
+            },
+        )
+        assert "Could not attach" in result
+        assert "NOT sent" in result
+        # And the backend was never asked to send.
+        runtime = inbox_service._runtimes[mb.id]
+        assert getattr(runtime.backend, "sent", []) == []
