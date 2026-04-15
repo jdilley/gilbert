@@ -57,7 +57,13 @@ class KnowledgeService(Service):
             capabilities=frozenset({"knowledge", "ai_tools", "ws_handlers"}),
             requires=frozenset({"entity_storage"}),
             optional=frozenset({"scheduler", "configuration", "event_bus", "vision", "ocr"}),
-            events=frozenset({"knowledge.document.indexed", "knowledge.document.removed", "knowledge.document.discovered"}),
+            events=frozenset(
+                {
+                    "knowledge.document.indexed",
+                    "knowledge.document.removed",
+                    "knowledge.document.discovered",
+                }
+            ),
             toggleable=True,
             toggle_description="Document knowledge store",
         )
@@ -70,7 +76,8 @@ class KnowledgeService(Service):
         return self._backends.get(source_id)
 
     async def resolve_document(
-        self, full_path: str,
+        self,
+        full_path: str,
     ) -> tuple[DocumentBackend, "DocumentMeta", str] | None:
         """Resolve a ``source_id/doc_path`` string to a backend, metadata, and doc path.
 
@@ -79,7 +86,7 @@ class KnowledgeService(Service):
         for sid, backend in self._backends.items():
             prefix = sid + "/"
             if full_path.startswith(prefix):
-                doc_path = full_path[len(prefix):]
+                doc_path = full_path[len(prefix) :]
                 meta = await backend.get_metadata(doc_path)
                 if meta is not None:
                     return backend, meta, doc_path
@@ -120,7 +127,9 @@ class KnowledgeService(Service):
         try:
             import chromadb
 
-            persist_dir = str(Path(chromadb_path if 'chromadb_path' in dir() else ".gilbert/chromadb"))
+            persist_dir = str(
+                Path(chromadb_path if "chromadb_path" in dir() else ".gilbert/chromadb")
+            )
             Path(persist_dir).mkdir(parents=True, exist_ok=True)
             self._chroma_client = chromadb.PersistentClient(path=persist_dir)
             self._collection = self._chroma_client.get_or_create_collection(
@@ -140,6 +149,7 @@ class KnowledgeService(Service):
         # Event bus
         # Entity storage for document tracking metadata (required for change detection)
         from gilbert.interfaces.storage import StorageProvider
+
         storage_svc = resolver.require_capability("entity_storage")
         if isinstance(storage_svc, StorageProvider):
             self._storage = storage_svc.backend
@@ -163,6 +173,7 @@ class KnowledgeService(Service):
             if backend_cls is None:
                 # Try importing known backends
                 import gilbert.integrations.local_documents  # noqa: F401
+
                 backend_cls = DocumentBackend.registered_backends().get(backend_type)
 
             if backend_cls is None:
@@ -175,7 +186,9 @@ class KnowledgeService(Service):
                 self._backends[backend.source_id] = backend
                 logger.info("Registered knowledge backend: %s", backend.source_id)
             except Exception:
-                logger.exception("Failed to initialize knowledge backend: %s:%s", backend_type, backend_label)
+                logger.exception(
+                    "Failed to initialize knowledge backend: %s:%s", backend_type, backend_label
+                )
 
         # Register sync job with scheduler
         scheduler = resolver.get_capability("scheduler")
@@ -233,56 +246,79 @@ class KnowledgeService(Service):
 
         params = [
             ConfigParam(
-                key="chunk_size", type=ToolParameterType.INTEGER,
+                key="chunk_size",
+                type=ToolParameterType.INTEGER,
                 description="Text chunk size for document indexing.",
                 default=800,
             ),
             ConfigParam(
-                key="chunk_overlap", type=ToolParameterType.INTEGER,
+                key="chunk_overlap",
+                type=ToolParameterType.INTEGER,
                 description="Overlap between text chunks.",
                 default=200,
             ),
             ConfigParam(
-                key="max_search_results", type=ToolParameterType.INTEGER,
+                key="max_search_results",
+                type=ToolParameterType.INTEGER,
                 description="Maximum results returned per search.",
                 default=20,
             ),
             ConfigParam(
-                key="sync_interval_seconds", type=ToolParameterType.INTEGER,
+                key="sync_interval_seconds",
+                type=ToolParameterType.INTEGER,
                 description="How often to sync document sources (seconds).",
                 default=300,
             ),
             ConfigParam(
-                key="chromadb_path", type=ToolParameterType.STRING,
+                key="chromadb_path",
+                type=ToolParameterType.STRING,
                 description="Path to ChromaDB persistence directory.",
-                default=".gilbert/chromadb", restart_required=True,
+                default=".gilbert/chromadb",
+                restart_required=True,
             ),
             ConfigParam(
-                key="vision_enabled", type=ToolParameterType.BOOLEAN,
+                key="vision_enabled",
+                type=ToolParameterType.BOOLEAN,
                 description="Enable vision-based document analysis.",
                 default=True,
             ),
         ]
         # Add per-backend-type enable toggle + config params
         for name, backend_cls in DocumentBackend.registered_backends().items():
-            params.append(ConfigParam(
-                key=f"{name}.enabled", type=ToolParameterType.BOOLEAN,
-                description=f"Enable the {name} knowledge backend.",
-                default=False, restart_required=True, backend_param=True,
-            ))
-            params.append(ConfigParam(
-                key=f"{name}.name", type=ToolParameterType.STRING,
-                description=f"Display name for this {name} backend.",
-                default=name, restart_required=True, backend_param=True,
-            ))
+            params.append(
+                ConfigParam(
+                    key=f"{name}.enabled",
+                    type=ToolParameterType.BOOLEAN,
+                    description=f"Enable the {name} knowledge backend.",
+                    default=False,
+                    restart_required=True,
+                    backend_param=True,
+                )
+            )
+            params.append(
+                ConfigParam(
+                    key=f"{name}.name",
+                    type=ToolParameterType.STRING,
+                    description=f"Display name for this {name} backend.",
+                    default=name,
+                    restart_required=True,
+                    backend_param=True,
+                )
+            )
             for bp in backend_cls.backend_config_params():
-                params.append(ConfigParam(
-                    key=f"{name}.{bp.key}", type=bp.type,
-                    description=bp.description, default=bp.default,
-                    restart_required=True, backend_param=True,
-                    sensitive=bp.sensitive, choices=bp.choices,
-                    multiline=bp.multiline,
-                ))
+                params.append(
+                    ConfigParam(
+                        key=f"{name}.{bp.key}",
+                        type=bp.type,
+                        description=bp.description,
+                        default=bp.default,
+                        restart_required=True,
+                        backend_param=True,
+                        sensitive=bp.sensitive,
+                        choices=bp.choices,
+                        multiline=bp.multiline,
+                    )
+                )
         return params
 
     @staticmethod
@@ -299,12 +335,14 @@ class KnowledgeService(Service):
         for backend_name in DocumentBackend.registered_backends():
             sub = section.get(backend_name)
             if isinstance(sub, dict) and sub.get("enabled"):
-                configs.append({
-                    "type": backend_name,
-                    "name": sub.get("name", backend_name),
-                    "enabled": True,
-                    **{k: v for k, v in sub.items() if k not in ("enabled", "name", "type")},
-                })
+                configs.append(
+                    {
+                        "type": backend_name,
+                        "name": sub.get("name", backend_name),
+                        "enabled": True,
+                        **{k: v for k, v in sub.items() if k not in ("enabled", "name", "type")},
+                    }
+                )
 
         return configs
 
@@ -323,7 +361,9 @@ class KnowledgeService(Service):
 
         content = await backend.get_document(meta.path)
         if content is None:
-            logger.warning("Failed to download document: %s (get_document returned None)", meta.document_id)
+            logger.warning(
+                "Failed to download document: %s (get_document returned None)", meta.document_id
+            )
             return 0
 
         import asyncio
@@ -337,7 +377,9 @@ class KnowledgeService(Service):
         if not text.strip():
             logger.warning(
                 "No text extracted from %s (%s, %d bytes) — may be scanned/image-only",
-                meta.document_id, meta.document_type.value, meta.size_bytes,
+                meta.document_id,
+                meta.document_type.value,
+                meta.size_bytes,
             )
             return 0
 
@@ -346,26 +388,32 @@ class KnowledgeService(Service):
             logger.info(
                 "Extraction stats for %s: %d pages, %d OCR pages (%d chars), "
                 "%d Vision pages (%d chars), %d total chars",
-                meta.name, stats.pages, stats.ocr_pages, stats.ocr_chars,
-                stats.vision_pages, stats.vision_chars, stats.total_chars,
+                meta.name,
+                stats.pages,
+                stats.ocr_pages,
+                stats.ocr_chars,
+                stats.vision_pages,
+                stats.vision_chars,
+                stats.total_chars,
             )
 
         chunks = chunk_text(
-            text, meta.document_id,
+            text,
+            meta.document_id,
             chunk_size=self._chunk_size,
             chunk_overlap=self._chunk_overlap,
         )
         if not chunks:
-            logger.warning("Chunking produced 0 chunks for %s (%d chars of text)", meta.document_id, len(text))
+            logger.warning(
+                "Chunking produced 0 chunks for %s (%d chars of text)", meta.document_id, len(text)
+            )
             return 0
 
         doc_id = meta.document_id
 
         # Remove old chunks for this document
         try:
-            await asyncio.to_thread(
-                self._collection.delete, where={"document_id": doc_id}
-            )
+            await asyncio.to_thread(self._collection.delete, where={"document_id": doc_id})
         except Exception:
             pass  # May not exist yet
 
@@ -398,14 +446,17 @@ class KnowledgeService(Service):
         await self._cache_text(doc_id, text)
 
         await self._track_document(meta, indexed_chunks=len(chunks))
-        await self._emit("knowledge.document.indexed", {
-            "document_id": doc_id,
-            "source_id": meta.source_id,
-            "name": meta.name,
-            "path": meta.path,
-            "type": meta.document_type.value,
-            "chunks": len(chunks),
-        })
+        await self._emit(
+            "knowledge.document.indexed",
+            {
+                "document_id": doc_id,
+                "source_id": meta.source_id,
+                "name": meta.name,
+                "path": meta.path,
+                "type": meta.document_type.value,
+                "chunks": len(chunks),
+            },
+        )
 
         return len(chunks)
 
@@ -414,10 +465,14 @@ class KnowledgeService(Service):
         if self._storage is None:
             return
         try:
-            await self._storage.put("knowledge_text", document_id, {
-                "document_id": document_id,
-                "text": text,
-            })
+            await self._storage.put(
+                "knowledge_text",
+                document_id,
+                {
+                    "document_id": document_id,
+                    "text": text,
+                },
+            )
         except Exception:
             logger.warning("Failed to cache extracted text for %s", document_id)
 
@@ -456,9 +511,7 @@ class KnowledgeService(Service):
                     include=["metadatas"],
                 )
                 stored_ids = {
-                    m["document_id"]
-                    for m in (stored.get("metadatas") or [])
-                    if "document_id" in m
+                    m["document_id"] for m in (stored.get("metadatas") or []) if "document_id" in m
                 }
                 removed_ids = stored_ids - current_doc_ids
                 for removed_id in removed_ids:
@@ -467,10 +520,13 @@ class KnowledgeService(Service):
                     except Exception:
                         pass
                     await self._untrack_document(removed_id)
-                    await self._emit("knowledge.document.removed", {
-                        "document_id": removed_id,
-                        "source_id": backend.source_id,
-                    })
+                    await self._emit(
+                        "knowledge.document.removed",
+                        {
+                            "document_id": removed_id,
+                            "source_id": backend.source_id,
+                        },
+                    )
                     logger.info("Document removed from index: %s", removed_id)
             except Exception:
                 pass
@@ -498,25 +554,32 @@ class KnowledgeService(Service):
                             continue
                         logger.info(
                             "Re-indexing changed document: %s (modified: %s -> %s)",
-                            meta.name, stored_modified, meta.last_modified,
+                            meta.name,
+                            stored_modified,
+                            meta.last_modified,
                         )
             except Exception:
                 logger.warning("Failed to check tracking for %s", meta.document_id, exc_info=True)
 
             if is_new:
                 await self._track_document(meta)
-                await self._emit("knowledge.document.discovered", {
-                    "document_id": meta.document_id,
-                    "source_id": meta.source_id,
-                    "name": meta.name,
-                    "path": meta.path,
-                    "type": meta.document_type.value,
-                })
+                await self._emit(
+                    "knowledge.document.discovered",
+                    {
+                        "document_id": meta.document_id,
+                        "source_id": meta.source_id,
+                        "name": meta.name,
+                        "path": meta.path,
+                        "type": meta.document_type.value,
+                    },
+                )
 
             to_index.append(meta)
 
         if not to_index:
-            logger.info("Sync complete for %s: 0 documents indexed (all up to date)", backend.source_id)
+            logger.info(
+                "Sync complete for %s: 0 documents indexed (all up to date)", backend.source_id
+            )
             return 0
 
         # Index documents concurrently (up to 4 at a time)
@@ -531,7 +594,9 @@ class KnowledgeService(Service):
                 try:
                     logger.info(
                         "Indexing: %s (%s, %d bytes)",
-                        meta.name, meta.document_type.value, meta.size_bytes,
+                        meta.name,
+                        meta.document_type.value,
+                        meta.size_bytes,
                     )
                     chunks = await self.index_document(backend, meta)
                     if chunks > 0:
@@ -571,20 +636,24 @@ class KnowledgeService(Service):
         existing = await self._storage.get("knowledge_documents", doc_id)
         added_at = existing.get("added_at", now) if existing else now
 
-        await self._storage.put("knowledge_documents", doc_id, {
-            "document_id": doc_id,
-            "source_id": meta.source_id,
-            "path": meta.path,
-            "name": meta.name,
-            "type": meta.document_type.value,
-            "size_bytes": meta.size_bytes,
-            "last_modified": meta.last_modified,
-            "checksum": meta.checksum,
-            "external_url": meta.external_url,
-            "added_at": added_at,
-            "indexed_at": now if indexed_chunks > 0 else (existing or {}).get("indexed_at", ""),
-            "chunks": indexed_chunks or (existing or {}).get("chunks", 0),
-        })
+        await self._storage.put(
+            "knowledge_documents",
+            doc_id,
+            {
+                "document_id": doc_id,
+                "source_id": meta.source_id,
+                "path": meta.path,
+                "name": meta.name,
+                "type": meta.document_type.value,
+                "size_bytes": meta.size_bytes,
+                "last_modified": meta.last_modified,
+                "checksum": meta.checksum,
+                "external_url": meta.external_url,
+                "added_at": added_at,
+                "indexed_at": now if indexed_chunks > 0 else (existing or {}).get("indexed_at", ""),
+                "chunks": indexed_chunks or (existing or {}).get("chunks", 0),
+            },
+        )
 
     async def _untrack_document(self, document_id: str) -> None:
         """Remove document tracking info from entity store."""
@@ -609,10 +678,12 @@ class KnowledgeService(Service):
         if source_filter:
             filters.append(Filter(field="source_id", op=FilterOp.EQ, value=source_filter))
 
-        docs = await self._storage.query(Query(
-            collection="knowledge_documents",
-            filters=filters,
-        ))
+        docs = await self._storage.query(
+            Query(
+                collection="knowledge_documents",
+                filters=filters,
+            )
+        )
 
         if prefix:
             docs = [d for d in docs if d.get("path", "").startswith(prefix)]
@@ -624,11 +695,13 @@ class KnowledgeService(Service):
     async def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         """Publish an event if the event bus is available."""
         if self._event_bus is not None:
-            await self._event_bus.publish(Event(
-                event_type=event_type,
-                data=data,
-                source="knowledge",
-            ))
+            await self._event_bus.publish(
+                Event(
+                    event_type=event_type,
+                    data=data,
+                    source="knowledge",
+                )
+            )
 
     # --- Search ---
 
@@ -653,13 +726,15 @@ class KnowledgeService(Service):
         name_results: list[SearchResult] = []
         if name_matched_doc_id:
             name_results = self._vector_search(
-                query, effective_n,
+                query,
+                effective_n,
                 where_filter={"document_id": name_matched_doc_id},
             )
             if name_results:
                 logger.debug(
                     "Name-matched document %s: %d chunks found",
-                    name_matched_doc_id, len(name_results),
+                    name_matched_doc_id,
+                    len(name_results),
                 )
 
         # Phase 3: Broad vector search (may find different documents)
@@ -726,7 +801,9 @@ class KnowledgeService(Service):
         return None
 
     def _vector_search(
-        self, query: str, n_results: int,
+        self,
+        query: str,
+        n_results: int,
         where_filter: dict[str, Any] | None = None,
     ) -> list[SearchResult]:
         """Run a vector search on ChromaDB. Returns SearchResult list."""
@@ -754,17 +831,19 @@ class KnowledgeService(Service):
             distance = distances[i] if i < len(distances) else 1.0
             page = meta.get("page_number", -1)
 
-            search_results.append(SearchResult(
-                document_id=meta.get("document_id", ""),
-                source_id=meta.get("source_id", ""),
-                path=meta.get("path", ""),
-                name=meta.get("name", ""),
-                chunk_text=doc_text,
-                relevance_score=round(1.0 - distance, 4),
-                chunk_index=meta.get("chunk_index", 0),
-                page_number=page if page != -1 else None,
-                document_type=DocumentType(meta.get("document_type", "unknown")),
-            ))
+            search_results.append(
+                SearchResult(
+                    document_id=meta.get("document_id", ""),
+                    source_id=meta.get("source_id", ""),
+                    path=meta.get("path", ""),
+                    name=meta.get("name", ""),
+                    chunk_text=doc_text,
+                    relevance_score=round(1.0 - distance, 4),
+                    chunk_index=meta.get("chunk_index", 0),
+                    page_number=page if page != -1 else None,
+                    document_type=DocumentType(meta.get("document_type", "unknown")),
+                )
+            )
 
         return search_results
 
@@ -775,7 +854,7 @@ class KnowledgeService(Service):
         for sid, backend in self._backends.items():
             prefix = sid + ":"
             if document_id.startswith(prefix):
-                return backend, document_id[len(prefix):]
+                return backend, document_id[len(prefix) :]
         raise KeyError(f"No backend found for document: {document_id}")
 
     # --- ToolProvider protocol ---
@@ -799,16 +878,19 @@ class KnowledgeService(Service):
                 ),
                 parameters=[
                     ToolParameter(
-                        name="query", type=ToolParameterType.STRING,
+                        name="query",
+                        type=ToolParameterType.STRING,
                         description="Natural language search query.",
                     ),
                     ToolParameter(
-                        name="max_results", type=ToolParameterType.INTEGER,
+                        name="max_results",
+                        type=ToolParameterType.INTEGER,
                         description="Maximum results (default 5).",
                         required=False,
                     ),
                     ToolParameter(
-                        name="source", type=ToolParameterType.STRING,
+                        name="source",
+                        type=ToolParameterType.STRING,
                         description="Filter by source_id. Omit to search all.",
                         required=False,
                     ),
@@ -823,7 +905,8 @@ class KnowledgeService(Service):
                 description="Retrieve the full text content of a document by its ID.",
                 parameters=[
                     ToolParameter(
-                        name="document_id", type=ToolParameterType.STRING,
+                        name="document_id",
+                        type=ToolParameterType.STRING,
                         description="Document ID (source_id:path).",
                     ),
                 ],
@@ -837,12 +920,14 @@ class KnowledgeService(Service):
                 description="List documents available in the knowledge store.",
                 parameters=[
                     ToolParameter(
-                        name="source", type=ToolParameterType.STRING,
+                        name="source",
+                        type=ToolParameterType.STRING,
                         description="Filter by source_id. Omit to list all.",
                         required=False,
                     ),
                     ToolParameter(
-                        name="prefix", type=ToolParameterType.STRING,
+                        name="prefix",
+                        type=ToolParameterType.STRING,
                         description="Filter by path prefix.",
                         required=False,
                     ),
@@ -871,11 +956,13 @@ class KnowledgeService(Service):
                 ),
                 parameters=[
                     ToolParameter(
-                        name="document_id", type=ToolParameterType.STRING,
+                        name="document_id",
+                        type=ToolParameterType.STRING,
                         description="Document ID (source_id:path).",
                     ),
                     ToolParameter(
-                        name="page", type=ToolParameterType.INTEGER,
+                        name="page",
+                        type=ToolParameterType.INTEGER,
                         description="Page number to render (1-based).",
                     ),
                 ],
@@ -895,7 +982,8 @@ class KnowledgeService(Service):
                 ),
                 parameters=[
                     ToolParameter(
-                        name="type", type=ToolParameterType.STRING,
+                        name="type",
+                        type=ToolParameterType.STRING,
                         description=(
                             "File type category to filter by: "
                             "'image', 'video', 'audio', 'pdf', 'document' "
@@ -905,20 +993,22 @@ class KnowledgeService(Service):
                         required=False,
                     ),
                     ToolParameter(
-                        name="name", type=ToolParameterType.STRING,
+                        name="name",
+                        type=ToolParameterType.STRING,
                         description=(
-                            "Name or partial name to search for "
-                            "(case-insensitive substring match)."
+                            "Name or partial name to search for (case-insensitive substring match)."
                         ),
                         required=False,
                     ),
                     ToolParameter(
-                        name="source", type=ToolParameterType.STRING,
+                        name="source",
+                        type=ToolParameterType.STRING,
                         description="Filter by source_id. Omit to search all sources.",
                         required=False,
                     ),
                     ToolParameter(
-                        name="max_results", type=ToolParameterType.INTEGER,
+                        name="max_results",
+                        type=ToolParameterType.INTEGER,
                         description="Maximum results to return (default 20).",
                         required=False,
                     ),
@@ -930,15 +1020,18 @@ class KnowledgeService(Service):
                 description="Upload a new document to a writable source and index it.",
                 parameters=[
                     ToolParameter(
-                        name="source", type=ToolParameterType.STRING,
+                        name="source",
+                        type=ToolParameterType.STRING,
                         description="Target source_id for upload.",
                     ),
                     ToolParameter(
-                        name="path", type=ToolParameterType.STRING,
+                        name="path",
+                        type=ToolParameterType.STRING,
                         description="File path within the source.",
                     ),
                     ToolParameter(
-                        name="content", type=ToolParameterType.STRING,
+                        name="content",
+                        type=ToolParameterType.STRING,
                         description="Text content to store.",
                     ),
                 ],
@@ -952,7 +1045,8 @@ class KnowledgeService(Service):
                 description="Manually trigger re-indexing of a specific document.",
                 parameters=[
                     ToolParameter(
-                        name="document_id", type=ToolParameterType.STRING,
+                        name="document_id",
+                        type=ToolParameterType.STRING,
                         description="Document ID to re-index.",
                     ),
                 ],
@@ -1000,22 +1094,24 @@ class KnowledgeService(Service):
         source = arguments.get("source")
 
         response = await self.search(query, n_results=max_results, source_filter=source)
-        return json.dumps({
-            "query": response.query,
-            "total_searched": response.total_documents_searched,
-            "results": [
-                {
-                    "document_id": r.document_id,
-                    "name": r.name,
-                    "source_id": r.source_id,
-                    "relevance": r.relevance_score,
-                    "text": r.chunk_text,
-                    "page": r.page_number,
-                    "type": r.document_type.value,
-                }
-                for r in response.results
-            ],
-        })
+        return json.dumps(
+            {
+                "query": response.query,
+                "total_searched": response.total_documents_searched,
+                "results": [
+                    {
+                        "document_id": r.document_id,
+                        "name": r.name,
+                        "source_id": r.source_id,
+                        "relevance": r.relevance_score,
+                        "text": r.chunk_text,
+                        "page": r.page_number,
+                        "type": r.document_type.value,
+                    }
+                    for r in response.results
+                ],
+            }
+        )
 
     async def _tool_get_document(self, arguments: dict[str, Any]) -> str:
         document_id = arguments["document_id"]
@@ -1029,12 +1125,14 @@ class KnowledgeService(Service):
             return json.dumps({"error": f"Document not found: {document_id}"})
 
         text, _stats = extract_text(content)
-        return json.dumps({
-            "document_id": document_id,
-            "name": content.meta.name,
-            "type": content.meta.document_type.value,
-            "text": text[:50000],  # Cap at 50K chars for AI context
-        })
+        return json.dumps(
+            {
+                "document_id": document_id,
+                "name": content.meta.name,
+                "type": content.meta.document_type.value,
+                "text": text[:50000],  # Cap at 50K chars for AI context
+            }
+        )
 
     async def _tool_render_page(self, arguments: dict[str, Any]) -> str:
         document_id = arguments["document_id"]
@@ -1053,10 +1151,12 @@ class KnowledgeService(Service):
             return json.dumps({"error": f"Document not found: {document_id}"})
 
         if content.meta.document_type != DocumentType.PDF:
-            return json.dumps({
-                "error": f"Page rendering is only supported for PDF documents, "
-                         f"got {content.meta.document_type.value}",
-            })
+            return json.dumps(
+                {
+                    "error": f"Page rendering is only supported for PDF documents, "
+                    f"got {content.meta.document_type.value}",
+                }
+            )
 
         try:
             import fitz  # type: ignore[import-untyped]  # PyMuPDF
@@ -1071,9 +1171,11 @@ class KnowledgeService(Service):
         total_pages = len(doc)
         if page_num > total_pages:
             doc.close()
-            return json.dumps({
-                "error": f"Page {page_num} out of range (document has {total_pages} pages)",
-            })
+            return json.dumps(
+                {
+                    "error": f"Page {page_num} out of range (document has {total_pages} pages)",
+                }
+            )
 
         page = doc[page_num - 1]  # 0-based index
         # Render at 2x resolution for readability
@@ -1083,26 +1185,26 @@ class KnowledgeService(Service):
         doc.close()
 
         # Save to output directory with a stable filename
-        digest = hashlib.sha256(
-            f"{document_id}:{page_num}".encode()
-        ).hexdigest()[:12]
+        digest = hashlib.sha256(f"{document_id}:{page_num}".encode()).hexdigest()[:12]
         out_dir = get_output_dir("knowledge")
         filename = f"page_{digest}.png"
         out_path = out_dir / filename
         out_path.write_bytes(png_data)
 
         image_url = f"/output/knowledge/{filename}"
-        return json.dumps({
-            "document_id": document_id,
-            "page": page_num,
-            "total_pages": total_pages,
-            "image_url": image_url,
-            "markdown": f"![{content.meta.name} - Page {page_num}]({image_url})",
-            "instructions": (
-                "Include the markdown image tag in your response "
-                "to display the page in the chat."
-            ),
-        })
+        return json.dumps(
+            {
+                "document_id": document_id,
+                "page": page_num,
+                "total_pages": total_pages,
+                "image_url": image_url,
+                "markdown": f"![{content.meta.name} - Page {page_num}]({image_url})",
+                "instructions": (
+                    "Include the markdown image tag in your response "
+                    "to display the page in the chat."
+                ),
+            }
+        )
 
     # Type category → DocumentType members
     _TYPE_CATEGORIES: dict[str, set[DocumentType]] = {
@@ -1112,8 +1214,11 @@ class KnowledgeService(Service):
         "pdf": {DocumentType.PDF},
         "document": {DocumentType.WORD, DocumentType.EXCEL, DocumentType.POWERPOINT},
         "text": {
-            DocumentType.TEXT, DocumentType.MARKDOWN,
-            DocumentType.CSV, DocumentType.JSON, DocumentType.YAML,
+            DocumentType.TEXT,
+            DocumentType.MARKDOWN,
+            DocumentType.CSV,
+            DocumentType.JSON,
+            DocumentType.YAML,
         },
     }
 
@@ -1132,10 +1237,12 @@ class KnowledgeService(Service):
                 try:
                     allowed_types = {DocumentType(type_filter)}
                 except ValueError:
-                    return json.dumps({
-                        "error": f"Unknown type category: {type_filter}. "
-                                 f"Valid categories: {', '.join(sorted(self._TYPE_CATEGORIES))}",
-                    })
+                    return json.dumps(
+                        {
+                            "error": f"Unknown type category: {type_filter}. "
+                            f"Valid categories: {', '.join(sorted(self._TYPE_CATEGORIES))}",
+                        }
+                    )
 
         # Query backends directly
         matches: list[dict[str, Any]] = []
@@ -1173,33 +1280,39 @@ class KnowledgeService(Service):
             if len(matches) >= max_results:
                 break
 
-        return json.dumps({
-            "total_found": len(matches),
-            "files": matches,
-            "instructions": (
-                "For images, include the 'markdown' field value in your response "
-                "to display them in chat. For PDFs, use render_document_page to "
-                "show specific pages."
-            ) if matches else "No files found matching the criteria.",
-        })
+        return json.dumps(
+            {
+                "total_found": len(matches),
+                "files": matches,
+                "instructions": (
+                    "For images, include the 'markdown' field value in your response "
+                    "to display them in chat. For PDFs, use render_document_page to "
+                    "show specific pages."
+                )
+                if matches
+                else "No files found matching the criteria.",
+            }
+        )
 
     async def _tool_list_documents(self, arguments: dict[str, Any]) -> str:
         source = arguments.get("source")
         prefix = arguments.get("prefix", "")
 
         docs = await self._list_from_entity_store(source_filter=source, prefix=prefix)
-        return json.dumps([
-            {
-                "document_id": d.get("document_id", ""),
-                "name": d.get("name", ""),
-                "source_id": d.get("source_id", ""),
-                "type": d.get("type", ""),
-                "size": d.get("size_bytes", 0),
-                "modified": d.get("last_modified", ""),
-                "indexed": bool(d.get("indexed_at")),
-            }
-            for d in docs
-        ])
+        return json.dumps(
+            [
+                {
+                    "document_id": d.get("document_id", ""),
+                    "name": d.get("name", ""),
+                    "source_id": d.get("source_id", ""),
+                    "type": d.get("type", ""),
+                    "size": d.get("size_bytes", 0),
+                    "modified": d.get("last_modified", ""),
+                    "indexed": bool(d.get("indexed_at")),
+                }
+                for d in docs
+            ]
+        )
 
     def _tool_list_sources(self) -> str:
         sources = [
@@ -1227,11 +1340,13 @@ class KnowledgeService(Service):
             meta = await backend.upload_document(path, content.encode("utf-8"))
             # Auto-index
             chunks = await self.index_document(backend, meta)
-            return json.dumps({
-                "status": "uploaded",
-                "document_id": meta.document_id,
-                "chunks_indexed": chunks,
-            })
+            return json.dumps(
+                {
+                    "status": "uploaded",
+                    "document_id": meta.document_id,
+                    "chunks_indexed": chunks,
+                }
+            )
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -1267,13 +1382,16 @@ class KnowledgeService(Service):
 
         # Trigger sync in background
         import asyncio
+
         asyncio.ensure_future(self._sync_all())
 
-        return json.dumps({
-            "status": "reindex_started",
-            "tracking_records_cleared": cleared,
-            "message": f"Cleared {cleared} tracking records. Full re-index running in background.",
-        })
+        return json.dumps(
+            {
+                "status": "reindex_started",
+                "tracking_records_cleared": cleared,
+                "message": f"Cleared {cleared} tracking records. Full re-index running in background.",
+            }
+        )
 
     # --- WebSocket RPC handlers ---
 
@@ -1297,9 +1415,13 @@ class KnowledgeService(Service):
 
         # Query all documents for this source
         filters = [Filter(field="source_id", op=FilterOp.EQ, value=source_id)]
-        docs = await self._storage.query(Query(
-            collection="knowledge_documents", filters=filters, limit=5000,
-        ))
+        docs = await self._storage.query(
+            Query(
+                collection="knowledge_documents",
+                filters=filters,
+                limit=5000,
+            )
+        )
 
         # Build directory listing from stored paths
         prefix = path.rstrip("/") + "/" if path else ""
@@ -1321,21 +1443,25 @@ class KnowledgeService(Service):
                 folder_path = f"{prefix}{folder_name}" if prefix else folder_name
                 if folder_path not in seen_folders:
                     seen_folders.add(folder_path)
-                    children.append({
-                        "name": folder_name,
-                        "path": folder_path,
-                        "is_folder": True,
-                    })
+                    children.append(
+                        {
+                            "name": folder_name,
+                            "path": folder_path,
+                            "is_folder": True,
+                        }
+                    )
             else:
-                children.append({
-                    "name": d.get("name", rel),
-                    "path": doc_path,
-                    "is_folder": False,
-                    "size": d.get("size_bytes", 0),
-                    "modified": d.get("last_modified", ""),
-                    "type": d.get("type", ""),
-                    "external_url": d.get("external_url", ""),
-                })
+                children.append(
+                    {
+                        "name": d.get("name", rel),
+                        "path": doc_path,
+                        "is_folder": False,
+                        "size": d.get("size_bytes", 0),
+                        "modified": d.get("last_modified", ""),
+                        "type": d.get("type", ""),
+                        "external_url": d.get("external_url", ""),
+                    }
+                )
 
         children.sort(key=lambda c: (not c["is_folder"], c["name"].lower()))
         return children
@@ -1355,14 +1481,37 @@ class KnowledgeService(Service):
         source_id = frame.get("source_id", "")
         path = frame.get("path", "")
         if not source_id:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "source_id required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "source_id required",
+                "code": 400,
+            }
         children = await self.browse(source_id, path)
-        return {"type": "documents.browse.result", "ref": frame.get("id"), "source_id": source_id, "path": path, "children": children}
+        return {
+            "type": "documents.browse.result",
+            "ref": frame.get("id"),
+            "source_id": source_id,
+            "path": path,
+            "children": children,
+        }
 
     async def _ws_documents_search(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         query = frame.get("query", "").strip()
         if not query:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "query required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "query required",
+                "code": 400,
+            }
 
-        results = await self.search(query, source_filter=frame.get("source_id"), n_results=frame.get("max_results", 20))
-        return {"type": "documents.search.result", "ref": frame.get("id"), "results": results, "query": query}
+        results = await self.search(
+            query, source_filter=frame.get("source_id"), n_results=frame.get("max_results", 20)
+        )
+        return {
+            "type": "documents.search.result",
+            "ref": frame.get("id"),
+            "results": results,
+            "query": query,
+        }

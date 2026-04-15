@@ -132,9 +132,7 @@ def _callback_page(*, title: str, message: str, ok: bool) -> str:
     """Tiny inline HTML response — no external assets, no JS beyond the
     auto-close attempt for the success case."""
     color = "#10b981" if ok else "#ef4444"
-    auto_close = (
-        "<script>setTimeout(() => window.close(), 1500);</script>" if ok else ""
-    )
+    auto_close = "<script>setTimeout(() => window.close(), 1500);</script>" if ok else ""
     return f"""<!doctype html>
 <html>
 <head>

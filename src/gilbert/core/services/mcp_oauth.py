@@ -73,7 +73,8 @@ class EntityStorageTokenStorage(TokenStorage):
             return OAuthToken.model_validate(raw)
         except Exception:  # noqa: BLE001 - corrupted row shouldn't block the flow
             logger.warning(
-                "Discarding corrupted OAuth token row for %s", self._server_id,
+                "Discarding corrupted OAuth token row for %s",
+                self._server_id,
             )
             return None
 
@@ -91,7 +92,8 @@ class EntityStorageTokenStorage(TokenStorage):
             return OAuthClientInformationFull.model_validate(raw)
         except Exception:  # noqa: BLE001
             logger.warning(
-                "Discarding corrupted OAuth client info for %s", self._server_id,
+                "Discarding corrupted OAuth client info for %s",
+                self._server_id,
             )
             return None
 
@@ -195,7 +197,10 @@ class OAuthFlowManager:
         return flow.auth_url_future if flow else None
 
     async def complete(
-        self, state: str, code: str, received_state: str | None,
+        self,
+        state: str,
+        code: str,
+        received_state: str | None,
     ) -> bool:
         """Resolve the pending flow identified by ``state``.
 
@@ -252,6 +257,7 @@ def _make_redirect_handler(
     async def handler(authorization_url: str) -> None:
         if not flow.auth_url_future.done():
             flow.auth_url_future.set_result(authorization_url)
+
     return handler
 
 
@@ -260,11 +266,13 @@ def _make_callback_handler(
 ) -> Any:
     async def handler() -> tuple[str, str | None]:
         return await flow.code_future
+
     return handler
 
 
 def _client_metadata_for(
-    record: MCPServerRecord, redirect_uri: str,
+    record: MCPServerRecord,
+    redirect_uri: str,
 ) -> OAuthClientMetadata:
     """Build the OAuth client metadata Gilbert registers with the
     authorization server.

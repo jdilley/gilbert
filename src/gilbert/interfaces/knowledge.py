@@ -245,11 +245,17 @@ class DocumentBackend(ABC):
                 modified = d.last_modified
                 if hasattr(modified, "isoformat"):
                     modified = modified.isoformat()
-                children.append({
-                    "name": d.name, "path": d.path, "is_folder": False,
-                    "size": d.size_bytes, "modified": modified or "",
-                    "type": d.document_type.value, "external_url": d.external_url or "",
-                })
+                children.append(
+                    {
+                        "name": d.name,
+                        "path": d.path,
+                        "is_folder": False,
+                        "size": d.size_bytes,
+                        "modified": modified or "",
+                        "type": d.document_type.value,
+                        "external_url": d.external_url or "",
+                    }
+                )
 
         children.sort(key=lambda c: (not c["is_folder"], c["name"].lower()))
         return children
@@ -265,9 +271,7 @@ class DocumentBackend(ABC):
         ...
 
     @abstractmethod
-    async def upload_document(
-        self, path: str, data: bytes, mime_type: str = ""
-    ) -> DocumentMeta:
+    async def upload_document(self, path: str, data: bytes, mime_type: str = "") -> DocumentMeta:
         """Upload/create a document. Raises PermissionError if read-only."""
         ...
 

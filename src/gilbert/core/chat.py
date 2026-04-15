@@ -10,11 +10,14 @@ from typing import Any
 from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.events import Event, EventBusProvider
 
-_GILBERT_MENTION = re.compile(r'\bgilbert\b', re.IGNORECASE)
+_GILBERT_MENTION = re.compile(r"\bgilbert\b", re.IGNORECASE)
 
 
 def check_conversation_access(
-    data: dict[str, Any], user: UserContext, *, require_member: bool = False,
+    data: dict[str, Any],
+    user: UserContext,
+    *,
+    require_member: bool = False,
 ) -> str | None:
     """Check if user has access to a conversation.
 
@@ -62,8 +65,7 @@ def conv_summary(c: dict[str, Any], *, shared: bool) -> dict[str, Any]:
         members = c.get("members", [])
         summary["member_count"] = len(members)
         summary["members"] = [
-            {"user_id": m["user_id"], "display_name": m.get("display_name", "")}
-            for m in members
+            {"user_id": m["user_id"], "display_name": m.get("display_name", "")} for m in members
         ]
         summary["visibility"] = c.get("visibility", "public")
         summary["is_member"] = c.get("_is_member", True)
@@ -91,7 +93,7 @@ def build_room_context(data: dict[str, Any], user: UserContext) -> str:
     members_str = "\n".join(member_lines) if member_lines else "  (no members)"
 
     return (
-        f"You are Gilbert, an AI assistant in a shared chat room called \"{title}\".\n"
+        f'You are Gilbert, an AI assistant in a shared chat room called "{title}".\n'
         f"Multiple users are in this room. Messages from users are prefixed with their name "
         f"in brackets, e.g. [Alice]: hello.\n\n"
         f"Current members:\n{members_str}\n\n"
@@ -111,6 +113,10 @@ async def publish_event(gilbert: Any, event_type: str, data: dict[str, Any]) -> 
         return
 
     if isinstance(event_bus_svc, EventBusProvider):
-        await event_bus_svc.bus.publish(Event(
-            event_type=event_type, data=data, source="chat",
-        ))
+        await event_bus_svc.bus.publish(
+            Event(
+                event_type=event_type,
+                data=data,
+                source="chat",
+            )
+        )

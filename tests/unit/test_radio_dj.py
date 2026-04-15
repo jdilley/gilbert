@@ -77,10 +77,12 @@ class FakeStorageService:
 
     def create_namespaced(self, namespace: str) -> Any:
         from gilbert.interfaces.storage import NamespacedStorageBackend
+
         return NamespacedStorageBackend(self._backend, namespace)
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="storage", capabilities=frozenset({"entity_storage"}))
 
 
@@ -107,6 +109,7 @@ class FakeEventBusSvc:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="event_bus", capabilities=frozenset({"event_bus"}))
 
 
@@ -116,14 +119,13 @@ class FakePresenceService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="presence", capabilities=frozenset({"presence"}))
 
     async def who_is_here(self) -> list[Any]:
         from gilbert.interfaces.presence import PresenceState, UserPresence
-        return [
-            UserPresence(user_id=uid, state=PresenceState.PRESENT)
-            for uid in self._users
-        ]
+
+        return [UserPresence(user_id=uid, state=PresenceState.PRESENT) for uid in self._users]
 
 
 class FakeMusicService:
@@ -146,6 +148,7 @@ class FakeMusicService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="music", capabilities=frozenset({"music"}))
 
     async def search(
@@ -188,6 +191,7 @@ class FakeMusicService:
 
     async def now_playing(self, speaker_name: str | None = None) -> Any:
         from gilbert.interfaces.speaker import NowPlaying, PlaybackState
+
         if self.current_now_playing is None:
             return NowPlaying(state=PlaybackState.STOPPED)
         return self.current_now_playing
@@ -201,6 +205,7 @@ class FakeSpeakerService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="speaker", capabilities=frozenset({"speaker_control"}))
 
 
@@ -210,9 +215,12 @@ class FakeSchedulerService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="scheduler", capabilities=frozenset({"scheduler"}))
 
-    def add_job(self, name: str, schedule: Any, callback: Any, system: bool = False, **kwargs: Any) -> Any:
+    def add_job(
+        self, name: str, schedule: Any, callback: Any, system: bool = False, **kwargs: Any
+    ) -> Any:
         self.jobs[name] = {"schedule": schedule, "callback": callback, "system": system}
         return MagicMock()
 
@@ -361,41 +369,73 @@ class TestGenreSelection:
     ) -> None:
         """Genre with most votes wins."""
         # Alice likes rock and jazz, Bob likes rock
-        await started_dj._save_preferences("alice", {
-            "user_id": "alice", "likes": ["rock", "jazz"], "vetoes": [],
-        })
-        await started_dj._save_preferences("bob", {
-            "user_id": "bob", "likes": ["rock"], "vetoes": [],
-        })
+        await started_dj._save_preferences(
+            "alice",
+            {
+                "user_id": "alice",
+                "likes": ["rock", "jazz"],
+                "vetoes": [],
+            },
+        )
+        await started_dj._save_preferences(
+            "bob",
+            {
+                "user_id": "bob",
+                "likes": ["rock"],
+                "vetoes": [],
+            },
+        )
         genre = await started_dj.select_genre({"alice", "bob"})
         assert genre == "rock"
 
     @pytest.mark.asyncio
     async def test_vetoed_genre_excluded(
-        self, started_dj: RadioDJService,
+        self,
+        started_dj: RadioDJService,
     ) -> None:
         """Vetoed genres are excluded from selection."""
-        await started_dj._save_preferences("alice", {
-            "user_id": "alice", "likes": ["rock", "jazz"], "vetoes": [],
-        })
-        await started_dj._save_preferences("bob", {
-            "user_id": "bob", "likes": ["rock"], "vetoes": ["rock"],
-        })
+        await started_dj._save_preferences(
+            "alice",
+            {
+                "user_id": "alice",
+                "likes": ["rock", "jazz"],
+                "vetoes": [],
+            },
+        )
+        await started_dj._save_preferences(
+            "bob",
+            {
+                "user_id": "bob",
+                "likes": ["rock"],
+                "vetoes": ["rock"],
+            },
+        )
         genre = await started_dj.select_genre({"alice", "bob"})
         # Rock is vetoed by Bob, so jazz should win
         assert genre == "jazz"
 
     @pytest.mark.asyncio
     async def test_all_voted_genres_vetoed_falls_back(
-        self, started_dj: RadioDJService,
+        self,
+        started_dj: RadioDJService,
     ) -> None:
         """When all voted genres are vetoed, fall back to default rotation."""
-        await started_dj._save_preferences("alice", {
-            "user_id": "alice", "likes": ["rock"], "vetoes": [],
-        })
-        await started_dj._save_preferences("bob", {
-            "user_id": "bob", "likes": [], "vetoes": ["rock"],
-        })
+        await started_dj._save_preferences(
+            "alice",
+            {
+                "user_id": "alice",
+                "likes": ["rock"],
+                "vetoes": [],
+            },
+        )
+        await started_dj._save_preferences(
+            "bob",
+            {
+                "user_id": "bob",
+                "likes": [],
+                "vetoes": ["rock"],
+            },
+        )
         genre = await started_dj.select_genre({"alice", "bob"})
         # Should get a default genre (not rock since it's vetoed)
         assert genre is not None
@@ -403,11 +443,15 @@ class TestGenreSelection:
 
     @pytest.mark.asyncio
     async def test_no_preferences_uses_defaults(
-        self, started_dj: RadioDJService,
+        self,
+        started_dj: RadioDJService,
     ) -> None:
         """Users with no preferences fall back to default rotation."""
         genre = await started_dj.select_genre({"alice"})
-        assert genre in [g.lower() for g in started_dj._default_genres] or genre in started_dj._default_genres
+        assert (
+            genre in [g.lower() for g in started_dj._default_genres]
+            or genre in started_dj._default_genres
+        )
 
 
 # --- Throttle logic ---
@@ -501,9 +545,7 @@ class TestPreferences:
         assert "country" in prefs["vetoes"]
 
     @pytest.mark.asyncio
-    async def test_like_current_records_preference(
-        self, started_dj: RadioDJService
-    ) -> None:
+    async def test_like_current_records_preference(self, started_dj: RadioDJService) -> None:
         await started_dj.start_radio(genre="jazz")
         result = await started_dj.like_current("alice")
         assert "jazz" in result.lower()
@@ -511,9 +553,7 @@ class TestPreferences:
         assert "jazz" in prefs["likes"]
 
     @pytest.mark.asyncio
-    async def test_dislike_current_vetoes_and_switches(
-        self, started_dj: RadioDJService
-    ) -> None:
+    async def test_dislike_current_vetoes_and_switches(self, started_dj: RadioDJService) -> None:
         await started_dj.start_radio(genre="country")
         result = await started_dj.dislike_current("alice")
         assert "vetoed" in result.lower() or "country" in result.lower()
@@ -731,8 +771,14 @@ class TestTools:
         tools = dj.get_tools()
         names = {t.name for t in tools}
         assert names == {
-            "radio_start", "radio_stop", "radio_request", "radio_skip",
-            "radio_like", "radio_dislike", "radio_veto", "radio_status",
+            "radio_start",
+            "radio_stop",
+            "radio_request",
+            "radio_skip",
+            "radio_like",
+            "radio_dislike",
+            "radio_veto",
+            "radio_status",
             "radio_set_preferences",
         }
 
@@ -763,6 +809,7 @@ class TestTools:
     async def test_tool_status(self, started_dj: RadioDJService) -> None:
         result = await started_dj.execute_tool("radio_status", {})
         import json
+
         status = json.loads(result)
         assert "active" in status
         assert "current_genre" in status
@@ -770,12 +817,16 @@ class TestTools:
 
     @pytest.mark.asyncio
     async def test_tool_set_preferences(self, started_dj: RadioDJService) -> None:
-        result = await started_dj.execute_tool("radio_set_preferences", {
-            "user_id": "alice",
-            "likes": ["rock", "jazz"],
-            "vetoes": ["country"],
-        })
+        result = await started_dj.execute_tool(
+            "radio_set_preferences",
+            {
+                "user_id": "alice",
+                "likes": ["rock", "jazz"],
+                "vetoes": ["country"],
+            },
+        )
         import json
+
         data = json.loads(result)
         assert data["status"] == "ok"
         assert data["likes"] == ["rock", "jazz"]
@@ -804,8 +855,7 @@ class TestGenreChangeEvents:
         event_bus_svc.bus.published.clear()
         await started_dj.request_genre("jazz")
         genre_events = [
-            e for e in event_bus_svc.bus.published
-            if e.event_type == "radio_dj.genre.changed"
+            e for e in event_bus_svc.bus.published if e.event_type == "radio_dj.genre.changed"
         ]
         assert len(genre_events) == 1
         assert genre_events[0].data["old_genre"] == "rock"
@@ -826,9 +876,7 @@ class TestGenreChangeEvents:
 
 class TestVeto:
     @pytest.mark.asyncio
-    async def test_veto_genre_records_preference(
-        self, started_dj: RadioDJService
-    ) -> None:
+    async def test_veto_genre_records_preference(self, started_dj: RadioDJService) -> None:
         result = await started_dj.veto_genre("alice", "country")
         assert "vetoed" in result.lower()
         prefs = await started_dj._get_preferences("alice")
@@ -866,12 +914,14 @@ class TestConfig:
 
     @pytest.mark.asyncio
     async def test_apply_config(self, dj: RadioDJService) -> None:
-        await dj.on_config_changed({
-            "default_volume": 50,
-            "min_switch_interval": 30,
-            "speakers": ["shop"],
-            "stop_when_empty": False,
-        })
+        await dj.on_config_changed(
+            {
+                "default_volume": 50,
+                "min_switch_interval": 30,
+                "speakers": ["shop"],
+                "stop_when_empty": False,
+            }
+        )
         assert dj._default_volume == 50
         assert dj._min_switch_minutes == 30
         assert dj._speakers == ["shop"]

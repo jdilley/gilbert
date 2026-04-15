@@ -22,6 +22,7 @@ class FakeUserService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="users", capabilities=frozenset({"users"}))
 
 
@@ -41,33 +42,49 @@ class FakeResolver:
 class TestResolveWithUserService:
     @pytest.mark.asyncio
     async def test_resolves_to_first_name(self) -> None:
-        resolver = FakeResolver(FakeUserService({
-            "usr_abc123": {"display_name": "Brian Dilley", "email": "b@test.com"},
-        }))
+        resolver = FakeResolver(
+            FakeUserService(
+                {
+                    "usr_abc123": {"display_name": "Brian Dilley", "email": "b@test.com"},
+                }
+            )
+        )
         name = await resolve_display_name("usr_abc123", resolver)
         assert name == "Brian"
 
     @pytest.mark.asyncio
     async def test_resolves_full_name_when_requested(self) -> None:
-        resolver = FakeResolver(FakeUserService({
-            "usr_abc123": {"display_name": "Brian Dilley", "email": "b@test.com"},
-        }))
+        resolver = FakeResolver(
+            FakeUserService(
+                {
+                    "usr_abc123": {"display_name": "Brian Dilley", "email": "b@test.com"},
+                }
+            )
+        )
         name = await resolve_display_name("usr_abc123", resolver, first_name_only=False)
         assert name == "Brian Dilley"
 
     @pytest.mark.asyncio
     async def test_single_name_returns_as_is(self) -> None:
-        resolver = FakeResolver(FakeUserService({
-            "usr_abc123": {"display_name": "Brian", "email": "b@test.com"},
-        }))
+        resolver = FakeResolver(
+            FakeUserService(
+                {
+                    "usr_abc123": {"display_name": "Brian", "email": "b@test.com"},
+                }
+            )
+        )
         name = await resolve_display_name("usr_abc123", resolver)
         assert name == "Brian"
 
     @pytest.mark.asyncio
     async def test_empty_display_name_falls_back(self) -> None:
-        resolver = FakeResolver(FakeUserService({
-            "usr_abc123": {"display_name": "", "email": "b@test.com"},
-        }))
+        resolver = FakeResolver(
+            FakeUserService(
+                {
+                    "usr_abc123": {"display_name": "", "email": "b@test.com"},
+                }
+            )
+        )
         # No display_name → falls back to user_id parsing
         name = await resolve_display_name("usr_abc123", resolver)
         assert name == "usr_abc123"

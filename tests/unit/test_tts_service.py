@@ -116,7 +116,8 @@ async def test_start_initializes_backend(
 
 
 async def test_stop_closes_backend(
-    service: TTSService, stub_backend: StubTTSBackend,
+    service: TTSService,
+    stub_backend: StubTTSBackend,
 ) -> None:
     await service.stop()
     assert stub_backend.closed
@@ -140,7 +141,8 @@ async def test_synthesize(service: TTSService) -> None:
 
 
 async def test_synthesize_explicit_voice_id_used(
-    service: TTSService, stub_backend: StubTTSBackend,
+    service: TTSService,
+    stub_backend: StubTTSBackend,
 ) -> None:
     request = SynthesisRequest(text="Hello", voice_id="explicit-id")
     await service.synthesize(request)
@@ -171,7 +173,6 @@ async def test_list_voices(service: TTSService) -> None:
     assert voices[1].name == "Bob"
 
 
-
 # --- Config parsing ---
 
 
@@ -180,7 +181,11 @@ def test_config_parses_tts_full() -> None:
         "tts": {
             "enabled": True,
             "backend": "elevenlabs",
-            "settings": {"api_key": "sk-xxx", "voice_id": "abc123", "model_id": "eleven_turbo_v2_5"},
+            "settings": {
+                "api_key": "sk-xxx",
+                "voice_id": "abc123",
+                "model_id": "eleven_turbo_v2_5",
+            },
         }
     }
     config = GilbertConfig.model_validate(raw)
@@ -216,9 +221,7 @@ def test_get_tools_empty_when_disabled() -> None:
     assert svc.get_tools() == []
 
 
-async def test_tool_synthesize(
-    service: TTSService, tmp_path: Path, monkeypatch: object
-) -> None:
+async def test_tool_synthesize(service: TTSService, tmp_path: Path, monkeypatch: object) -> None:
     import gilbert.core.output as output_mod
 
     monkeypatch.setattr(output_mod, "OUTPUT_DIR", tmp_path / "output")  # type: ignore[attr-defined]

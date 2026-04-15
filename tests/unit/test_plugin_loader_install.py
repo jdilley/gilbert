@@ -25,7 +25,7 @@ from gilbert.plugins.loader import (
 # --- Plugin dir builder helper ---
 
 
-PLUGIN_PY = '''
+PLUGIN_PY = """
 from gilbert.interfaces.plugin import Plugin, PluginMeta, PluginContext
 
 class _P(Plugin):
@@ -38,17 +38,21 @@ class _P(Plugin):
 
 def create_plugin() -> Plugin:
     return _P()
-'''
+"""
 
 
 def _build_plugin_dir(parent: Path, name: str = "test-plugin", version: str = "1.0.0") -> Path:
     plugin_dir = parent / name
     plugin_dir.mkdir(parents=True)
-    (plugin_dir / "plugin.yaml").write_text(yaml.safe_dump({
-        "name": name,
-        "version": version,
-        "description": "a test plugin",
-    }))
+    (plugin_dir / "plugin.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "name": name,
+                "version": version,
+                "description": "a test plugin",
+            }
+        )
+    )
     (plugin_dir / "plugin.py").write_text(PLUGIN_PY.format(name=name, version=version))
     return plugin_dir
 
@@ -317,7 +321,8 @@ class TestInstallFromUrl:
 
         try:
             info = await loader.install_from_url(
-                "https://example.com/release.zip", install_dir,
+                "https://example.com/release.zip",
+                install_dir,
             )
         finally:
             loader._fetch_archive = original_fetch  # type: ignore[method-assign]
@@ -344,6 +349,7 @@ class TestInstallFromUrl:
 
         async def fake_fetch_to(url: str, stage_path: Path) -> Path:
             import shutil
+
             target = stage_path / "fetched"
             shutil.copytree(plugin_dir, target)
             return target
@@ -352,7 +358,8 @@ class TestInstallFromUrl:
 
         with pytest.raises(PluginError, match="already installed"):
             await loader.install_from_url(
-                "https://example.com/anything.zip", install_dir,
+                "https://example.com/anything.zip",
+                install_dir,
             )
 
     @pytest.mark.asyncio
@@ -370,6 +377,7 @@ class TestInstallFromUrl:
 
         async def fake_fetch_to(url: str, stage_path: Path) -> Path:
             import shutil
+
             target = stage_path / "fetched"
             shutil.copytree(plugin_dir, target)
             return target
@@ -377,7 +385,9 @@ class TestInstallFromUrl:
         loader._fetch_to = fake_fetch_to  # type: ignore[method-assign]
 
         info = await loader.install_from_url(
-            "https://example.com/anything.zip", install_dir, force=True,
+            "https://example.com/anything.zip",
+            install_dir,
+            force=True,
         )
 
         assert info.name == "force-plugin"

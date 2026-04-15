@@ -100,8 +100,10 @@ class EventBusService(Service):
         event = Event(event_type=event_type, data=data, source=source)
         await self._bus.publish(event)
 
-        return json.dumps({
-            "status": "ok",
-            "event_type": event_type,
-            "timestamp": event.timestamp.isoformat(),
-        })
+        return json.dumps(
+            {
+                "status": "ok",
+                "event_type": event_type,
+                "timestamp": event.timestamp.isoformat(),
+            }
+        )

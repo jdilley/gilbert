@@ -271,9 +271,11 @@ class MusicService(Service):
     def config_params(self) -> list[ConfigParam]:
         params = [
             ConfigParam(
-                key="backend", type=ToolParameterType.STRING,
+                key="backend",
+                type=ToolParameterType.STRING,
                 description="Music backend type.",
-                default="sonos", restart_required=True,
+                default="sonos",
+                restart_required=True,
                 choices=tuple(MusicBackend.registered_backends().keys()),
             ),
         ]
@@ -281,13 +283,20 @@ class MusicService(Service):
         backend_cls = backends.get(self._backend_name)
         if backend_cls is not None:
             for bp in backend_cls.backend_config_params():
-                params.append(ConfigParam(
-                    key=f"settings.{bp.key}", type=bp.type,
-                    description=bp.description, default=bp.default,
-                    restart_required=bp.restart_required, sensitive=bp.sensitive,
-                    choices=bp.choices, choices_from=bp.choices_from,
-                    multiline=bp.multiline, backend_param=True,
-                ))
+                params.append(
+                    ConfigParam(
+                        key=f"settings.{bp.key}",
+                        type=bp.type,
+                        description=bp.description,
+                        default=bp.default,
+                        restart_required=bp.restart_required,
+                        sensitive=bp.sensitive,
+                        choices=bp.choices,
+                        choices_from=bp.choices_from,
+                        multiline=bp.multiline,
+                        backend_param=True,
+                    )
+                )
         return params
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
@@ -315,7 +324,9 @@ class MusicService(Service):
         )
 
     async def invoke_config_action(
-        self, key: str, payload: dict[str, Any],
+        self,
+        key: str,
+        payload: dict[str, Any],
     ) -> ConfigActionResult:
         return await invoke_backend_action(self._backend, key, payload)
 
@@ -394,8 +405,7 @@ class MusicService(Service):
                 slash_command="favorites",
                 slash_help="List Sonos favorites: /music favorites",
                 description=(
-                    "List the user's Sonos favorites (tracks, playlists, "
-                    "radio stations)."
+                    "List the user's Sonos favorites (tracks, playlists, radio stations)."
                 ),
                 required_role="everyone",
             ),
@@ -411,9 +421,7 @@ class MusicService(Service):
                 name="search_music",
                 slash_group="music",
                 slash_command="search",
-                slash_help=(
-                    "Search linked music service: /music search <query> [kind=tracks]"
-                ),
+                slash_help=("Search linked music service: /music search <query> [kind=tracks]"),
                 description=(
                     "Search the music service linked to Sonos "
                     "(default: Spotify). Returns tracks, albums, or "
@@ -458,9 +466,7 @@ class MusicService(Service):
                     ToolParameter(
                         name="title",
                         type=ToolParameterType.STRING,
-                        description=(
-                            "Title to match (track, playlist, or favorite name)."
-                        ),
+                        description=("Title to match (track, playlist, or favorite name)."),
                     ),
                     ToolParameter(
                         name="speakers",
@@ -477,9 +483,7 @@ class MusicService(Service):
                     ToolParameter(
                         name="source",
                         type=ToolParameterType.STRING,
-                        description=(
-                            "Restrict lookup: favorites, playlists, or search."
-                        ),
+                        description=("Restrict lookup: favorites, playlists, or search."),
                         required=False,
                         enum=["favorites", "playlists", "search"],
                     ),
@@ -523,8 +527,7 @@ class MusicService(Service):
                         name="item",
                         type=ToolParameterType.STRING,
                         description=(
-                            "JSON-encoded MusicItem (as produced by a "
-                            "search result's Play button)."
+                            "JSON-encoded MusicItem (as produced by a search result's Play button)."
                         ),
                     ),
                     ToolParameter(
@@ -545,7 +548,9 @@ class MusicService(Service):
         ]
 
     async def execute_tool(
-        self, name: str, arguments: dict[str, Any],
+        self,
+        name: str,
+        arguments: dict[str, Any],
     ) -> str | ToolOutput:
         match name:
             case "list_favorites":
@@ -572,7 +577,8 @@ class MusicService(Service):
         return json.dumps({"playlists": [_item_to_dict(i) for i in items]})
 
     async def _tool_search(
-        self, arguments: dict[str, Any],
+        self,
+        arguments: dict[str, Any],
     ) -> str | ToolOutput:
         query = arguments["query"]
         kind_str = arguments.get("kind", "tracks")
@@ -593,10 +599,12 @@ class MusicService(Service):
         # Text payload: the JSON shape the AI already knows how to reason
         # over. Unchanged from the pre-UI-block version so existing AI
         # prompts and tool schemas keep working.
-        text = json.dumps({
-            "kind": kind.value,
-            "results": [_item_to_dict(i) for i in results],
-        })
+        text = json.dumps(
+            {
+                "kind": kind.value,
+                "results": [_item_to_dict(i) for i in results],
+            }
+        )
 
         if not results:
             return ToolOutput(text=text)
@@ -605,9 +613,7 @@ class MusicService(Service):
         # title + subtitle + service, and a single Play button whose
         # value round-trips the full MusicItem as JSON so the Play tool
         # can resolve it without a second search hit.
-        blocks: list[UIBlock] = [
-            _build_search_result_block(item) for item in results
-        ]
+        blocks: list[UIBlock] = [_build_search_result_block(item) for item in results]
         return ToolOutput(text=text, ui_blocks=blocks)
 
     async def _tool_play(self, arguments: dict[str, Any]) -> str:
@@ -655,10 +661,12 @@ class MusicService(Service):
                 item = await _try_search()
 
         if item is None:
-            return json.dumps({
-                "error": f"No music found matching '{title}'",
-                "sources_tried": sources_tried,
-            })
+            return json.dumps(
+                {
+                    "error": f"No music found matching '{title}'",
+                    "sources_tried": sources_tried,
+                }
+            )
 
         try:
             playable = await self.play_item(item, speaker_names=speakers, volume=volume)
@@ -667,14 +675,16 @@ class MusicService(Service):
         except RuntimeError as exc:
             return json.dumps({"error": str(exc)})
 
-        return json.dumps({
-            "status": "playing",
-            "title": playable.title or item.title,
-            "kind": item.kind.value,
-            "service": item.service,
-            "uri": playable.uri,
-            "source": sources_tried[-1] if sources_tried else "",
-        })
+        return json.dumps(
+            {
+                "status": "playing",
+                "title": playable.title or item.title,
+                "kind": item.kind.value,
+                "service": item.service,
+                "uri": playable.uri,
+                "source": sources_tried[-1] if sources_tried else "",
+            }
+        )
 
     async def _tool_play_item(self, arguments: dict[str, Any]) -> str:
         """Play a specific item from a search result Play button click.
@@ -697,21 +707,25 @@ class MusicService(Service):
 
         try:
             playable = await self.play_item(
-                music_item, speaker_names=speakers, volume=volume,
+                music_item,
+                speaker_names=speakers,
+                volume=volume,
             )
         except MusicSearchUnavailableError as exc:
             return json.dumps({"error": str(exc)})
         except RuntimeError as exc:
             return json.dumps({"error": str(exc)})
 
-        return json.dumps({
-            "status": "playing",
-            "title": playable.title or music_item.title,
-            "kind": music_item.kind.value,
-            "service": music_item.service,
-            "uri": playable.uri,
-            "source": "search",
-        })
+        return json.dumps(
+            {
+                "status": "playing",
+                "title": playable.title or music_item.title,
+                "kind": music_item.kind.value,
+                "service": music_item.service,
+                "uri": playable.uri,
+                "source": "search",
+            }
+        )
 
     async def _tool_now_playing(self, arguments: dict[str, Any]) -> str:
         speaker_name: str | None = arguments.get("speaker") or None

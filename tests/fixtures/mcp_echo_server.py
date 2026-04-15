@@ -112,7 +112,8 @@ def main() -> None:
 
     @app.call_tool()
     async def _call_tool(
-        name: str, arguments: dict,
+        name: str,
+        arguments: dict,
     ) -> list[types.TextContent]:
         if name == "echo":
             return [types.TextContent(type="text", text=f"echoed: {arguments['text']}")]

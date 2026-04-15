@@ -109,14 +109,17 @@ class TTSService(Service):
     def config_params(self) -> list[ConfigParam]:
         params = [
             ConfigParam(
-                key="silence_padding", type=ToolParameterType.NUMBER,
+                key="silence_padding",
+                type=ToolParameterType.NUMBER,
                 description="Seconds of silence appended after synthesized audio.",
                 default=3.0,
             ),
             ConfigParam(
-                key="backend", type=ToolParameterType.STRING,
+                key="backend",
+                type=ToolParameterType.STRING,
                 description="TTS backend provider.",
-                default="elevenlabs", restart_required=True,
+                default="elevenlabs",
+                restart_required=True,
                 choices=tuple(TTSBackend.registered_backends().keys()),
             ),
         ]
@@ -124,12 +127,19 @@ class TTSService(Service):
         backend_cls = backends.get(self._backend_name)
         if backend_cls is not None:
             for bp in backend_cls.backend_config_params():
-                params.append(ConfigParam(
-                    key=f"settings.{bp.key}", type=bp.type,
-                    description=bp.description, default=bp.default,
-                    restart_required=bp.restart_required, sensitive=bp.sensitive,
-                    choices=bp.choices, multiline=bp.multiline, backend_param=True,
-                ))
+                params.append(
+                    ConfigParam(
+                        key=f"settings.{bp.key}",
+                        type=bp.type,
+                        description=bp.description,
+                        default=bp.default,
+                        restart_required=bp.restart_required,
+                        sensitive=bp.sensitive,
+                        choices=bp.choices,
+                        multiline=bp.multiline,
+                        backend_param=True,
+                    )
+                )
         return params
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
@@ -147,7 +157,9 @@ class TTSService(Service):
         )
 
     async def invoke_config_action(
-        self, key: str, payload: dict[str, Any],
+        self,
+        key: str,
+        payload: dict[str, Any],
     ) -> ConfigActionResult:
         return await invoke_backend_action(self._backend, key, payload)
 
@@ -193,7 +205,7 @@ class TTSService(Service):
                 slash_help=(
                     "Synthesize speech to an MP3 file (does NOT play on "
                     "speakers — use /speaker announce for that): "
-                    "/tts synthesize \"<text>\""
+                    '/tts synthesize "<text>"'
                 ),
                 description=(
                     "Synthesize speech from text and save as an MP3 file. "
@@ -239,21 +251,25 @@ class TTSService(Service):
         file_path = output_dir / f"{uuid.uuid4()}.mp3"
         file_path.write_bytes(result.audio)
 
-        return json.dumps({
-            "file_path": str(file_path),
-            "format": "mp3",
-            "duration_seconds": result.duration_seconds,
-            "characters_used": result.characters_used,
-        })
+        return json.dumps(
+            {
+                "file_path": str(file_path),
+                "format": "mp3",
+                "duration_seconds": result.duration_seconds,
+                "characters_used": result.characters_used,
+            }
+        )
 
     async def _tool_list_voices(self) -> str:
         voices = await self.list_voices()
-        return json.dumps([
-            {
-                "voice_id": v.voice_id,
-                "name": v.name,
-                "language": v.language,
-                "description": v.description,
-            }
-            for v in voices
-        ])
+        return json.dumps(
+            [
+                {
+                    "voice_id": v.voice_id,
+                    "name": v.name,
+                    "language": v.language,
+                    "description": v.description,
+                }
+                for v in voices
+            ]
+        )

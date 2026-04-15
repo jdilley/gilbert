@@ -279,26 +279,30 @@ class WebApiService(Service):
                         (i["url"] for i in visible_items if i.get("url")),
                         default_url,
                     )
-                visible_nav.append({
-                    "key": group["key"],
-                    "label": group["label"],
-                    "description": group.get("description", ""),
-                    "url": default_url,
-                    "icon": group.get("icon", ""),
-                    "items": visible_items,
-                })
+                visible_nav.append(
+                    {
+                        "key": group["key"],
+                        "label": group["label"],
+                        "description": group.get("description", ""),
+                        "url": default_url,
+                        "icon": group.get("icon", ""),
+                        "items": visible_items,
+                    }
+                )
             else:
                 # Leaf: filter by its own role/capability.
                 if not _visible(group):
                     continue
-                visible_nav.append({
-                    "key": group["key"],
-                    "label": group["label"],
-                    "description": group.get("description", ""),
-                    "url": group["url"],
-                    "icon": group.get("icon", ""),
-                    "items": [],
-                })
+                visible_nav.append(
+                    {
+                        "key": group["key"],
+                        "label": group["label"],
+                        "description": group.get("description", ""),
+                        "url": group["url"],
+                        "icon": group.get("icon", ""),
+                        "items": [],
+                    }
+                )
 
         # Flat ``cards`` list preserved for the dashboard view.
         # Dashboard shows one card per top-level entry (leaves and
@@ -361,7 +365,13 @@ class WebApiService(Service):
                 entry["config_namespace"] = svc.config_namespace
                 try:
                     entry["config_params"] = [
-                        {"key": p.key, "type": p.type.value, "description": p.description, "default": p.default, "restart_required": p.restart_required}
+                        {
+                            "key": p.key,
+                            "type": p.type.value,
+                            "description": p.description,
+                            "default": p.default,
+                            "restart_required": p.restart_required,
+                        }
                         for p in svc.config_params()
                     ]
                 except Exception:
@@ -371,6 +381,7 @@ class WebApiService(Service):
                         section = config_svc.get_section(svc.config_namespace)
                         # Ensure values are JSON-serializable
                         import json as _json
+
                         _json.dumps(section)
                         entry["config_values"] = section
                     except (TypeError, ValueError):
@@ -378,8 +389,20 @@ class WebApiService(Service):
 
             if isinstance(svc, ToolProvider):
                 entry["tools"] = [
-                    {"name": t.name, "description": t.description, "required_role": t.required_role,
-                     "parameters": [{"name": p.name, "type": p.type.value, "description": p.description, "required": p.required} for p in t.parameters]}
+                    {
+                        "name": t.name,
+                        "description": t.description,
+                        "required_role": t.required_role,
+                        "parameters": [
+                            {
+                                "name": p.name,
+                                "type": p.type.value,
+                                "description": p.description,
+                                "required": p.required,
+                            }
+                            for p in t.parameters
+                        ],
+                    }
                     for t in svc.get_tools()
                 ]
 
@@ -418,17 +441,33 @@ class WebApiService(Service):
 
         collection = frame.get("collection", "")
         if not collection:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "collection required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "collection required",
+                "code": 400,
+            }
 
         gilbert = conn.manager.gilbert
         if gilbert is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
+            }
 
         storage_svc = gilbert.service_manager.get_by_capability("entity_storage")
         if storage_svc is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
+            }
 
         from gilbert.interfaces.storage import Query, SortField
+
         page = int(frame.get("page", 1))
         sort_field = frame.get("sort", "_id")
         order = frame.get("order", "asc")
@@ -436,9 +475,14 @@ class WebApiService(Service):
         offset = (page - 1) * page_size
 
         sort = [SortField(field=sort_field, descending=(order == "desc"))]
-        entities = await storage_svc.backend.query(Query(
-            collection=collection, sort=sort, limit=page_size, offset=offset,
-        ))
+        entities = await storage_svc.backend.query(
+            Query(
+                collection=collection,
+                sort=sort,
+                limit=page_size,
+                offset=offset,
+            )
+        )
         try:
             total = await storage_svc.backend.count(Query(collection=collection))
         except Exception:
@@ -469,12 +513,16 @@ class WebApiService(Service):
                 if field not in display_columns:
                     display_columns.append(field)
 
-
         return {
-            "type": "entities.collection.query.result", "ref": frame.get("id"),
-            "collection": collection, "entities": entities, "total": total,
-            "page": page, "total_pages": total_pages,
-            "sortable_fields": sortable_fields, "fk_map": fk_map,
+            "type": "entities.collection.query.result",
+            "ref": frame.get("id"),
+            "collection": collection,
+            "entities": entities,
+            "total": total,
+            "page": page,
+            "total_pages": total_pages,
+            "sortable_fields": sortable_fields,
+            "fk_map": fk_map,
             "display_columns": display_columns,
         }
 
@@ -483,26 +531,49 @@ class WebApiService(Service):
         collection = frame.get("collection", "")
         entity_id = frame.get("entity_id", "")
         if not collection or not entity_id:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "collection and entity_id required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "collection and entity_id required",
+                "code": 400,
+            }
 
         gilbert = conn.manager.gilbert
         if gilbert is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
+            }
 
         storage_svc = gilbert.service_manager.get_by_capability("entity_storage")
         if storage_svc is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
+            }
 
         entity = await storage_svc.backend.get(collection, entity_id)
         if entity is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Entity not found", "code": 404}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Entity not found",
+                "code": 404,
+            }
 
         fk_map: dict[str, Any] = {}
         if hasattr(storage_svc.backend, "get_foreign_keys"):
             fk_map = await storage_svc.backend.get_foreign_keys(collection) or {}
 
         return {
-            "type": "entities.entity.get.result", "ref": frame.get("id"),
-            "collection": collection, "entity_id": entity_id,
-            "entity": entity, "fk_map": fk_map,
+            "type": "entities.entity.get.result",
+            "ref": frame.get("id"),
+            "collection": collection,
+            "entity_id": entity_id,
+            "entity": entity,
+            "fk_map": fk_map,
         }

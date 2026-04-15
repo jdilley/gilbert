@@ -24,13 +24,21 @@ from gilbert.interfaces.knowledge import (
 
 class TestDocumentMeta:
     def test_document_id(self) -> None:
-        meta = DocumentMeta(source_id="local:docs", path="report.pdf", name="report.pdf",
-                           document_type=DocumentType.PDF)
+        meta = DocumentMeta(
+            source_id="local:docs",
+            path="report.pdf",
+            name="report.pdf",
+            document_type=DocumentType.PDF,
+        )
         assert meta.document_id == "local:docs:report.pdf"
 
     def test_document_id_with_subpath(self) -> None:
-        meta = DocumentMeta(source_id="gdrive:lib", path="folder/doc.txt", name="doc.txt",
-                           document_type=DocumentType.TEXT)
+        meta = DocumentMeta(
+            source_id="gdrive:lib",
+            path="folder/doc.txt",
+            name="doc.txt",
+            document_type=DocumentType.TEXT,
+        )
         assert meta.document_id == "gdrive:lib:folder/doc.txt"
 
 
@@ -39,38 +47,43 @@ class TestDocumentMeta:
 
 class TestExtractors:
     def test_text_extraction(self) -> None:
-        meta = DocumentMeta(source_id="test", path="f.txt", name="f.txt",
-                           document_type=DocumentType.TEXT)
+        meta = DocumentMeta(
+            source_id="test", path="f.txt", name="f.txt", document_type=DocumentType.TEXT
+        )
         content = DocumentContent(meta=meta, data=b"Hello world")
         text, stats = extract_text(content)
         assert text == "Hello world"
 
     def test_markdown_extraction(self) -> None:
-        meta = DocumentMeta(source_id="test", path="f.md", name="f.md",
-                           document_type=DocumentType.MARKDOWN)
+        meta = DocumentMeta(
+            source_id="test", path="f.md", name="f.md", document_type=DocumentType.MARKDOWN
+        )
         content = DocumentContent(meta=meta, data=b"# Title\n\nBody text")
         text, stats = extract_text(content)
         assert "Title" in text
         assert "Body text" in text
 
     def test_json_extraction(self) -> None:
-        meta = DocumentMeta(source_id="test", path="f.json", name="f.json",
-                           document_type=DocumentType.JSON)
+        meta = DocumentMeta(
+            source_id="test", path="f.json", name="f.json", document_type=DocumentType.JSON
+        )
         content = DocumentContent(meta=meta, data=b'{"key": "value"}')
         text, stats = extract_text(content)
         assert "key" in text
         assert "value" in text
 
     def test_csv_extraction(self) -> None:
-        meta = DocumentMeta(source_id="test", path="f.csv", name="f.csv",
-                           document_type=DocumentType.CSV)
+        meta = DocumentMeta(
+            source_id="test", path="f.csv", name="f.csv", document_type=DocumentType.CSV
+        )
         content = DocumentContent(meta=meta, data=b"name,age\nAlice,30\nBob,25")
         text, stats = extract_text(content)
         assert "Alice" in text
 
     def test_unknown_falls_back_to_text(self) -> None:
-        meta = DocumentMeta(source_id="test", path="f.xyz", name="f.xyz",
-                           document_type=DocumentType.UNKNOWN)
+        meta = DocumentMeta(
+            source_id="test", path="f.xyz", name="f.xyz", document_type=DocumentType.UNKNOWN
+        )
         content = DocumentContent(meta=meta, data=b"some text")
         text, stats = extract_text(content)
         assert text == "some text"
@@ -166,7 +179,9 @@ class TestSearchModels:
                 document_type=DocumentType.PDF,
             )
         ]
-        response = SearchResponse(query="revenue growth", results=results, total_documents_searched=50)
+        response = SearchResponse(
+            query="revenue growth", results=results, total_documents_searched=50
+        )
         assert response.query == "revenue growth"
         assert len(response.results) == 1
         assert response.results[0].relevance_score == 0.92
@@ -178,6 +193,7 @@ class TestSearchModels:
 def _make_pdf_bytes() -> bytes:
     """Create a minimal single-page PDF using PyMuPDF."""
     import fitz
+
     doc = fitz.open()
     page = doc.new_page(width=200, height=100)
     page.insert_text((10, 50), "Test page content")
@@ -196,7 +212,9 @@ class TestRenderDocumentPage:
     @pytest.fixture
     def pdf_content(self) -> DocumentContent:
         meta = DocumentMeta(
-            source_id="local:docs", path="manual.pdf", name="manual.pdf",
+            source_id="local:docs",
+            path="manual.pdf",
+            name="manual.pdf",
             document_type=DocumentType.PDF,
         )
         return DocumentContent(meta=meta, data=_make_pdf_bytes())
@@ -209,16 +227,20 @@ class TestRenderDocumentPage:
 
     @pytest.mark.asyncio
     async def test_renders_pdf_page(
-        self, knowledge_service: KnowledgeService,
-        stub_backend: AsyncMock, tmp_path: Path,
+        self,
+        knowledge_service: KnowledgeService,
+        stub_backend: AsyncMock,
+        tmp_path: Path,
     ) -> None:
         knowledge_service._backends = {"local:docs": stub_backend}
 
         with patch("gilbert.core.services.knowledge.get_output_dir", return_value=tmp_path):
-            result = await knowledge_service._tool_render_page({
-                "document_id": "local:docs:manual.pdf",
-                "page": 1,
-            })
+            result = await knowledge_service._tool_render_page(
+                {
+                    "document_id": "local:docs:manual.pdf",
+                    "page": 1,
+                }
+            )
 
         data = json.loads(result)
         assert data["page"] == 1
@@ -231,25 +253,31 @@ class TestRenderDocumentPage:
 
     @pytest.mark.asyncio
     async def test_page_out_of_range(
-        self, knowledge_service: KnowledgeService,
+        self,
+        knowledge_service: KnowledgeService,
         stub_backend: AsyncMock,
     ) -> None:
         knowledge_service._backends = {"local:docs": stub_backend}
 
-        result = await knowledge_service._tool_render_page({
-            "document_id": "local:docs:manual.pdf",
-            "page": 999,
-        })
+        result = await knowledge_service._tool_render_page(
+            {
+                "document_id": "local:docs:manual.pdf",
+                "page": 999,
+            }
+        )
         data = json.loads(result)
         assert "error" in data
         assert "out of range" in data["error"]
 
     @pytest.mark.asyncio
     async def test_non_pdf_rejected(
-        self, knowledge_service: KnowledgeService,
+        self,
+        knowledge_service: KnowledgeService,
     ) -> None:
         meta = DocumentMeta(
-            source_id="local:docs", path="notes.txt", name="notes.txt",
+            source_id="local:docs",
+            path="notes.txt",
+            name="notes.txt",
             document_type=DocumentType.TEXT,
         )
         content = DocumentContent(meta=meta, data=b"hello")
@@ -257,37 +285,45 @@ class TestRenderDocumentPage:
         backend.get_document.return_value = content
         knowledge_service._backends = {"local:docs": backend}
 
-        result = await knowledge_service._tool_render_page({
-            "document_id": "local:docs:notes.txt",
-            "page": 1,
-        })
+        result = await knowledge_service._tool_render_page(
+            {
+                "document_id": "local:docs:notes.txt",
+                "page": 1,
+            }
+        )
         data = json.loads(result)
         assert "error" in data
         assert "PDF" in data["error"]
 
     @pytest.mark.asyncio
     async def test_negative_page_number(
-        self, knowledge_service: KnowledgeService,
+        self,
+        knowledge_service: KnowledgeService,
     ) -> None:
-        result = await knowledge_service._tool_render_page({
-            "document_id": "local:docs:manual.pdf",
-            "page": 0,
-        })
+        result = await knowledge_service._tool_render_page(
+            {
+                "document_id": "local:docs:manual.pdf",
+                "page": 0,
+            }
+        )
         data = json.loads(result)
         assert "error" in data
 
     @pytest.mark.asyncio
     async def test_document_not_found(
-        self, knowledge_service: KnowledgeService,
+        self,
+        knowledge_service: KnowledgeService,
     ) -> None:
         backend = AsyncMock(spec=DocumentBackend)
         backend.get_document.return_value = None
         knowledge_service._backends = {"local:docs": backend}
 
-        result = await knowledge_service._tool_render_page({
-            "document_id": "local:docs:missing.pdf",
-            "page": 1,
-        })
+        result = await knowledge_service._tool_render_page(
+            {
+                "document_id": "local:docs:missing.pdf",
+                "page": 1,
+            }
+        )
         data = json.loads(result)
         assert "error" in data
         assert "not found" in data["error"].lower()
@@ -307,28 +343,43 @@ class TestFindFiles:
     def mixed_files(self) -> list[DocumentMeta]:
         return [
             DocumentMeta(
-                source_id="local:docs", path="photo.jpg", name="photo.jpg",
-                document_type=DocumentType.IMAGE, size_bytes=50000,
+                source_id="local:docs",
+                path="photo.jpg",
+                name="photo.jpg",
+                document_type=DocumentType.IMAGE,
+                size_bytes=50000,
                 mime_type="image/jpeg",
             ),
             DocumentMeta(
-                source_id="local:docs", path="logo.png", name="logo.png",
-                document_type=DocumentType.IMAGE, size_bytes=12000,
+                source_id="local:docs",
+                path="logo.png",
+                name="logo.png",
+                document_type=DocumentType.IMAGE,
+                size_bytes=12000,
                 mime_type="image/png",
             ),
             DocumentMeta(
-                source_id="local:docs", path="report.pdf", name="report.pdf",
-                document_type=DocumentType.PDF, size_bytes=200000,
+                source_id="local:docs",
+                path="report.pdf",
+                name="report.pdf",
+                document_type=DocumentType.PDF,
+                size_bytes=200000,
                 mime_type="application/pdf",
             ),
             DocumentMeta(
-                source_id="local:docs", path="clip.mp4", name="clip.mp4",
-                document_type=DocumentType.VIDEO, size_bytes=5000000,
+                source_id="local:docs",
+                path="clip.mp4",
+                name="clip.mp4",
+                document_type=DocumentType.VIDEO,
+                size_bytes=5000000,
                 mime_type="video/mp4",
             ),
             DocumentMeta(
-                source_id="local:docs", path="notes.txt", name="notes.txt",
-                document_type=DocumentType.TEXT, size_bytes=500,
+                source_id="local:docs",
+                path="notes.txt",
+                name="notes.txt",
+                document_type=DocumentType.TEXT,
+                size_bytes=500,
                 mime_type="text/plain",
             ),
         ]
@@ -341,7 +392,9 @@ class TestFindFiles:
 
     @pytest.mark.asyncio
     async def test_find_all_files(
-        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+        self,
+        knowledge_service: KnowledgeService,
+        stub_backend: AsyncMock,
     ) -> None:
         knowledge_service._backends = {"local:docs": stub_backend}
         result = await knowledge_service._tool_find_files({})
@@ -350,7 +403,9 @@ class TestFindFiles:
 
     @pytest.mark.asyncio
     async def test_find_by_type_image(
-        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+        self,
+        knowledge_service: KnowledgeService,
+        stub_backend: AsyncMock,
     ) -> None:
         knowledge_service._backends = {"local:docs": stub_backend}
         result = await knowledge_service._tool_find_files({"type": "image"})
@@ -363,7 +418,9 @@ class TestFindFiles:
 
     @pytest.mark.asyncio
     async def test_find_by_type_video(
-        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+        self,
+        knowledge_service: KnowledgeService,
+        stub_backend: AsyncMock,
     ) -> None:
         knowledge_service._backends = {"local:docs": stub_backend}
         result = await knowledge_service._tool_find_files({"type": "video"})
@@ -373,7 +430,9 @@ class TestFindFiles:
 
     @pytest.mark.asyncio
     async def test_find_by_name(
-        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+        self,
+        knowledge_service: KnowledgeService,
+        stub_backend: AsyncMock,
     ) -> None:
         knowledge_service._backends = {"local:docs": stub_backend}
         result = await knowledge_service._tool_find_files({"name": "logo"})
@@ -383,7 +442,9 @@ class TestFindFiles:
 
     @pytest.mark.asyncio
     async def test_find_by_type_and_name(
-        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+        self,
+        knowledge_service: KnowledgeService,
+        stub_backend: AsyncMock,
     ) -> None:
         knowledge_service._backends = {"local:docs": stub_backend}
         result = await knowledge_service._tool_find_files(
@@ -395,7 +456,9 @@ class TestFindFiles:
 
     @pytest.mark.asyncio
     async def test_find_no_matches(
-        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+        self,
+        knowledge_service: KnowledgeService,
+        stub_backend: AsyncMock,
     ) -> None:
         knowledge_service._backends = {"local:docs": stub_backend}
         result = await knowledge_service._tool_find_files(
@@ -406,7 +469,8 @@ class TestFindFiles:
 
     @pytest.mark.asyncio
     async def test_find_invalid_type(
-        self, knowledge_service: KnowledgeService,
+        self,
+        knowledge_service: KnowledgeService,
     ) -> None:
         knowledge_service._backends = {}
         result = await knowledge_service._tool_find_files(
@@ -417,7 +481,9 @@ class TestFindFiles:
 
     @pytest.mark.asyncio
     async def test_find_respects_max_results(
-        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+        self,
+        knowledge_service: KnowledgeService,
+        stub_backend: AsyncMock,
     ) -> None:
         knowledge_service._backends = {"local:docs": stub_backend}
         result = await knowledge_service._tool_find_files({"max_results": 2})
@@ -426,19 +492,24 @@ class TestFindFiles:
 
     @pytest.mark.asyncio
     async def test_find_filters_by_source(
-        self, knowledge_service: KnowledgeService,
+        self,
+        knowledge_service: KnowledgeService,
     ) -> None:
         backend1 = AsyncMock(spec=DocumentBackend)
         backend1.list_documents.return_value = [
             DocumentMeta(
-                source_id="local:a", path="a.png", name="a.png",
+                source_id="local:a",
+                path="a.png",
+                name="a.png",
                 document_type=DocumentType.IMAGE,
             ),
         ]
         backend2 = AsyncMock(spec=DocumentBackend)
         backend2.list_documents.return_value = [
             DocumentMeta(
-                source_id="local:b", path="b.png", name="b.png",
+                source_id="local:b",
+                path="b.png",
+                name="b.png",
                 document_type=DocumentType.IMAGE,
             ),
         ]
@@ -453,7 +524,9 @@ class TestFindFiles:
 
     @pytest.mark.asyncio
     async def test_image_markdown_contains_serve_url(
-        self, knowledge_service: KnowledgeService, stub_backend: AsyncMock,
+        self,
+        knowledge_service: KnowledgeService,
+        stub_backend: AsyncMock,
     ) -> None:
         knowledge_service._backends = {"local:docs": stub_backend}
         result = await knowledge_service._tool_find_files({"type": "image"})

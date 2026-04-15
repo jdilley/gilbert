@@ -134,11 +134,18 @@ async def test_tool_list_users_strips_password(user_service: UserService) -> Non
 
 class _FakeConn:
     """Minimal stand-in for a WsConnection."""
+
     pass
 
 
 async def test_ws_create_user(user_service: UserService) -> None:
-    frame = {"id": "1", "username": "alice", "password": "secret123", "display_name": "Alice", "email": "alice@example.com"}
+    frame = {
+        "id": "1",
+        "username": "alice",
+        "password": "secret123",
+        "display_name": "Alice",
+        "email": "alice@example.com",
+    }
     result = await user_service._ws_user_create(_FakeConn(), frame)
     assert result is not None
     assert result["status"] == "ok"
@@ -163,7 +170,9 @@ async def test_ws_create_user_duplicate_username(user_service: UserService) -> N
 
 
 async def test_ws_create_user_disabled(storage: Any) -> None:
-    svc = UserService(root_password_hash="hashed_pw", default_roles=["user"], allow_user_creation=False)
+    svc = UserService(
+        root_password_hash="hashed_pw", default_roles=["user"], allow_user_creation=False
+    )
     resolver = StubResolver({"entity_storage": StubStorageService(storage)})
     await svc.start(resolver)
 
@@ -187,7 +196,9 @@ async def test_ws_create_user_missing_fields(user_service: UserService) -> None:
 
 
 async def test_ws_delete_user(user_service: UserService) -> None:
-    await user_service.create_user("u_del", {"username": "todelete", "email": "", "display_name": "Del"})
+    await user_service.create_user(
+        "u_del", {"username": "todelete", "email": "", "display_name": "Del"}
+    )
     result = await user_service._ws_user_delete(_FakeConn(), {"id": "1", "user_id": "u_del"})
     assert result is not None
     assert result["status"] == "ok"

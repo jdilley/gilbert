@@ -53,6 +53,7 @@ class _FakeConn:
         self.user_ctx = user_ctx
         self.user_level = 0 if "admin" in user_ctx.roles else 100
         import asyncio
+
         self.shared_conv_ids: set[str] = set()
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
@@ -96,7 +97,9 @@ async def svc() -> MCPServerService:
 @pytest.fixture
 def admin_ctx() -> UserContext:
     return UserContext(
-        user_id="admin", email="admin@x", display_name="Admin",
+        user_id="admin",
+        email="admin@x",
+        display_name="Admin",
         roles=frozenset({"admin"}),
     )
 
@@ -104,7 +107,9 @@ def admin_ctx() -> UserContext:
 @pytest.fixture
 def alice_ctx() -> UserContext:
     return UserContext(
-        user_id="alice", email="alice@x", display_name="Alice",
+        user_id="alice",
+        email="alice@x",
+        display_name="Alice",
         roles=frozenset({"user"}),
     )
 
@@ -112,10 +117,12 @@ def alice_ctx() -> UserContext:
 class TestTokenLifecycle:
     @pytest.mark.asyncio
     async def test_create_returns_plaintext_token_with_prefix(
-        self, svc: MCPServerService,
+        self,
+        svc: MCPServerService,
     ) -> None:
         client, token = await svc.create_client(
-            name="Claude Desktop", owner_user_id="alice",
+            name="Claude Desktop",
+            owner_user_id="alice",
         )
         assert token.startswith(TOKEN_PREFIX)
         # Stored hash is opaque — never equal to the plaintext.
@@ -126,24 +133,28 @@ class TestTokenLifecycle:
 
     @pytest.mark.asyncio
     async def test_create_rejects_blank_name(
-        self, svc: MCPServerService,
+        self,
+        svc: MCPServerService,
     ) -> None:
         with pytest.raises(ValueError, match="name"):
             await svc.create_client(name="", owner_user_id="alice")
 
     @pytest.mark.asyncio
     async def test_create_rejects_missing_owner(
-        self, svc: MCPServerService,
+        self,
+        svc: MCPServerService,
     ) -> None:
         with pytest.raises(ValueError, match="owner_user_id"):
             await svc.create_client(name="X", owner_user_id="")
 
     @pytest.mark.asyncio
     async def test_rotate_issues_new_token_and_invalidates_old(
-        self, svc: MCPServerService,
+        self,
+        svc: MCPServerService,
     ) -> None:
         client, old_token = await svc.create_client(
-            name="X", owner_user_id="alice",
+            name="X",
+            owner_user_id="alice",
         )
         _, new_token = await svc.rotate_token(client.id)
 
@@ -160,7 +171,8 @@ class TestTokenLifecycle:
 
     @pytest.mark.asyncio
     async def test_rotate_unknown_client_raises(
-        self, svc: MCPServerService,
+        self,
+        svc: MCPServerService,
     ) -> None:
         with pytest.raises(LookupError):
             await svc.rotate_token("nonexistent")
@@ -169,10 +181,12 @@ class TestTokenLifecycle:
 class TestAuthenticate:
     @pytest.mark.asyncio
     async def test_successful_auth_resolves_user_context(
-        self, svc: MCPServerService,
+        self,
+        svc: MCPServerService,
     ) -> None:
         client, token = await svc.create_client(
-            name="X", owner_user_id="alice",
+            name="X",
+            owner_user_id="alice",
         )
         result = await svc.authenticate(token, client_ip="10.0.0.1")
         assert result is not None
@@ -185,10 +199,12 @@ class TestAuthenticate:
 
     @pytest.mark.asyncio
     async def test_authenticate_updates_last_used_at(
-        self, svc: MCPServerService,
+        self,
+        svc: MCPServerService,
     ) -> None:
         client, token = await svc.create_client(
-            name="X", owner_user_id="alice",
+            name="X",
+            owner_user_id="alice",
         )
         assert client.last_used_at is None
         await svc.authenticate(token, client_ip="192.168.1.5")
@@ -199,7 +215,8 @@ class TestAuthenticate:
 
     @pytest.mark.asyncio
     async def test_malformed_token_rejected_without_hash_lookup(
-        self, svc: MCPServerService,
+        self,
+        svc: MCPServerService,
     ) -> None:
         # Any string not starting with the prefix is rejected cheaply.
         assert await svc.authenticate("wrong-shape-token") is None
@@ -207,26 +224,31 @@ class TestAuthenticate:
 
     @pytest.mark.asyncio
     async def test_inactive_client_cannot_authenticate(
-        self, svc: MCPServerService,
+        self,
+        svc: MCPServerService,
     ) -> None:
         client, token = await svc.create_client(
-            name="X", owner_user_id="alice",
+            name="X",
+            owner_user_id="alice",
         )
         await svc.update_client(client.id, active=False)
         assert await svc.authenticate(token) is None
 
     @pytest.mark.asyncio
     async def test_unknown_owner_rejected(
-        self, svc: MCPServerService,
+        self,
+        svc: MCPServerService,
     ) -> None:
         client, token = await svc.create_client(
-            name="X", owner_user_id="ghost",
+            name="X",
+            owner_user_id="ghost",
         )
         assert await svc.authenticate(token) is None
 
     @pytest.mark.asyncio
     async def test_random_string_does_not_match(
-        self, svc: MCPServerService,
+        self,
+        svc: MCPServerService,
     ) -> None:
         await svc.create_client(name="X", owner_user_id="alice")
         forged = f"{TOKEN_PREFIX}not-the-real-token"
@@ -236,7 +258,9 @@ class TestAuthenticate:
 class TestWsHandlers:
     @pytest.mark.asyncio
     async def test_list_refuses_non_admin(
-        self, svc: MCPServerService, alice_ctx: UserContext,
+        self,
+        svc: MCPServerService,
+        alice_ctx: UserContext,
     ) -> None:
         result = await svc._ws_list(_FakeConn(alice_ctx), {"id": 1})
         assert result is not None
@@ -245,7 +269,9 @@ class TestWsHandlers:
 
     @pytest.mark.asyncio
     async def test_list_returns_clients_for_admin(
-        self, svc: MCPServerService, admin_ctx: UserContext,
+        self,
+        svc: MCPServerService,
+        admin_ctx: UserContext,
     ) -> None:
         await svc.create_client(name="A", owner_user_id="alice")
         await svc.create_client(name="B", owner_user_id="alice")
@@ -261,7 +287,9 @@ class TestWsHandlers:
 
     @pytest.mark.asyncio
     async def test_create_returns_one_shot_token(
-        self, svc: MCPServerService, admin_ctx: UserContext,
+        self,
+        svc: MCPServerService,
+        admin_ctx: UserContext,
     ) -> None:
         result = await svc._ws_create(
             _FakeConn(admin_ctx),
@@ -289,7 +317,9 @@ class TestWsHandlers:
 
     @pytest.mark.asyncio
     async def test_create_refuses_non_admin(
-        self, svc: MCPServerService, alice_ctx: UserContext,
+        self,
+        svc: MCPServerService,
+        alice_ctx: UserContext,
     ) -> None:
         result = await svc._ws_create(
             _FakeConn(alice_ctx),
@@ -304,22 +334,28 @@ class TestWsHandlers:
 
     @pytest.mark.asyncio
     async def test_rotate_refuses_non_admin(
-        self, svc: MCPServerService, alice_ctx: UserContext,
+        self,
+        svc: MCPServerService,
+        alice_ctx: UserContext,
     ) -> None:
         client, _ = await svc.create_client(name="X", owner_user_id="alice")
         result = await svc._ws_rotate(
-            _FakeConn(alice_ctx), {"id": 1, "client_id": client.id},
+            _FakeConn(alice_ctx),
+            {"id": 1, "client_id": client.id},
         )
         assert result is not None
         assert result["code"] == 403
 
     @pytest.mark.asyncio
     async def test_rotate_returns_new_token(
-        self, svc: MCPServerService, admin_ctx: UserContext,
+        self,
+        svc: MCPServerService,
+        admin_ctx: UserContext,
     ) -> None:
         client, _ = await svc.create_client(name="X", owner_user_id="alice")
         result = await svc._ws_rotate(
-            _FakeConn(admin_ctx), {"id": 1, "client_id": client.id},
+            _FakeConn(admin_ctx),
+            {"id": 1, "client_id": client.id},
         )
         assert result is not None
         assert result["type"] == "mcp.clients.rotate_token.result"
@@ -327,7 +363,9 @@ class TestWsHandlers:
 
     @pytest.mark.asyncio
     async def test_update_toggles_active(
-        self, svc: MCPServerService, admin_ctx: UserContext,
+        self,
+        svc: MCPServerService,
+        admin_ctx: UserContext,
     ) -> None:
         client, _ = await svc.create_client(name="X", owner_user_id="alice")
         result = await svc._ws_update(
@@ -344,11 +382,14 @@ class TestWsHandlers:
 
     @pytest.mark.asyncio
     async def test_delete_removes_client(
-        self, svc: MCPServerService, admin_ctx: UserContext,
+        self,
+        svc: MCPServerService,
+        admin_ctx: UserContext,
     ) -> None:
         client, _ = await svc.create_client(name="X", owner_user_id="alice")
         result = await svc._ws_delete(
-            _FakeConn(admin_ctx), {"id": 1, "client_id": client.id},
+            _FakeConn(admin_ctx),
+            {"id": 1, "client_id": client.id},
         )
         assert result is not None
         assert result["type"] == "mcp.clients.delete.result"

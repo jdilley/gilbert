@@ -41,7 +41,8 @@ class LocalDocumentBackend(DocumentBackend):
     def backend_config_params(cls) -> list[ConfigParam]:
         return [
             ConfigParam(
-                key="path", type=ToolParameterType.STRING,
+                key="path",
+                type=ToolParameterType.STRING,
                 description="Local filesystem directory path to index.",
                 restart_required=True,
             ),
@@ -128,9 +129,7 @@ class LocalDocumentBackend(DocumentBackend):
             return None
         return self._meta_for(file_path)
 
-    async def upload_document(
-        self, path: str, data: bytes, mime_type: str = ""
-    ) -> DocumentMeta:
+    async def upload_document(self, path: str, data: bytes, mime_type: str = "") -> DocumentMeta:
         file_path = self._resolve(path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_bytes(data)

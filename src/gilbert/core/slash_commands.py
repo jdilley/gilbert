@@ -121,9 +121,7 @@ def parse_slash_command(
     if full_command is None:
         full_command = extract_command_name(text)
     if full_command is None:
-        raise SlashCommandError(
-            "Not a slash command — must start with /<name>."
-        )
+        raise SlashCommandError("Not a slash command — must start with /<name>.")
 
     # Use the resolved full name in error messages so hints match what
     # the user typed (including any plugin namespace or group prefix).
@@ -132,17 +130,13 @@ def parse_slash_command(
     prefix = "/" + full_command
     stripped = text.lstrip()
     if not stripped.startswith(prefix):
-        raise SlashCommandError(
-            f"Expected command prefix {prefix!r}. Usage: {usage}"
-        )
-    remainder = stripped[len(prefix):].strip()
+        raise SlashCommandError(f"Expected command prefix {prefix!r}. Usage: {usage}")
+    remainder = stripped[len(prefix) :].strip()
 
     try:
         tokens = shlex.split(remainder) if remainder else []
     except ValueError as exc:
-        raise SlashCommandError(
-            f"Could not parse arguments: {exc}. Usage: {usage}"
-        ) from exc
+        raise SlashCommandError(f"Could not parse arguments: {exc}. Usage: {usage}") from exc
 
     # Parameters, excluding injected-context names (``_user_id`` etc.) so
     # users can't spoof them and so positional indexing skips them.
@@ -166,10 +160,7 @@ def parse_slash_command(
         if tok.startswith("--") and len(tok) > 2 and "=" not in tok:
             key = tok[2:]
             if i + 1 >= len(tokens):
-                raise SlashCommandError(
-                    f"Flag --{key} requires a value. "
-                    f"Usage: {usage}"
-                )
+                raise SlashCommandError(f"Flag --{key} requires a value. Usage: {usage}")
             keywords[key] = tokens[i + 1]
             i += 2
             continue
@@ -181,8 +172,7 @@ def parse_slash_command(
         if k not in by_name:
             known = ", ".join(p.name for p in params) or "(none)"
             raise SlashCommandError(
-                f"Unknown parameter '{k}'. Known parameters: {known}. "
-                f"Usage: {usage}"
+                f"Unknown parameter '{k}'. Known parameters: {known}. Usage: {usage}"
             )
 
     # Assign positional arguments to parameters that weren't supplied as
@@ -198,8 +188,7 @@ def parse_slash_command(
             except StopIteration:
                 if param.required and param.default is None:
                     raise SlashCommandError(
-                        f"Missing required parameter '{param.name}'. "
-                        f"Usage: {usage}"
+                        f"Missing required parameter '{param.name}'. Usage: {usage}"
                     ) from None
                 continue
         try:
@@ -208,17 +197,13 @@ def parse_slash_command(
             raise
         except Exception as exc:
             raise SlashCommandError(
-                f"Invalid value for '{param.name}': {exc}. "
-                f"Usage: {usage}"
+                f"Invalid value for '{param.name}': {exc}. Usage: {usage}"
             ) from exc
 
     # Reject leftover positional args — usually a mistake
     leftover = list(positional_iter)
     if leftover:
-        raise SlashCommandError(
-            f"Unexpected extra arguments: {leftover}. "
-            f"Usage: {usage}"
-        )
+        raise SlashCommandError(f"Unexpected extra arguments: {leftover}. Usage: {usage}")
 
     # Apply enum validation
     for param in params:
@@ -227,9 +212,7 @@ def parse_slash_command(
         value = arguments[param.name]
         if value not in param.enum:
             choices = ", ".join(param.enum)
-            raise SlashCommandError(
-                f"'{param.name}' must be one of: {choices} (got {value!r})."
-            )
+            raise SlashCommandError(f"'{param.name}' must be one of: {choices} (got {value!r}).")
 
     return arguments
 
@@ -272,17 +255,14 @@ def _coerce(raw: str, param: ToolParameter) -> Any:
         if low in _FALSE_LITERALS:
             return False
         raise SlashCommandError(
-            f"'{param.name}' must be a boolean (true/false/yes/no/1/0), "
-            f"got {raw!r}."
+            f"'{param.name}' must be a boolean (true/false/yes/no/1/0), got {raw!r}."
         )
     if param.type == ToolParameterType.ARRAY:
         stripped = raw.strip()
         if stripped.startswith("["):
             parsed = json.loads(stripped)
             if not isinstance(parsed, list):
-                raise SlashCommandError(
-                    f"'{param.name}' JSON value must be an array."
-                )
+                raise SlashCommandError(f"'{param.name}' JSON value must be an array.")
             return parsed
         # Comma-separated fallback. Empty string → empty list; single
         # value with no commas → one-element list.
@@ -292,9 +272,7 @@ def _coerce(raw: str, param: ToolParameter) -> Any:
     if param.type == ToolParameterType.OBJECT:
         parsed = json.loads(raw)
         if not isinstance(parsed, dict):
-            raise SlashCommandError(
-                f"'{param.name}' JSON value must be an object."
-            )
+            raise SlashCommandError(f"'{param.name}' JSON value must be an object.")
         return parsed
     # Should never happen — all ToolParameterType values handled above.
     raise SlashCommandError(f"Unsupported parameter type: {param.type}")

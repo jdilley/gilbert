@@ -40,7 +40,10 @@ class _StubMcp:
         self.calls: list[tuple[str, str, str | None]] = []
 
     async def complete_oauth_callback(
-        self, state: str, code: str, received_state: str | None,
+        self,
+        state: str,
+        code: str,
+        received_state: str | None,
     ) -> bool:
         self.calls.append((state, code, received_state))
         return self.resolve

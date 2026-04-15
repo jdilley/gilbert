@@ -22,7 +22,9 @@ def test_user_context_is_frozen() -> None:
 
 def test_user_context_roles_frozenset() -> None:
     ctx = UserContext(
-        user_id="u1", email="a@b.com", display_name="A",
+        user_id="u1",
+        email="a@b.com",
+        display_name="A",
         roles=frozenset({"admin", "user"}),
     )
     assert "admin" in ctx.roles

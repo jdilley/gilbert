@@ -73,23 +73,25 @@ _MAX_IMAGE_BYTES = 5 * 1024 * 1024
 _MAX_DOCUMENT_BYTES = 32 * 1024 * 1024  # Anthropic's documented PDF cap.
 _MAX_TEXT_BYTES = 512 * 1024  # decoded UTF-8.
 _MAX_TOTAL_ATTACHMENT_BYTES = 40 * 1024 * 1024
-_ALLOWED_IMAGE_MEDIA_TYPES = frozenset({
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "image/webp",
-})
-_XLSX_MEDIA_TYPE = (
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_ALLOWED_IMAGE_MEDIA_TYPES = frozenset(
+    {
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+    }
 )
+_XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 # Documents we accept on the wire as base64 blobs. PDFs flow through to
 # Anthropic's document content block unchanged; xlsx is converted to a
 # markdown text attachment at parse time so the AI sees rows it can
 # actually reason about.
-_ALLOWED_DOCUMENT_MEDIA_TYPES = frozenset({
-    "application/pdf",
-    _XLSX_MEDIA_TYPE,
-})
+_ALLOWED_DOCUMENT_MEDIA_TYPES = frozenset(
+    {
+        "application/pdf",
+        _XLSX_MEDIA_TYPE,
+    }
+)
 
 
 def _convert_xlsx_to_markdown(data: bytes, name: str) -> str:
@@ -127,9 +129,7 @@ def _convert_xlsx_to_markdown(data: bytes, name: str) -> str:
             return str(v).replace("|", "\\|").replace("\n", " ").replace("\r", " ")
 
         header_row = rows[0]
-        header_cells = [_cell(c) for c in header_row] + [""] * (
-            max_cols - len(header_row)
-        )
+        header_cells = [_cell(c) for c in header_row] + [""] * (max_cols - len(header_row))
         parts.append("| " + " | ".join(header_cells) + " |")
         parts.append("| " + " | ".join(["---"] * max_cols) + " |")
         for row in rows[1:]:
@@ -192,12 +192,14 @@ def _parse_frame_attachments(raw: Any) -> list[FileAttachment]:
                     f"({decoded_len} bytes > {_MAX_IMAGE_BYTES} max)",
                 )
             total_bytes += decoded_len
-            result.append(FileAttachment(
-                kind="image",
-                name=name,
-                media_type=media_type,
-                data=data,
-            ))
+            result.append(
+                FileAttachment(
+                    kind="image",
+                    name=name,
+                    media_type=media_type,
+                    data=data,
+                )
+            )
         elif kind == "document":
             data = item.get("data")
             if not name:
@@ -240,20 +242,24 @@ def _parse_frame_attachments(raw: Any) -> list[FileAttachment]:
                         "try a smaller subset",
                     )
                 total_bytes += text_bytes
-                result.append(FileAttachment(
-                    kind="text",
-                    name=name,
-                    media_type="text/markdown",
-                    text=markdown,
-                ))
+                result.append(
+                    FileAttachment(
+                        kind="text",
+                        name=name,
+                        media_type="text/markdown",
+                        text=markdown,
+                    )
+                )
             else:
                 total_bytes += decoded_len
-                result.append(FileAttachment(
-                    kind="document",
-                    name=name,
-                    media_type=media_type,
-                    data=data,
-                ))
+                result.append(
+                    FileAttachment(
+                        kind="document",
+                        name=name,
+                        media_type=media_type,
+                        data=data,
+                    )
+                )
         elif kind == "text":
             text = item.get("text")
             if not name:
@@ -269,16 +275,17 @@ def _parse_frame_attachments(raw: Any) -> list[FileAttachment]:
                     f"({byte_len} bytes > {_MAX_TEXT_BYTES} max)",
                 )
             total_bytes += byte_len
-            result.append(FileAttachment(
-                kind="text",
-                name=name,
-                media_type=media_type or "text/plain",
-                text=text,
-            ))
+            result.append(
+                FileAttachment(
+                    kind="text",
+                    name=name,
+                    media_type=media_type or "text/plain",
+                    text=text,
+                )
+            )
         else:
             raise ValueError(
-                f"attachments[{idx}] has unknown kind {kind!r} "
-                "(expected image, document, or text)",
+                f"attachments[{idx}] has unknown kind {kind!r} (expected image, document, or text)",
             )
 
         if total_bytes > _MAX_TOTAL_ATTACHMENT_BYTES:
@@ -288,6 +295,7 @@ def _parse_frame_attachments(raw: Any) -> list[FileAttachment]:
             )
 
     return result
+
 
 # ── Persona constants and helper ──────────────────────────────
 
@@ -370,7 +378,8 @@ class _PersonaHelper:
         self._persona = DEFAULT_PERSONA
         self._is_customized = False
         await self._storage.put(
-            _PERSONA_COLLECTION, _PERSONA_ID,
+            _PERSONA_COLLECTION,
+            _PERSONA_ID,
             {"text": DEFAULT_PERSONA, "customized": False},
         )
         logger.info("Persona reset to default")
@@ -388,10 +397,12 @@ class _MemoryHelper:
         self._storage = storage
 
     async def setup_indexes(self) -> None:
-        await self._storage.ensure_index(IndexDefinition(
-            collection=_MEMORY_COLLECTION,
-            fields=["user_id"],
-        ))
+        await self._storage.ensure_index(
+            IndexDefinition(
+                collection=_MEMORY_COLLECTION,
+                fields=["user_id"],
+            )
+        )
 
     async def get_user_summaries(self, user_id: str) -> str:
         memories = await self._get_user_memories(user_id)
@@ -406,10 +417,12 @@ class _MemoryHelper:
         return "\n".join(lines)
 
     async def _get_user_memories(self, user_id: str) -> list[dict[str, Any]]:
-        memories = await self._storage.query(Query(
-            collection=_MEMORY_COLLECTION,
-            filters=[Filter(field="user_id", op=FilterOp.EQ, value=user_id)],
-        ))
+        memories = await self._storage.query(
+            Query(
+                collection=_MEMORY_COLLECTION,
+                filters=[Filter(field="user_id", op=FilterOp.EQ, value=user_id)],
+            )
+        )
 
         def sort_key(m: dict[str, Any]) -> tuple[int, int, str]:
             source_rank = 0 if m.get("source") == "user" else 1
@@ -430,16 +443,20 @@ class _MemoryHelper:
             content = summary
         now = datetime.now(UTC).isoformat()
         memory_id = f"memory_{uuid.uuid4().hex[:12]}"
-        await self._storage.put(_MEMORY_COLLECTION, memory_id, {
-            "memory_id": memory_id,
-            "user_id": user_id,
-            "summary": summary,
-            "content": content,
-            "source": source,
-            "access_count": 0,
-            "created_at": now,
-            "updated_at": now,
-        })
+        await self._storage.put(
+            _MEMORY_COLLECTION,
+            memory_id,
+            {
+                "memory_id": memory_id,
+                "user_id": user_id,
+                "summary": summary,
+                "content": content,
+                "source": source,
+                "access_count": 0,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
         logger.info("Memory created for %s: %s", user_id, summary[:60])
         return f"Got it, I'll remember that. (memory {memory_id})"
 
@@ -606,7 +623,9 @@ class AIService(Service):
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="ai",
-            capabilities=frozenset({"ai_chat", "ai_tools", "ws_handlers", "persona", "user_memory"}),
+            capabilities=frozenset(
+                {"ai_chat", "ai_tools", "ws_handlers", "persona", "user_memory"}
+            ),
             requires=frozenset({"entity_storage"}),
             optional=frozenset({"ai_tools", "configuration", "access_control"}),
             events=frozenset({"chat.conversation.renamed"}),
@@ -691,9 +710,7 @@ class AIService(Service):
 
     def _apply_config(self, section: dict[str, Any]) -> None:
         """Apply tunable config values from a config section."""
-        self._max_history_messages = section.get(
-            "max_history_messages", self._max_history_messages
-        )
+        self._max_history_messages = section.get("max_history_messages", self._max_history_messages)
         self._max_tool_rounds = section.get("max_tool_rounds", self._max_tool_rounds)
         self._config = section.get("settings", self._config)
 
@@ -710,31 +727,38 @@ class AIService(Service):
     def config_params(self) -> list[ConfigParam]:
         params = [
             ConfigParam(
-                key="max_history_messages", type=ToolParameterType.INTEGER,
+                key="max_history_messages",
+                type=ToolParameterType.INTEGER,
                 description="Maximum conversation messages to include in each request.",
                 default=50,
             ),
             ConfigParam(
-                key="max_tool_rounds", type=ToolParameterType.INTEGER,
+                key="max_tool_rounds",
+                type=ToolParameterType.INTEGER,
                 description="Maximum agentic loop iterations (tool call rounds) per chat.",
                 default=10,
             ),
             ConfigParam(
-                key="backend", type=ToolParameterType.STRING,
+                key="backend",
+                type=ToolParameterType.STRING,
                 description="AI backend provider.",
-                default="anthropic", restart_required=True,
+                default="anthropic",
+                restart_required=True,
                 choices=tuple(AIBackend.registered_backends().keys()) or ("anthropic",),
             ),
             ConfigParam(
-                key="default_persona", type=ToolParameterType.STRING,
+                key="default_persona",
+                type=ToolParameterType.STRING,
                 description="Default persona instructions for the AI assistant.",
                 default=DEFAULT_PERSONA,
                 multiline=True,
             ),
             ConfigParam(
-                key="memory_enabled", type=ToolParameterType.BOOLEAN,
+                key="memory_enabled",
+                type=ToolParameterType.BOOLEAN,
                 description="Whether the AI memory system is enabled.",
-                default=True, restart_required=True,
+                default=True,
+                restart_required=True,
             ),
         ]
         # Include backend-declared params under settings.*
@@ -743,13 +767,20 @@ class AIService(Service):
         backend_cls = backends.get(self._backend_name)
         if backend_cls is not None:
             for bp in backend_cls.backend_config_params():
-                params.append(ConfigParam(
-                    key=f"settings.{bp.key}", type=bp.type,
-                    description=bp.description, default=bp.default,
-                    restart_required=bp.restart_required, sensitive=bp.sensitive,
-                    choices=bp.choices, choices_from=bp.choices_from,
-                    multiline=bp.multiline, backend_param=True,
-                ))
+                params.append(
+                    ConfigParam(
+                        key=f"settings.{bp.key}",
+                        type=bp.type,
+                        description=bp.description,
+                        default=bp.default,
+                        restart_required=bp.restart_required,
+                        sensitive=bp.sensitive,
+                        choices=bp.choices,
+                        choices_from=bp.choices_from,
+                        multiline=bp.multiline,
+                        backend_param=True,
+                    )
+                )
         return params
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
@@ -768,7 +799,9 @@ class AIService(Service):
         )
 
     async def invoke_config_action(
-        self, key: str, payload: dict[str, Any],
+        self,
+        key: str,
+        payload: dict[str, Any],
     ) -> ConfigActionResult:
         return await invoke_backend_action(self._backend, key, payload)
 
@@ -786,22 +819,30 @@ class AIService(Service):
         for bp in _BUILTIN_PROFILES:
             existing = await self._storage.get(_PROFILES_COLLECTION, bp.name)
             if existing is None:
-                await self._storage.put(_PROFILES_COLLECTION, bp.name, {
-                    "name": bp.name,
-                    "description": bp.description,
-                    "tool_mode": bp.tool_mode,
-                    "tools": bp.tools,
-                    "tool_roles": bp.tool_roles,
-                })
+                await self._storage.put(
+                    _PROFILES_COLLECTION,
+                    bp.name,
+                    {
+                        "name": bp.name,
+                        "description": bp.description,
+                        "tool_mode": bp.tool_mode,
+                        "tools": bp.tools,
+                        "tool_roles": bp.tool_roles,
+                    },
+                )
 
         # Seed built-in assignments
         for call_name, profile_name in _BUILTIN_ASSIGNMENTS.items():
             existing = await self._storage.get(_ASSIGNMENTS_COLLECTION, call_name)
             if existing is None:
-                await self._storage.put(_ASSIGNMENTS_COLLECTION, call_name, {
-                    "call_name": call_name,
-                    "profile": profile_name,
-                })
+                await self._storage.put(
+                    _ASSIGNMENTS_COLLECTION,
+                    call_name,
+                    {
+                        "call_name": call_name,
+                        "profile": profile_name,
+                    },
+                )
 
         # Also seed from config (config overrides built-ins)
         config_svc = self._resolver.get_capability("configuration") if self._resolver else None
@@ -810,13 +851,17 @@ class AIService(Service):
             config_profiles = ai_section.get("profiles", {})
             for name, pdata in config_profiles.items():
                 if isinstance(pdata, dict):
-                    await self._storage.put(_PROFILES_COLLECTION, name, {
-                        "name": name,
-                        "description": pdata.get("description", ""),
-                        "tool_mode": pdata.get("tool_mode", "all"),
-                        "tools": pdata.get("tools", []),
-                        "tool_roles": pdata.get("tool_roles", {}),
-                    })
+                    await self._storage.put(
+                        _PROFILES_COLLECTION,
+                        name,
+                        {
+                            "name": name,
+                            "description": pdata.get("description", ""),
+                            "tool_mode": pdata.get("tool_mode", "all"),
+                            "tools": pdata.get("tools", []),
+                            "tool_roles": pdata.get("tool_roles", {}),
+                        },
+                    )
 
         # Load all profiles from storage
         await self._refresh_profiles()
@@ -867,15 +912,24 @@ class AIService(Service):
     async def set_profile(self, profile: AIContextProfile) -> None:
         """Create or update a profile."""
         if self._storage is not None:
-            await self._storage.put(_PROFILES_COLLECTION, profile.name, {
-                "name": profile.name,
-                "description": profile.description,
-                "tool_mode": profile.tool_mode,
-                "tools": profile.tools,
-                "tool_roles": profile.tool_roles,
-            })
+            await self._storage.put(
+                _PROFILES_COLLECTION,
+                profile.name,
+                {
+                    "name": profile.name,
+                    "description": profile.description,
+                    "tool_mode": profile.tool_mode,
+                    "tools": profile.tools,
+                    "tool_roles": profile.tool_roles,
+                },
+            )
         self._profiles[profile.name] = profile
-        logger.info("Profile '%s' saved (mode=%s, tools=%d)", profile.name, profile.tool_mode, len(profile.tools))
+        logger.info(
+            "Profile '%s' saved (mode=%s, tools=%d)",
+            profile.name,
+            profile.tool_mode,
+            len(profile.tools),
+        )
 
     async def delete_profile(self, name: str) -> None:
         """Delete a profile."""
@@ -891,10 +945,14 @@ class AIService(Service):
         if profile_name not in self._profiles:
             raise ValueError(f"Unknown profile: {profile_name}")
         if self._storage is not None:
-            await self._storage.put(_ASSIGNMENTS_COLLECTION, call_name, {
-                "call_name": call_name,
-                "profile": profile_name,
-            })
+            await self._storage.put(
+                _ASSIGNMENTS_COLLECTION,
+                call_name,
+                {
+                    "call_name": call_name,
+                    "profile": profile_name,
+                },
+            )
         self._assignments[call_name] = profile_name
         logger.info("Call '%s' assigned to profile '%s'", call_name, profile_name)
 
@@ -1030,31 +1088,41 @@ class AIService(Service):
                 hint = "Available: " + ", ".join(f"/{c}" for c in available)
             else:
                 hint = "No slash commands are available to you."
-            error_text = (
-                f"Unknown slash command '/{first_word}'. {hint}"
+            error_text = f"Unknown slash command '/{first_word}'. {hint}"
+            messages.append(
+                Message(
+                    role=MessageRole.USER,
+                    content=user_message,
+                    author_id=user_ctx.user_id if user_ctx else "",
+                    author_name=user_ctx.display_name if user_ctx else "",
+                )
             )
-            messages.append(Message(
-                role=MessageRole.USER,
-                content=user_message,
-                author_id=user_ctx.user_id if user_ctx else "",
-                author_name=user_ctx.display_name if user_ctx else "",
-            ))
-            messages.append(Message(
-                role=MessageRole.ASSISTANT, content=error_text,
-            ))
+            messages.append(
+                Message(
+                    role=MessageRole.ASSISTANT,
+                    content=error_text,
+                )
+            )
             await self._save_conversation(
-                conversation_id, messages, user_ctx=user_ctx,
+                conversation_id,
+                messages,
+                user_ctx=user_ctx,
             )
-            return error_text, conversation_id, [], [
-                {"tool_name": f"/{first_word}", "is_error": True}
-            ]
+            return (
+                error_text,
+                conversation_id,
+                [],
+                [{"tool_name": f"/{first_word}", "is_error": True}],
+            )
 
         # Append user message
-        messages.append(Message(
-            role=MessageRole.USER,
-            content=user_message,
-            attachments=list(attachments) if attachments else [],
-        ))
+        messages.append(
+            Message(
+                role=MessageRole.USER,
+                content=user_message,
+                attachments=list(attachments) if attachments else [],
+            )
+        )
 
         # Resolve profile for this AI call
         profile = self.get_profile(ai_call)
@@ -1089,7 +1157,8 @@ class AIService(Service):
             effective_prompt = f"{date_ctx}\n\n{system_prompt}"
         else:
             effective_prompt = await self._build_system_prompt(
-                user_ctx=user_ctx, conversation_id=conversation_id,
+                user_ctx=user_ctx,
+                conversation_id=conversation_id,
             )
 
         # Agentic loop
@@ -1104,10 +1173,7 @@ class AIService(Service):
             # mutations are visible to subsequent AI rounds.
             conv_state = await self._load_conversation_state(conversation_id)
             if conv_state:
-                round_prompt = (
-                    f"{effective_prompt}\n\n"
-                    f"{self._format_state_for_context(conv_state)}"
-                )
+                round_prompt = f"{effective_prompt}\n\n{self._format_state_for_context(conv_state)}"
             else:
                 round_prompt = effective_prompt
 
@@ -1129,8 +1195,10 @@ class AIService(Service):
 
             # Execute tool calls and append results
             tool_results, round_ui_blocks = await self._execute_tool_calls(
-                response.message.tool_calls, tools_by_name,
-                user_ctx=user_ctx, profile=profile,
+                response.message.tool_calls,
+                tools_by_name,
+                user_ctx=user_ctx,
+                profile=profile,
             )
             all_ui_blocks.extend(round_ui_blocks)
             messages.append(Message(role=MessageRole.TOOL_RESULT, tool_results=tool_results))
@@ -1139,14 +1207,18 @@ class AIService(Service):
             # sanitized to drop injected ``_user_id`` / ``_room_members``
             # keys before the payload is sent to the frontend.
             for tc, tr in zip(
-                response.message.tool_calls, tool_results, strict=False,
+                response.message.tool_calls,
+                tool_results,
+                strict=False,
             ):
-                tool_usage.append({
-                    "tool_name": tc.tool_name,
-                    "is_error": tr.is_error,
-                    "arguments": self._sanitize_tool_args(tc.arguments),
-                    "result": tr.content,
-                })
+                tool_usage.append(
+                    {
+                        "tool_name": tc.tool_name,
+                        "is_error": tr.is_error,
+                        "arguments": self._sanitize_tool_args(tc.arguments),
+                        "result": tr.content,
+                    }
+                )
         else:
             logger.warning(
                 "Agentic loop hit max rounds (%d) for conversation %s",
@@ -1162,10 +1234,7 @@ class AIService(Service):
         # here would push response_index past the frontend's index space
         # and leave blocks unanchored. Match the history loader by
         # counting only non-empty assistant rows.
-        assistant_count = sum(
-            1 for m in messages
-            if m.role == MessageRole.ASSISTANT and m.content
-        )
+        assistant_count = sum(1 for m in messages if m.role == MessageRole.ASSISTANT and m.content)
         response_index = max(0, assistant_count - 1)
 
         # Serialize UI blocks with position and submission state
@@ -1179,7 +1248,10 @@ class AIService(Service):
 
         # Persist conversation with user ownership and UI blocks
         await self._save_conversation(
-            conversation_id, messages, user_ctx, ui_blocks=ui_block_dicts,
+            conversation_id,
+            messages,
+            user_ctx,
+            ui_blocks=ui_block_dicts,
         )
 
         # Return final text response
@@ -1200,10 +1272,7 @@ class AIService(Service):
         today = now.strftime("%A, %B %d, %Y")
         time_str = now.strftime("%I:%M %p %Z")
         yesterday = (now - timedelta(days=1)).strftime("%A, %B %d, %Y")
-        return (
-            f"Current date and time: {today} at {time_str}. "
-            f"Yesterday was {yesterday}."
-        )
+        return f"Current date and time: {today} at {time_str}. Yesterday was {yesterday}."
 
     async def _build_system_prompt(
         self,
@@ -1360,14 +1429,12 @@ class AIService(Service):
             if profile.tool_mode == "include":
                 include_set = set(profile.tools)
                 tools_by_name = {
-                    name: v for name, v in tools_by_name.items()
-                    if name in include_set
+                    name: v for name, v in tools_by_name.items() if name in include_set
                 }
             elif profile.tool_mode == "exclude":
                 exclude_set = set(profile.tools)
                 tools_by_name = {
-                    name: v for name, v in tools_by_name.items()
-                    if name not in exclude_set
+                    name: v for name, v in tools_by_name.items() if name not in exclude_set
                 }
             # "all" = no filtering
 
@@ -1388,7 +1455,8 @@ class AIService(Service):
                 if removed:
                     logger.debug(
                         "Filtered %d tools for user %s (effective level %d)",
-                        removed, user_ctx.user_id,
+                        removed,
+                        user_ctx.user_id,
                         self._acl_svc.get_effective_level(user_ctx),
                     )
                 tools_by_name = filtered
@@ -1412,11 +1480,13 @@ class AIService(Service):
         for tc in tool_calls:
             provider_and_def = tools_by_name.get(tc.tool_name)
             if provider_and_def is None:
-                results.append(ToolResult(
-                    tool_call_id=tc.tool_call_id,
-                    content=f"Error: unknown tool '{tc.tool_name}'",
-                    is_error=True,
-                ))
+                results.append(
+                    ToolResult(
+                        tool_call_id=tc.tool_call_id,
+                        content=f"Error: unknown tool '{tc.tool_name}'",
+                        is_error=True,
+                    )
+                )
                 continue
             provider, tool_def = provider_and_def
 
@@ -1428,11 +1498,13 @@ class AIService(Service):
                     role_level = self._acl_svc.get_role_level(effective_role)
                     user_level = self._acl_svc.get_effective_level(user_ctx)
                     if user_level > role_level:
-                        results.append(ToolResult(
-                            tool_call_id=tc.tool_call_id,
-                            content=f"Permission denied: tool '{tc.tool_name}' requires higher privileges",
-                            is_error=True,
-                        ))
+                        results.append(
+                            ToolResult(
+                                tool_call_id=tc.tool_call_id,
+                                content=f"Permission denied: tool '{tc.tool_name}' requires higher privileges",
+                                is_error=True,
+                            )
+                        )
                         continue
 
             # Inject user context so tools can identify the caller
@@ -1455,17 +1527,21 @@ class AIService(Service):
                         for m in conv_data.get("members", [])
                     ]
 
-            await self._publish_tool_event("chat.tool.started", {
-                "conversation_id": self._current_conversation_id,
-                "tool_name": tc.tool_name,
-                "tool_call_id": tc.tool_call_id,
-                "arguments": self._sanitize_tool_args(tc.arguments),
-            })
+            await self._publish_tool_event(
+                "chat.tool.started",
+                {
+                    "conversation_id": self._current_conversation_id,
+                    "tool_name": tc.tool_name,
+                    "tool_call_id": tc.tool_call_id,
+                    "arguments": self._sanitize_tool_args(tc.arguments),
+                },
+            )
 
             # Propagate caller identity through the async context so
             # tools can resolve it via core.context.get_current_user().
             if user_ctx is not None:
                 from gilbert.core.context import set_current_user
+
                 set_current_user(user_ctx)
 
             try:
@@ -1476,6 +1552,7 @@ class AIService(Service):
                     result_text = raw_result.text
                     for block in raw_result.ui_blocks:
                         import dataclasses as _dc
+
                         # Auto-assign block_id if missing
                         if not block.block_id:
                             block = _dc.replace(block, block_id=str(uuid.uuid4()))
@@ -1486,32 +1563,42 @@ class AIService(Service):
                 else:
                     result_text = raw_result
 
-                results.append(ToolResult(
-                    tool_call_id=tc.tool_call_id,
-                    content=result_text,
-                ))
+                results.append(
+                    ToolResult(
+                        tool_call_id=tc.tool_call_id,
+                        content=result_text,
+                    )
+                )
 
-                await self._publish_tool_event("chat.tool.completed", {
-                    "conversation_id": self._current_conversation_id,
-                    "tool_name": tc.tool_name,
-                    "tool_call_id": tc.tool_call_id,
-                    "is_error": False,
-                    "result_preview": result_text[:200] if result_text else "",
-                })
+                await self._publish_tool_event(
+                    "chat.tool.completed",
+                    {
+                        "conversation_id": self._current_conversation_id,
+                        "tool_name": tc.tool_name,
+                        "tool_call_id": tc.tool_call_id,
+                        "is_error": False,
+                        "result_preview": result_text[:200] if result_text else "",
+                    },
+                )
             except Exception as exc:
                 logger.exception("Tool execution failed: %s", tc.tool_name)
-                results.append(ToolResult(
-                    tool_call_id=tc.tool_call_id,
-                    content=f"Error executing tool: {exc}",
-                    is_error=True,
-                ))
-                await self._publish_tool_event("chat.tool.completed", {
-                    "conversation_id": self._current_conversation_id,
-                    "tool_name": tc.tool_name,
-                    "tool_call_id": tc.tool_call_id,
-                    "is_error": True,
-                    "result_preview": str(exc)[:200],
-                })
+                results.append(
+                    ToolResult(
+                        tool_call_id=tc.tool_call_id,
+                        content=f"Error executing tool: {exc}",
+                        is_error=True,
+                    )
+                )
+                await self._publish_tool_event(
+                    "chat.tool.completed",
+                    {
+                        "conversation_id": self._current_conversation_id,
+                        "tool_name": tc.tool_name,
+                        "tool_call_id": tc.tool_call_id,
+                        "is_error": True,
+                        "result_preview": str(exc)[:200],
+                    },
+                )
         return results, ui_blocks
 
     # --- Slash-command execution ---
@@ -1540,12 +1627,13 @@ class AIService(Service):
         if module.startswith(prefix):
             # ``gilbert_plugin_current_data_sync.data_sync_service`` →
             # ``current_data_sync``
-            tail = module[len(prefix):]
+            tail = module[len(prefix) :]
             return tail.split(".", 1)[0]
         return ""
 
     def _slash_commands_for_user(
-        self, user_ctx: UserContext | None,
+        self,
+        user_ctx: UserContext | None,
     ) -> dict[str, tuple[ToolProvider, ToolDefinition]]:
         """Return slash-enabled tools the user may invoke, keyed by full command name.
 
@@ -1577,9 +1665,10 @@ class AIService(Service):
             full_cmd = f"{namespace}.{local}" if namespace else local
             if full_cmd in result:
                 logger.warning(
-                    "Duplicate slash command %r from tool %r "
-                    "(already registered by %r)",
-                    full_cmd, tool_def.name, result[full_cmd][1].name,
+                    "Duplicate slash command %r from tool %r (already registered by %r)",
+                    full_cmd,
+                    tool_def.name,
+                    result[full_cmd][1].name,
                 )
                 continue
             result[full_cmd] = (provider, tool_def)
@@ -1641,12 +1730,14 @@ class AIService(Service):
 
         # Record the user's command as a user message (with author fields
         # so shared-room history renders the actor correctly).
-        messages.append(Message(
-            role=MessageRole.USER,
-            content=raw_text,
-            author_id=user_ctx.user_id if user_ctx else "",
-            author_name=user_ctx.display_name if user_ctx else "",
-        ))
+        messages.append(
+            Message(
+                role=MessageRole.USER,
+                content=raw_text,
+                author_id=user_ctx.user_id if user_ctx else "",
+                author_name=user_ctx.display_name if user_ctx else "",
+            )
+        )
 
         # Parse — errors are shown to the user as the assistant reply.
         # ``cmd_name`` is the matched full command (e.g. ``"radio start"``
@@ -1654,26 +1745,35 @@ class AIService(Service):
         # strips the correct prefix for grouped invocations.
         try:
             arguments = parse_slash_command(
-                raw_text, tool_def, full_command=cmd_name,
+                raw_text,
+                tool_def,
+                full_command=cmd_name,
             )
         except SlashCommandError as exc:
             error_text = str(exc)
-            messages.append(Message(
-                role=MessageRole.ASSISTANT, content=error_text,
-            ))
+            messages.append(
+                Message(
+                    role=MessageRole.ASSISTANT,
+                    content=error_text,
+                )
+            )
             await self._save_conversation(
-                conversation_id, messages, user_ctx=user_ctx,
+                conversation_id,
+                messages,
+                user_ctx=user_ctx,
             )
             return (
                 error_text,
                 conversation_id,
                 [],
-                [{
-                    "tool_name": tool_def.name,
-                    "is_error": True,
-                    "arguments": {},
-                    "result": error_text,
-                }],
+                [
+                    {
+                        "tool_name": tool_def.name,
+                        "is_error": True,
+                        "arguments": {},
+                        "result": error_text,
+                    }
+                ],
             )
 
         # Inject caller identity so tools can see who invoked them,
@@ -1698,17 +1798,21 @@ class AIService(Service):
         tool_call_id = f"slash-{uuid.uuid4().hex[:12]}"
         sanitized_args = self._sanitize_tool_args(arguments)
 
-        await self._publish_tool_event("chat.tool.started", {
-            "conversation_id": conversation_id,
-            "tool_name": tool_def.name,
-            "tool_call_id": tool_call_id,
-            "arguments": sanitized_args,
-        })
+        await self._publish_tool_event(
+            "chat.tool.started",
+            {
+                "conversation_id": conversation_id,
+                "tool_name": tool_def.name,
+                "tool_call_id": tool_call_id,
+                "arguments": sanitized_args,
+            },
+        )
 
         # Propagate caller identity through the async context so
         # tools can resolve it via core.context.get_current_user().
         if user_ctx is not None:
             from gilbert.core.context import set_current_user
+
             set_current_user(user_ctx)
 
         ui_blocks: list[UIBlock] = []
@@ -1730,35 +1834,45 @@ class AIService(Service):
         except Exception as exc:
             logger.exception(
                 "Slash command execution failed: /%s -> %s",
-                cmd_name, tool_def.name,
+                cmd_name,
+                tool_def.name,
             )
             result_text = f"Error executing /{cmd_name}: {exc}"
             is_error = True
 
-        await self._publish_tool_event("chat.tool.completed", {
-            "conversation_id": conversation_id,
-            "tool_name": tool_def.name,
-            "tool_call_id": tool_call_id,
-            "is_error": is_error,
-            "result_preview": result_text[:200] if result_text else "",
-        })
+        await self._publish_tool_event(
+            "chat.tool.completed",
+            {
+                "conversation_id": conversation_id,
+                "tool_name": tool_def.name,
+                "tool_call_id": tool_call_id,
+                "is_error": is_error,
+                "result_preview": result_text[:200] if result_text else "",
+            },
+        )
 
         # Store the assistant turn with ToolCall/ToolResult metadata so
         # the frontend renders it identically to an AI-driven tool use.
-        messages.append(Message(
-            role=MessageRole.ASSISTANT,
-            content=result_text,
-            tool_calls=[ToolCall(
-                tool_call_id=tool_call_id,
-                tool_name=tool_def.name,
-                arguments=sanitized_args,
-            )],
-            tool_results=[ToolResult(
-                tool_call_id=tool_call_id,
+        messages.append(
+            Message(
+                role=MessageRole.ASSISTANT,
                 content=result_text,
-                is_error=is_error,
-            )],
-        ))
+                tool_calls=[
+                    ToolCall(
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_def.name,
+                        arguments=sanitized_args,
+                    )
+                ],
+                tool_results=[
+                    ToolResult(
+                        tool_call_id=tool_call_id,
+                        content=result_text,
+                        is_error=is_error,
+                    )
+                ],
+            )
+        )
 
         # Serialize UI blocks with position + submission state, matching
         # the chat() agentic loop so downstream rendering is uniform.
@@ -1766,10 +1880,7 @@ class AIService(Service):
         # index aligns with what the frontend and history loader show;
         # intermediate tool-use rounds are invisible and would offset
         # the anchor otherwise.
-        assistant_count = sum(
-            1 for m in messages
-            if m.role == MessageRole.ASSISTANT and m.content
-        )
+        assistant_count = sum(1 for m in messages if m.role == MessageRole.ASSISTANT and m.content)
         response_index = max(0, assistant_count - 1)
         ui_block_dicts: list[dict[str, Any]] = []
         for block in ui_blocks:
@@ -1780,22 +1891,28 @@ class AIService(Service):
             ui_block_dicts.append(d)
 
         await self._save_conversation(
-            conversation_id, messages, user_ctx=user_ctx,
+            conversation_id,
+            messages,
+            user_ctx=user_ctx,
             ui_blocks=ui_block_dicts,
         )
 
-        tool_usage = [{
-            "tool_name": tool_def.name,
-            "is_error": is_error,
-            "arguments": sanitized_args,
-            "result": result_text,
-        }]
+        tool_usage = [
+            {
+                "tool_name": tool_def.name,
+                "is_error": is_error,
+                "arguments": sanitized_args,
+                "result": result_text,
+            }
+        ]
         return result_text, conversation_id, ui_block_dicts, tool_usage
 
     # --- Tool Event Publishing ---
 
     async def _publish_tool_event(
-        self, event_type: str, data: dict[str, Any],
+        self,
+        event_type: str,
+        data: dict[str, Any],
     ) -> None:
         """Publish a tool execution event for real-time UI updates."""
         if self._resolver is None:
@@ -1806,9 +1923,13 @@ class AIService(Service):
         from gilbert.interfaces.events import Event, EventBusProvider
 
         if isinstance(event_bus_svc, EventBusProvider):
-            await event_bus_svc.bus.publish(Event(
-                event_type=event_type, data=data, source="ai",
-            ))
+            await event_bus_svc.bus.publish(
+                Event(
+                    event_type=event_type,
+                    data=data,
+                    source="ai",
+                )
+            )
 
     @staticmethod
     def _sanitize_tool_args(args: dict[str, Any]) -> dict[str, Any]:
@@ -1978,22 +2099,26 @@ class AIService(Service):
                 kind = str(att.get("kind") or "")
                 if not kind:
                     continue
-                attachments.append(FileAttachment(
-                    kind=kind,
-                    name=str(att.get("name", "")),
-                    media_type=str(att.get("media_type", "")),
-                    data=str(att.get("data", "")),
-                    text=str(att.get("text", "")),
-                ))
+                attachments.append(
+                    FileAttachment(
+                        kind=kind,
+                        name=str(att.get("name", "")),
+                        media_type=str(att.get("media_type", "")),
+                        data=str(att.get("data", "")),
+                        text=str(att.get("text", "")),
+                    )
+                )
         else:
             # Legacy: pre-attachments schema stored images under "images".
             for img in data.get("images", []) or []:
                 if isinstance(img, dict) and img.get("data"):
-                    attachments.append(FileAttachment(
-                        kind="image",
-                        media_type=str(img.get("media_type", "")),
-                        data=str(img.get("data", "")),
-                    ))
+                    attachments.append(
+                        FileAttachment(
+                            kind="image",
+                            media_type=str(img.get("media_type", "")),
+                            data=str(img.get("data", "")),
+                        )
+                    )
         return Message(
             role=MessageRole(data["role"]),
             content=data.get("content", ""),
@@ -2015,7 +2140,9 @@ class AIService(Service):
         return cid
 
     async def get_conversation_state(
-        self, key: str, conversation_id: str | None = None,
+        self,
+        key: str,
+        conversation_id: str | None = None,
     ) -> Any | None:
         """Read a state entry from a conversation.
 
@@ -2036,7 +2163,10 @@ class AIService(Service):
         return data.get("state", {}).get(key)
 
     async def set_conversation_state(
-        self, key: str, value: Any, conversation_id: str | None = None,
+        self,
+        key: str,
+        value: Any,
+        conversation_id: str | None = None,
     ) -> None:
         """Write a state entry to a conversation.
 
@@ -2059,7 +2189,9 @@ class AIService(Service):
         await self._storage.put(_COLLECTION, cid, data)
 
     async def clear_conversation_state(
-        self, key: str, conversation_id: str | None = None,
+        self,
+        key: str,
+        conversation_id: str | None = None,
     ) -> None:
         """Remove a state entry from a conversation.
 
@@ -2109,7 +2241,7 @@ class AIService(Service):
         if len(messages) <= self._max_history_messages:
             return list(messages)
 
-        truncated = messages[-self._max_history_messages:]
+        truncated = messages[-self._max_history_messages :]
 
         # If the first message is TOOL_RESULT, include the preceding assistant
         # message (which has the tool_calls) to keep the pair intact.
@@ -2162,11 +2294,34 @@ class AIService(Service):
                     "tool_roles: per-tool role overrides within this profile."
                 ),
                 parameters=[
-                    ToolParameter(name="name", type=ToolParameterType.STRING, description="Profile name."),
-                    ToolParameter(name="description", type=ToolParameterType.STRING, description="What this profile is for.", required=False),
-                    ToolParameter(name="tool_mode", type=ToolParameterType.STRING, description="'all', 'include', or 'exclude'.", required=False, enum=["all", "include", "exclude"]),
-                    ToolParameter(name="tools", type=ToolParameterType.ARRAY, description="Tool names for include/exclude mode.", required=False),
-                    ToolParameter(name="tool_roles", type=ToolParameterType.OBJECT, description="Per-tool role overrides: {tool_name: role_name}.", required=False),
+                    ToolParameter(
+                        name="name", type=ToolParameterType.STRING, description="Profile name."
+                    ),
+                    ToolParameter(
+                        name="description",
+                        type=ToolParameterType.STRING,
+                        description="What this profile is for.",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="tool_mode",
+                        type=ToolParameterType.STRING,
+                        description="'all', 'include', or 'exclude'.",
+                        required=False,
+                        enum=["all", "include", "exclude"],
+                    ),
+                    ToolParameter(
+                        name="tools",
+                        type=ToolParameterType.ARRAY,
+                        description="Tool names for include/exclude mode.",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="tool_roles",
+                        type=ToolParameterType.OBJECT,
+                        description="Per-tool role overrides: {tool_name: role_name}.",
+                        required=False,
+                    ),
                 ],
                 required_role="admin",
                 # No slash_command: the nested ARRAY + OBJECT params
@@ -2181,7 +2336,11 @@ class AIService(Service):
                 slash_help="Delete an AI profile: /profile delete <name>",
                 description="Delete an AI context profile. The 'default' profile cannot be deleted.",
                 parameters=[
-                    ToolParameter(name="name", type=ToolParameterType.STRING, description="Profile name to delete."),
+                    ToolParameter(
+                        name="name",
+                        type=ToolParameterType.STRING,
+                        description="Profile name to delete.",
+                    ),
                 ],
                 required_role="admin",
             ),
@@ -2190,13 +2349,20 @@ class AIService(Service):
                 slash_group="profile",
                 slash_command="assign",
                 slash_help=(
-                    "Assign a profile to an AI call name: "
-                    "/profile assign <call_name> <profile>"
+                    "Assign a profile to an AI call name: /profile assign <call_name> <profile>"
                 ),
                 description="Assign an AI context profile to a named AI call (e.g., 'human_chat', 'sales_initial_email').",
                 parameters=[
-                    ToolParameter(name="call_name", type=ToolParameterType.STRING, description="The AI call name."),
-                    ToolParameter(name="profile", type=ToolParameterType.STRING, description="Profile name to assign."),
+                    ToolParameter(
+                        name="call_name",
+                        type=ToolParameterType.STRING,
+                        description="The AI call name.",
+                    ),
+                    ToolParameter(
+                        name="profile",
+                        type=ToolParameterType.STRING,
+                        description="Profile name to assign.",
+                    ),
                 ],
                 required_role="admin",
             ),
@@ -2205,12 +2371,15 @@ class AIService(Service):
                 slash_group="profile",
                 slash_command="unassign",
                 slash_help=(
-                    "Revert a call to the 'default' profile: "
-                    "/profile unassign <call_name>"
+                    "Revert a call to the 'default' profile: /profile unassign <call_name>"
                 ),
                 description="Remove a call's profile assignment, reverting it to the 'default' profile.",
                 parameters=[
-                    ToolParameter(name="call_name", type=ToolParameterType.STRING, description="The AI call name."),
+                    ToolParameter(
+                        name="call_name",
+                        type=ToolParameterType.STRING,
+                        description="The AI call name.",
+                    ),
                 ],
                 required_role="admin",
             ),
@@ -2342,17 +2511,21 @@ class AIService(Service):
     def _tool_list_profiles(self) -> str:
         profiles = []
         for p in self.list_profiles():
-            profiles.append({
-                "name": p.name,
-                "description": p.description,
-                "tool_mode": p.tool_mode,
-                "tools": p.tools,
-                "tool_roles": p.tool_roles,
-            })
-        return _json.dumps({
-            "profiles": profiles,
-            "assignments": self.list_assignments(),
-        })
+            profiles.append(
+                {
+                    "name": p.name,
+                    "description": p.description,
+                    "tool_mode": p.tool_mode,
+                    "tools": p.tools,
+                    "tool_roles": p.tool_roles,
+                }
+            )
+        return _json.dumps(
+            {
+                "profiles": profiles,
+                "assignments": self.list_assignments(),
+            }
+        )
 
     async def _tool_set_profile(self, arguments: dict[str, Any]) -> str:
         name = arguments.get("name", "").strip()
@@ -2454,27 +2627,25 @@ class AIService(Service):
                 from gilbert.interfaces.events import Event, EventBusProvider
 
                 if isinstance(event_bus_svc, EventBusProvider):
-                    await event_bus_svc.bus.publish(Event(
-                        event_type="chat.conversation.renamed",
-                        data={
-                            "conversation_id": self._current_conversation_id,
-                            "title": title,
-                        },
-                        source="ai",
-                    ))
+                    await event_bus_svc.bus.publish(
+                        Event(
+                            event_type="chat.conversation.renamed",
+                            data={
+                                "conversation_id": self._current_conversation_id,
+                                "title": title,
+                            },
+                            source="ai",
+                        )
+                    )
 
         return _json.dumps({"status": "renamed", "title": title})
 
     # --- Logging ---
 
-    def _log_api_call(
-        self, request: AIRequest, response: AIResponse, round_num: int
-    ) -> None:
+    def _log_api_call(self, request: AIRequest, response: AIResponse, round_num: int) -> None:
         usage_str = ""
         if response.usage:
-            usage_str = (
-                f" tokens={response.usage.input_tokens}+{response.usage.output_tokens}"
-            )
+            usage_str = f" tokens={response.usage.input_tokens}+{response.usage.output_tokens}"
         ai_logger.debug(
             "AI call round=%d model=%s stop=%s%s tools=%d messages=%d",
             round_num,
@@ -2489,11 +2660,13 @@ class AIService(Service):
 
     @staticmethod
     def _filter_blocks_for_user(
-        blocks: list[dict[str, Any]], user_id: str,
+        blocks: list[dict[str, Any]],
+        user_id: str,
     ) -> list[dict[str, Any]]:
         """Filter UI blocks by for_user/exclude_user targeting."""
         return [
-            b for b in blocks
+            b
+            for b in blocks
             if (not b.get("for_user") or b.get("for_user") == user_id)
             and b.get("exclude_user") != user_id
         ]
@@ -2519,7 +2692,9 @@ class AIService(Service):
         }
 
     async def _ws_slash_commands_list(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         """Return the slash commands the caller can invoke.
 
@@ -2534,35 +2709,39 @@ class AIService(Service):
             # plugin-namespace dot (e.g. "currev.time_logs"); either way
             # it IS the full invocation so the usage string reflects the
             # grouped / namespaced form the user actually types.
-            commands.append({
-                "command": cmd_name,
-                "group": tool_def.slash_group or "",
-                "tool_name": tool_def.name,
-                "provider": provider.tool_provider_name,
-                "description": tool_def.description,
-                "help": tool_def.slash_help or tool_def.description,
-                "usage": format_usage(tool_def, full_command=cmd_name),
-                "required_role": tool_def.required_role,
-                "parameters": [
-                    {
-                        "name": p.name,
-                        "type": p.type.value,
-                        "description": p.description,
-                        "required": p.required,
-                        "default": p.default,
-                        "enum": p.enum,
-                    }
-                    for p in tool_def.parameters
-                    if not p.name.startswith("_")
-                ],
-            })
+            commands.append(
+                {
+                    "command": cmd_name,
+                    "group": tool_def.slash_group or "",
+                    "tool_name": tool_def.name,
+                    "provider": provider.tool_provider_name,
+                    "description": tool_def.description,
+                    "help": tool_def.slash_help or tool_def.description,
+                    "usage": format_usage(tool_def, full_command=cmd_name),
+                    "required_role": tool_def.required_role,
+                    "parameters": [
+                        {
+                            "name": p.name,
+                            "type": p.type.value,
+                            "description": p.description,
+                            "required": p.required,
+                            "default": p.default,
+                            "enum": p.enum,
+                        }
+                        for p in tool_def.parameters
+                        if not p.name.startswith("_")
+                    ],
+                }
+            )
         return {
             "type": "slash.commands.list.result",
             "ref": frame.get("id"),
             "commands": commands,
         }
 
-    async def _ws_chat_send(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_chat_send(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
 
         message = frame.get("message", "").strip()
         raw_attachments = frame.get("attachments") or []
@@ -2576,7 +2755,12 @@ class AIService(Service):
                 "code": 400,
             }
         if not message and not attachments:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "message is required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "message is required",
+                "code": 400,
+            }
 
         conversation_id = frame.get("conversation_id") or None
 
@@ -2596,9 +2780,7 @@ class AIService(Service):
         is_slash_command = False
         if extract_command_name(message) is not None:
             slash_cmds = self._slash_commands_for_user(conn.user_ctx)
-            is_slash_command = (
-                self._match_slash_command(message, slash_cmds) is not None
-            )
+            is_slash_command = self._match_slash_command(message, slash_cmds) is not None
 
         try:
             if is_shared:
@@ -2633,25 +2815,32 @@ class AIService(Service):
                     # Store message without invoking AI
                     conv_id = conversation_id
                     messages = await self._load_conversation(conversation_id)
-                    messages.append(Message(
-                        role=MessageRole.USER, content=tagged_message,
-                        author_id=conn.user_ctx.user_id,
-                        author_name=conn.user_ctx.display_name,
-                        attachments=list(attachments),
-                    ))
+                    messages.append(
+                        Message(
+                            role=MessageRole.USER,
+                            content=tagged_message,
+                            author_id=conn.user_ctx.user_id,
+                            author_name=conn.user_ctx.display_name,
+                            attachments=list(attachments),
+                        )
+                    )
                     await self._save_conversation(conv_id, messages, user_ctx=conn.user_ctx)
 
                 # Broadcast to room members
                 gilbert = conn.manager.gilbert
                 if gilbert:
-                    await publish_event(gilbert, "chat.message.created", {
-                        "conversation_id": conv_id,
-                        "author_id": conn.user_ctx.user_id,
-                        "author_name": conn.user_ctx.display_name,
-                        "content": response_text,
-                        "user_message": message,
-                        "ui_blocks": ui_blocks,
-                    })
+                    await publish_event(
+                        gilbert,
+                        "chat.message.created",
+                        {
+                            "conversation_id": conv_id,
+                            "author_id": conn.user_ctx.user_id,
+                            "author_name": conn.user_ctx.display_name,
+                            "content": response_text,
+                            "user_message": message,
+                            "ui_blocks": ui_blocks,
+                        },
+                    )
             else:
                 # Personal chat — normal AI flow
                 response_text, conv_id, ui_blocks, tool_usage = await self.chat(
@@ -2674,24 +2863,35 @@ class AIService(Service):
             "tool_usage": tool_usage,
         }
 
-    async def _ws_conversation_create(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_conversation_create(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """Create an empty named personal conversation."""
 
         title = (frame.get("title") or "").strip() or "New conversation"
 
         if self._storage is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
+            }
 
         conv_id = str(uuid.uuid4())
         now = datetime.now(UTC).isoformat()
 
-        await self._storage.put(_COLLECTION, conv_id, {
-            "title": title,
-            "user_id": conn.user_ctx.user_id,
-            "messages": [],
-            "created_at": now,
-            "updated_at": now,
-        })
+        await self._storage.put(
+            _COLLECTION,
+            conv_id,
+            {
+                "title": title,
+                "user_id": conn.user_ctx.user_id,
+                "messages": [],
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
 
         return {
             "type": "chat.conversation.create.result",
@@ -2700,14 +2900,21 @@ class AIService(Service):
             "title": title,
         }
 
-    async def _ws_form_submit(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_form_submit(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
 
         conversation_id = frame.get("conversation_id")
         block_id = frame.get("block_id")
         values = frame.get("values", {})
 
         if not conversation_id or not block_id:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id and block_id required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "conversation_id and block_id required",
+                "code": 400,
+            }
 
         # Mark block as submitted in storage and check if shared room
         block_title = "Form"
@@ -2734,6 +2941,7 @@ class AIService(Service):
             system_prompt = None
             if is_shared and conv_data:
                 from gilbert.core.chat import build_room_context
+
                 system_prompt = build_room_context(conv_data, conn.user_ctx)
 
             response_text, conv_id, ui_blocks, _tool_usage = await self.chat(
@@ -2750,16 +2958,21 @@ class AIService(Service):
         # Broadcast to room members in shared rooms
         if is_shared:
             from gilbert.core.chat import publish_event
+
             gilbert = conn.manager.gilbert
             if gilbert:
-                await publish_event(gilbert, "chat.message.created", {
-                    "conversation_id": conv_id,
-                    "author_id": conn.user_ctx.user_id,
-                    "author_name": conn.user_ctx.display_name,
-                    "content": response_text,
-                    "user_message": "",
-                    "ui_blocks": ui_blocks,
-                })
+                await publish_event(
+                    gilbert,
+                    "chat.message.created",
+                    {
+                        "conversation_id": conv_id,
+                        "author_id": conn.user_ctx.user_id,
+                        "author_name": conn.user_ctx.display_name,
+                        "content": response_text,
+                        "user_message": "",
+                        "ui_blocks": ui_blocks,
+                    },
+                )
 
         return {
             "type": "chat.form.submit.result",
@@ -2769,18 +2982,35 @@ class AIService(Service):
             "ui_blocks": self._filter_blocks_for_user(ui_blocks, conn.user_id),
         }
 
-    async def _ws_history_load(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_history_load(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
 
         conversation_id = frame.get("conversation_id")
         if not conversation_id:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "conversation_id required",
+                "code": 400,
+            }
 
         if self._storage is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
+            }
 
         data = await self._storage.get(_COLLECTION, conversation_id)
         if data is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Conversation not found", "code": 404}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Conversation not found",
+                "code": 404,
+            }
 
         is_shared = data.get("shared", False)
         # Walk persisted messages and build display messages. Assistant
@@ -2801,14 +3031,16 @@ class AIService(Service):
         def _flush_unpaired_calls() -> None:
             """Turn any unpaired tool_calls into usage entries (no result)."""
             for call in pending_calls.values():
-                pending_tool_usage.append({
-                    "tool_name": call.get("tool_name", ""),
-                    "is_error": False,
-                    "arguments": self._sanitize_tool_args(
-                        call.get("arguments", {}) or {},
-                    ),
-                    "result": "",
-                })
+                pending_tool_usage.append(
+                    {
+                        "tool_name": call.get("tool_name", ""),
+                        "is_error": False,
+                        "arguments": self._sanitize_tool_args(
+                            call.get("arguments", {}) or {},
+                        ),
+                        "result": "",
+                    }
+                )
             pending_calls.clear()
 
         for m in data.get("messages", []):
@@ -2824,21 +3056,25 @@ class AIService(Service):
                     call = pending_calls.pop(call_id, None)
                     if call is None:
                         # Result without a matching call — still surface it.
-                        pending_tool_usage.append({
-                            "tool_name": "",
-                            "is_error": bool(tr.get("is_error", False)),
-                            "arguments": {},
-                            "result": tr.get("content", ""),
-                        })
+                        pending_tool_usage.append(
+                            {
+                                "tool_name": "",
+                                "is_error": bool(tr.get("is_error", False)),
+                                "arguments": {},
+                                "result": tr.get("content", ""),
+                            }
+                        )
                         continue
-                    pending_tool_usage.append({
-                        "tool_name": call.get("tool_name", ""),
-                        "is_error": bool(tr.get("is_error", False)),
-                        "arguments": self._sanitize_tool_args(
-                            call.get("arguments", {}) or {},
-                        ),
-                        "result": tr.get("content", ""),
-                    })
+                    pending_tool_usage.append(
+                        {
+                            "tool_name": call.get("tool_name", ""),
+                            "is_error": bool(tr.get("is_error", False)),
+                            "arguments": self._sanitize_tool_args(
+                                call.get("arguments", {}) or {},
+                            ),
+                            "result": tr.get("content", ""),
+                        }
+                    )
                 continue
 
             if role not in ("user", "assistant"):
@@ -2863,21 +3099,25 @@ class AIService(Service):
                     call_id = tr.get("tool_call_id", "")
                     call = pending_calls.pop(call_id, None)
                     if call is None:
-                        pending_tool_usage.append({
-                            "tool_name": "",
-                            "is_error": bool(tr.get("is_error", False)),
-                            "arguments": {},
-                            "result": tr.get("content", ""),
-                        })
+                        pending_tool_usage.append(
+                            {
+                                "tool_name": "",
+                                "is_error": bool(tr.get("is_error", False)),
+                                "arguments": {},
+                                "result": tr.get("content", ""),
+                            }
+                        )
                         continue
-                    pending_tool_usage.append({
-                        "tool_name": call.get("tool_name", ""),
-                        "is_error": bool(tr.get("is_error", False)),
-                        "arguments": self._sanitize_tool_args(
-                            call.get("arguments", {}) or {},
-                        ),
-                        "result": tr.get("content", ""),
-                    })
+                    pending_tool_usage.append(
+                        {
+                            "tool_name": call.get("tool_name", ""),
+                            "is_error": bool(tr.get("is_error", False)),
+                            "arguments": self._sanitize_tool_args(
+                                call.get("arguments", {}) or {},
+                            ),
+                            "result": tr.get("content", ""),
+                        }
+                    )
 
                 # Empty-content assistant rows are intermediate tool-use
                 # rounds; don't emit them as their own bubble.
@@ -2919,12 +3159,14 @@ class AIService(Service):
                     # Legacy conversations stored images under "images".
                     for img in m.get("images") or []:
                         if isinstance(img, dict) and img.get("data"):
-                            emitted.append({
-                                "kind": "image",
-                                "name": "",
-                                "media_type": img.get("media_type", ""),
-                                "data": img.get("data"),
-                            })
+                            emitted.append(
+                                {
+                                    "kind": "image",
+                                    "name": "",
+                                    "media_type": img.get("media_type", ""),
+                                    "data": img.get("data"),
+                                }
+                            )
                 if emitted:
                     msg["attachments"] = emitted
 
@@ -2937,7 +3179,8 @@ class AIService(Service):
             display_messages.append(msg)
 
         ui_blocks = self._filter_blocks_for_user(
-            data.get("ui_blocks", []), conn.user_id,
+            data.get("ui_blocks", []),
+            conn.user_id,
         )
 
         result: dict[str, Any] = {
@@ -2956,7 +3199,9 @@ class AIService(Service):
             ]
         return result
 
-    async def _ws_conversation_list(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_conversation_list(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
         from gilbert.core.chat import conv_summary
 
         personal = await self.list_conversations(user_id=conn.user_id, limit=30)
@@ -2965,22 +3210,43 @@ class AIService(Service):
         conversations = [conv_summary(c, shared=True) for c in shared]
         conversations += [conv_summary(c, shared=False) for c in personal]
 
-        return {"type": "chat.conversation.list.result", "ref": frame.get("id"), "conversations": conversations}
+        return {
+            "type": "chat.conversation.list.result",
+            "ref": frame.get("id"),
+            "conversations": conversations,
+        }
 
-    async def _ws_conversation_rename(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_conversation_rename(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
         from gilbert.core.chat import check_conversation_access, publish_event
 
         conversation_id = frame.get("conversation_id")
         title = (frame.get("title") or "").strip()
         if not conversation_id or not title:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id and title required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "conversation_id and title required",
+                "code": 400,
+            }
 
         if self._storage is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
+            }
 
         data = await self._storage.get(_COLLECTION, conversation_id)
         if data is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Conversation not found", "code": 404}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Conversation not found",
+                "code": 404,
+            }
 
         err = check_conversation_access(data, conn.user_ctx)
         if err:
@@ -2991,48 +3257,104 @@ class AIService(Service):
 
         gilbert = conn.manager.gilbert
         if gilbert is not None:
-            await publish_event(gilbert, "chat.conversation.renamed", {"conversation_id": conversation_id, "title": title})
+            await publish_event(
+                gilbert,
+                "chat.conversation.renamed",
+                {"conversation_id": conversation_id, "title": title},
+            )
 
-        return {"type": "chat.conversation.rename.result", "ref": frame.get("id"), "status": "ok", "title": title}
+        return {
+            "type": "chat.conversation.rename.result",
+            "ref": frame.get("id"),
+            "status": "ok",
+            "title": title,
+        }
 
-    async def _ws_conversation_delete(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_conversation_delete(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
 
         conversation_id = frame.get("conversation_id")
         if not conversation_id:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "conversation_id required",
+                "code": 400,
+            }
 
         if self._storage is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
+            }
 
         data = await self._storage.get(_COLLECTION, conversation_id)
         if data is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Conversation not found", "code": 404}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Conversation not found",
+                "code": 404,
+            }
         if data.get("shared"):
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Use room destroy for shared conversations", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Use room destroy for shared conversations",
+                "code": 400,
+            }
         conv_owner = data.get("user_id", "")
         if conv_owner and conn.user_id != "system" and conv_owner != conn.user_id:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Access denied", "code": 403}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Access denied",
+                "code": 403,
+            }
 
         await self._storage.delete(_COLLECTION, conversation_id)
         return {"type": "chat.conversation.delete.result", "ref": frame.get("id"), "status": "ok"}
 
-    async def _ws_room_create(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_room_create(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
         from gilbert.core.chat import publish_event
 
         title = (frame.get("title") or "").strip()
         if not title:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "title required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "title required",
+                "code": 400,
+            }
         visibility = frame.get("visibility", "public")
 
         if self._storage is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
+            }
 
         import uuid as _uuid
         from datetime import datetime
+
         conv_id = str(_uuid.uuid4())
         now = datetime.now(UTC).isoformat()
 
-        members = [{"user_id": conn.user_id, "display_name": conn.user_ctx.display_name, "role": "owner", "joined_at": now}]
+        members = [
+            {
+                "user_id": conn.user_id,
+                "display_name": conn.user_ctx.display_name,
+                "role": "owner",
+                "joined_at": now,
+            }
+        ]
         data = {
             "shared": True,
             "visibility": visibility,
@@ -3047,62 +3369,124 @@ class AIService(Service):
 
         gilbert = conn.manager.gilbert
         if gilbert is not None:
-            await publish_event(gilbert, "chat.conversation.created", {
-                "conversation_id": conv_id, "title": title, "shared": True,
-                "members": members, "visibility": visibility,
-            })
+            await publish_event(
+                gilbert,
+                "chat.conversation.created",
+                {
+                    "conversation_id": conv_id,
+                    "title": title,
+                    "shared": True,
+                    "members": members,
+                    "visibility": visibility,
+                },
+            )
 
         return {
-            "type": "chat.room.create.result", "ref": frame.get("id"),
-            "conversation_id": conv_id, "title": title,
-            "members": [{"user_id": m["user_id"], "display_name": m["display_name"]} for m in members],
+            "type": "chat.room.create.result",
+            "ref": frame.get("id"),
+            "conversation_id": conv_id,
+            "title": title,
+            "members": [
+                {"user_id": m["user_id"], "display_name": m["display_name"]} for m in members
+            ],
         }
 
-    async def _ws_room_join(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_room_join(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
         from gilbert.core.chat import publish_event
 
         conversation_id = frame.get("conversation_id")
         if not conversation_id:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "conversation_id required",
+                "code": 400,
+            }
 
         if self._storage is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
+            }
 
         data = await self._storage.get(_COLLECTION, conversation_id)
         if data is None or not data.get("shared"):
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Room not found", "code": 404}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Room not found",
+                "code": 404,
+            }
 
         members = data.get("members", [])
         if any(m.get("user_id") == conn.user_id for m in members):
-            return {"type": "chat.room.join.result", "ref": frame.get("id"), "status": "already_member"}
+            return {
+                "type": "chat.room.join.result",
+                "ref": frame.get("id"),
+                "status": "already_member",
+            }
 
         from datetime import datetime
-        members.append({"user_id": conn.user_id, "display_name": conn.user_ctx.display_name, "role": "member", "joined_at": datetime.now(UTC).isoformat()})
+
+        members.append(
+            {
+                "user_id": conn.user_id,
+                "display_name": conn.user_ctx.display_name,
+                "role": "member",
+                "joined_at": datetime.now(UTC).isoformat(),
+            }
+        )
         data["members"] = members
         await self._storage.put(_COLLECTION, conversation_id, data)
 
         gilbert = conn.manager.gilbert
         if gilbert is not None:
-            await publish_event(gilbert, "chat.member.joined", {
-                "conversation_id": conversation_id, "user_id": conn.user_id,
-                "display_name": conn.user_ctx.display_name,
-            })
+            await publish_event(
+                gilbert,
+                "chat.member.joined",
+                {
+                    "conversation_id": conversation_id,
+                    "user_id": conn.user_id,
+                    "display_name": conn.user_ctx.display_name,
+                },
+            )
 
         return {"type": "chat.room.join.result", "ref": frame.get("id"), "status": "ok"}
 
-    async def _ws_room_leave(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_room_leave(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
         from gilbert.core.chat import publish_event
 
         conversation_id = frame.get("conversation_id")
         if not conversation_id:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "conversation_id required",
+                "code": 400,
+            }
 
         if self._storage is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
+            }
 
         data = await self._storage.get(_COLLECTION, conversation_id)
         if data is None or not data.get("shared"):
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Room not found", "code": 404}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Room not found",
+                "code": 404,
+            }
 
         gilbert = conn.manager.gilbert
 
@@ -3110,33 +3494,61 @@ class AIService(Service):
         if data.get("user_id") == conn.user_id:
             await self._storage.delete(_COLLECTION, conversation_id)
             if gilbert is not None:
-                await publish_event(gilbert, "chat.conversation.destroyed", {"conversation_id": conversation_id})
+                await publish_event(
+                    gilbert, "chat.conversation.destroyed", {"conversation_id": conversation_id}
+                )
             return {"type": "chat.room.leave.result", "ref": frame.get("id"), "status": "destroyed"}
 
         members = [m for m in data.get("members", []) if m.get("user_id") != conn.user_id]
         data["members"] = members
         await self._storage.put(_COLLECTION, conversation_id, data)
         if gilbert is not None:
-            await publish_event(gilbert, "chat.member.left", {"conversation_id": conversation_id, "user_id": conn.user_id})
+            await publish_event(
+                gilbert,
+                "chat.member.left",
+                {"conversation_id": conversation_id, "user_id": conn.user_id},
+            )
 
         return {"type": "chat.room.leave.result", "ref": frame.get("id"), "status": "ok"}
 
-    async def _ws_room_kick(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_room_kick(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
         from gilbert.core.chat import publish_event
 
         conversation_id = frame.get("conversation_id")
         target_user = frame.get("user_id")
         if not conversation_id or not target_user:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id and user_id required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "conversation_id and user_id required",
+                "code": 400,
+            }
 
         if self._storage is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
+            }
 
         data = await self._storage.get(_COLLECTION, conversation_id)
         if data is None or not data.get("shared"):
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Room not found", "code": 404}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Room not found",
+                "code": 404,
+            }
         if data.get("user_id") != conn.user_id:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Only the room owner can kick members", "code": 403}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Only the room owner can kick members",
+                "code": 403,
+            }
 
         members = [m for m in data.get("members", []) if m.get("user_id") != target_user]
         data["members"] = members
@@ -3144,27 +3556,50 @@ class AIService(Service):
 
         gilbert = conn.manager.gilbert
         if gilbert is not None:
-            await publish_event(gilbert, "chat.member.kicked", {"conversation_id": conversation_id, "user_id": target_user})
+            await publish_event(
+                gilbert,
+                "chat.member.kicked",
+                {"conversation_id": conversation_id, "user_id": target_user},
+            )
 
         return {"type": "chat.room.kick.result", "ref": frame.get("id"), "status": "ok"}
 
-    async def _ws_room_invite(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_room_invite(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
         from gilbert.core.chat import publish_event
 
         conversation_id = frame.get("conversation_id")
         user_ids = frame.get("user_ids", [])
         # Support single user_id for backwards compat
         if not user_ids and frame.get("user_id"):
-            user_ids = [{"user_id": frame["user_id"], "display_name": frame.get("display_name", "")}]
+            user_ids = [
+                {"user_id": frame["user_id"], "display_name": frame.get("display_name", "")}
+            ]
         if not conversation_id or not user_ids:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id and user_ids required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "conversation_id and user_ids required",
+                "code": 400,
+            }
 
         if self._storage is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
+            }
 
         data = await self._storage.get(_COLLECTION, conversation_id)
         if data is None or not data.get("shared"):
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Room not found", "code": 404}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Room not found",
+                "code": 404,
+            }
 
         members = data.get("members", [])
         invites = data.get("invites", [])
@@ -3172,6 +3607,7 @@ class AIService(Service):
         invite_ids = {inv.get("user_id") for inv in invites}
 
         from datetime import datetime
+
         now = datetime.now(UTC).isoformat()
         invited = []
 
@@ -3180,12 +3616,14 @@ class AIService(Service):
             display_name = entry.get("display_name", "") if isinstance(entry, dict) else ""
             if target_user in member_ids or target_user in invite_ids:
                 continue
-            invites.append({
-                "user_id": target_user,
-                "display_name": display_name,
-                "invited_by": conn.user_id,
-                "invited_at": now,
-            })
+            invites.append(
+                {
+                    "user_id": target_user,
+                    "display_name": display_name,
+                    "invited_by": conn.user_id,
+                    "invited_at": now,
+                }
+            )
             invite_ids.add(target_user)
             invited.append({"user_id": target_user, "display_name": display_name})
 
@@ -3195,70 +3633,108 @@ class AIService(Service):
         gilbert = conn.manager.gilbert
         if gilbert is not None:
             for inv in invited:
-                await publish_event(gilbert, "chat.invite.created", {
-                    "conversation_id": conversation_id,
-                    "title": data.get("title", ""),
-                    "user_id": inv["user_id"],
-                    "display_name": inv["display_name"],
-                    "invited_by": conn.user_id,
-                    "invited_by_name": conn.user_ctx.display_name,
-                })
+                await publish_event(
+                    gilbert,
+                    "chat.invite.created",
+                    {
+                        "conversation_id": conversation_id,
+                        "title": data.get("title", ""),
+                        "user_id": inv["user_id"],
+                        "display_name": inv["display_name"],
+                        "invited_by": conn.user_id,
+                        "invited_by_name": conn.user_ctx.display_name,
+                    },
+                )
 
-        return {"type": "chat.room.invite.result", "ref": frame.get("id"), "status": "ok", "invited": invited}
+        return {
+            "type": "chat.room.invite.result",
+            "ref": frame.get("id"),
+            "status": "ok",
+            "invited": invited,
+        }
 
-    async def _ws_room_invite_revoke(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_room_invite_revoke(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
 
         conversation_id = frame.get("conversation_id")
         target_user = frame.get("user_id")
         if not conversation_id or not target_user:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "conversation_id and user_id required", "code": 400,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "conversation_id and user_id required",
+                "code": 400,
             }
 
         if self._storage is None:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "Storage not available", "code": 503,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
             }
 
         data = await self._storage.get(_COLLECTION, conversation_id)
         if data is None or not data.get("shared"):
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "Room not found", "code": 404,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Room not found",
+                "code": 404,
             }
 
         invites = data.get("invites", [])
-        data["invites"] = [
-            inv for inv in invites if inv.get("user_id") != target_user
-        ]
+        data["invites"] = [inv for inv in invites if inv.get("user_id") != target_user]
         await self._storage.put(_COLLECTION, conversation_id, data)
 
         return {
             "type": "chat.room.invite_revoke.result",
-            "ref": frame.get("id"), "status": "ok",
+            "ref": frame.get("id"),
+            "status": "ok",
         }
 
-    async def _ws_room_invite_respond(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_room_invite_respond(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
         from gilbert.core.chat import publish_event
 
         conversation_id = frame.get("conversation_id")
         action = frame.get("action")  # "accept" or "decline"
         if not conversation_id or action not in ("accept", "decline"):
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "conversation_id and action (accept/decline) required", "code": 400}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "conversation_id and action (accept/decline) required",
+                "code": 400,
+            }
 
         if self._storage is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Storage not available",
+                "code": 503,
+            }
 
         data = await self._storage.get(_COLLECTION, conversation_id)
         if data is None or not data.get("shared"):
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Room not found", "code": 404}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Room not found",
+                "code": 404,
+            }
 
         invites = data.get("invites", [])
         invite = next((inv for inv in invites if inv.get("user_id") == conn.user_id), None)
         if invite is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "No pending invite found", "code": 404}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "No pending invite found",
+                "code": 404,
+            }
 
         # Remove the invite
         data["invites"] = [inv for inv in invites if inv.get("user_id") != conn.user_id]
@@ -3267,45 +3743,70 @@ class AIService(Service):
 
         if action == "accept":
             from datetime import datetime
+
             members = data.get("members", [])
-            members.append({
-                "user_id": conn.user_id,
-                "display_name": conn.user_ctx.display_name,
-                "role": "member",
-                "joined_at": datetime.now(UTC).isoformat(),
-            })
+            members.append(
+                {
+                    "user_id": conn.user_id,
+                    "display_name": conn.user_ctx.display_name,
+                    "role": "member",
+                    "joined_at": datetime.now(UTC).isoformat(),
+                }
+            )
             data["members"] = members
             await self._storage.put(_COLLECTION, conversation_id, data)
 
             if gilbert is not None:
-                await publish_event(gilbert, "chat.member.joined", {
-                    "conversation_id": conversation_id,
-                    "user_id": conn.user_id,
-                    "display_name": conn.user_ctx.display_name,
-                })
+                await publish_event(
+                    gilbert,
+                    "chat.member.joined",
+                    {
+                        "conversation_id": conversation_id,
+                        "user_id": conn.user_id,
+                        "display_name": conn.user_ctx.display_name,
+                    },
+                )
         else:
             await self._storage.put(_COLLECTION, conversation_id, data)
 
             if gilbert is not None:
-                await publish_event(gilbert, "chat.invite.declined", {
-                    "conversation_id": conversation_id,
-                    "user_id": conn.user_id,
-                })
+                await publish_event(
+                    gilbert,
+                    "chat.invite.declined",
+                    {
+                        "conversation_id": conversation_id,
+                        "user_id": conn.user_id,
+                    },
+                )
 
-        return {"type": "chat.room.invite_respond.result", "ref": frame.get("id"), "status": "ok", "action": action}
+        return {
+            "type": "chat.room.invite_respond.result",
+            "ref": frame.get("id"),
+            "status": "ok",
+            "action": action,
+        }
 
-    async def _ws_chat_list_users(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_chat_list_users(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """List all users for invite modal."""
 
         gilbert = conn.manager.gilbert
         if gilbert is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service unavailable", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Service unavailable",
+                "code": 503,
+            }
 
         user_svc = gilbert.service_manager.get_by_capability("users")
         if user_svc is None:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "User service unavailable", "code": 503,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "User service unavailable",
+                "code": 503,
             }
 
         users = await user_svc.list_users(limit=200)

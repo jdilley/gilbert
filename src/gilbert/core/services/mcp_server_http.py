@@ -52,7 +52,8 @@ audit_logger = logging.getLogger("gilbert.mcp_server.audit")
 # (``list_tools``, ``call_tool``) can see which client is talking without
 # needing the MCP request context to carry arbitrary metadata.
 _current_client: ContextVar[MCPServerClient | None] = ContextVar(
-    "_mcp_server_current_client", default=None,
+    "_mcp_server_current_client",
+    default=None,
 )
 
 
@@ -121,7 +122,8 @@ class MCPServerHttpApp:
                 )
             except Exception:
                 logger.exception(
-                    "MCP server list_tools failed for client %s", client.id,
+                    "MCP server list_tools failed for client %s",
+                    client.id,
                 )
                 return []
             tools: list[types.Tool] = []
@@ -137,7 +139,8 @@ class MCPServerHttpApp:
 
         @server.call_tool()  # type: ignore[untyped-decorator]
         async def _call_tool(
-            name: str, arguments: dict[str, Any],
+            name: str,
+            arguments: dict[str, Any],
         ) -> list[types.TextContent]:
             client = _current_client.get()
             if client is None:
@@ -217,7 +220,9 @@ class MCPServerHttpApp:
                 )
                 logger.warning(
                     "MCP tool %s failed for client %s: %s",
-                    name, client.id, exc,
+                    name,
+                    client.id,
+                    exc,
                 )
                 return [_error_text(f"Tool execution failed: {exc}")]
             finally:
@@ -280,7 +285,7 @@ async def authenticate_mcp_request(
     auth = request.headers.get("authorization", "")
     if not auth.lower().startswith("bearer "):
         return None
-    token = auth[len("Bearer "):].strip()
+    token = auth[len("Bearer ") :].strip()
     if not token:
         return None
     client_ip = request.client.host if request.client else ""

@@ -79,7 +79,9 @@ class FakeMCPBackend(MCPBackend):
         return list(self.tools)
 
     async def call_tool(
-        self, name: str, arguments: dict[str, Any],
+        self,
+        name: str,
+        arguments: dict[str, Any],
     ) -> MCPToolResult:
         self.call_log.append((name, arguments))
         if self.next_result is not None:
@@ -102,7 +104,9 @@ class FakeMCPBackend(MCPBackend):
         return list(self.prompts)
 
     async def get_prompt(
-        self, name: str, arguments: dict[str, str],
+        self,
+        name: str,
+        arguments: dict[str, str],
     ) -> MCPPromptResult:
         self.prompt_log.append((name, dict(arguments)))
         if name in self.prompt_results:
@@ -240,7 +244,9 @@ def svc() -> MCPService:
 @pytest.fixture
 def alice() -> UserContext:
     return UserContext(
-        user_id="alice", email="a@x", display_name="Alice",
+        user_id="alice",
+        email="a@x",
+        display_name="Alice",
         roles=frozenset({"user"}),
     )
 
@@ -248,7 +254,9 @@ def alice() -> UserContext:
 @pytest.fixture
 def bob() -> UserContext:
     return UserContext(
-        user_id="bob", email="b@x", display_name="Bob",
+        user_id="bob",
+        email="b@x",
+        display_name="Bob",
         roles=frozenset({"user"}),
     )
 
@@ -256,13 +264,18 @@ def bob() -> UserContext:
 @pytest.fixture
 def admin() -> UserContext:
     return UserContext(
-        user_id="root", email="r@x", display_name="Root",
+        user_id="root",
+        email="r@x",
+        display_name="Root",
         roles=frozenset({"admin"}),
     )
 
 
 def make_record(
-    *, id: str = "srv", name: str = "Test", slug: str = "test",
+    *,
+    id: str = "srv",
+    name: str = "Test",
+    slug: str = "test",
     owner_id: str = "alice",
     scope: str = "private",
     allowed_roles: tuple[str, ...] = (),
@@ -282,7 +295,9 @@ def make_record(
 
 
 def _install_client(
-    svc: MCPService, record: MCPServerRecord, tools: list[MCPToolSpec] | None = None,
+    svc: MCPService,
+    record: MCPServerRecord,
+    tools: list[MCPToolSpec] | None = None,
 ) -> FakeMCPBackend:
     """Directly attach a running fake client to the service, bypassing
     ``_start_client`` so we don't need a full async lifecycle in tests."""
@@ -320,7 +335,9 @@ class TestToolNameEncoding:
 
 
 class TestVisibility:
-    def test_private_owner_only(self, svc: MCPService, alice: UserContext, bob: UserContext) -> None:
+    def test_private_owner_only(
+        self, svc: MCPService, alice: UserContext, bob: UserContext
+    ) -> None:
         record = make_record(scope="private", owner_id="alice")
         _install_client(svc, record)
 
@@ -328,47 +345,65 @@ class TestVisibility:
         assert svc._can_see_server(record, bob) is False
 
     def test_admin_sees_all_private_servers(
-        self, svc: MCPService, admin: UserContext,
+        self,
+        svc: MCPService,
+        admin: UserContext,
     ) -> None:
         record = make_record(scope="private", owner_id="alice")
         assert svc._can_see_server(record, admin) is True
 
     def test_public_everyone(
-        self, svc: MCPService, alice: UserContext, bob: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
+        bob: UserContext,
     ) -> None:
         record = make_record(scope="public", owner_id="root")
         assert svc._can_see_server(record, alice) is True
         assert svc._can_see_server(record, bob) is True
 
     def test_shared_by_role(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         everyone_ctx = UserContext(
-            user_id="guest", email="", display_name="Guest",
+            user_id="guest",
+            email="",
+            display_name="Guest",
             roles=frozenset({"everyone"}),
         )
         record = make_record(
-            scope="shared", owner_id="root",
+            scope="shared",
+            owner_id="root",
             allowed_roles=("user",),
         )
         assert svc._can_see_server(record, alice) is True
         assert svc._can_see_server(record, everyone_ctx) is False
 
     def test_shared_by_user_id(
-        self, svc: MCPService, alice: UserContext, bob: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
+        bob: UserContext,
     ) -> None:
         record = make_record(
-            scope="shared", owner_id="root",
+            scope="shared",
+            owner_id="root",
             allowed_users=("alice",),
         )
         assert svc._can_see_server(record, alice) is True
         assert svc._can_see_server(record, bob) is False
 
     def test_shared_allow_lists_are_union(
-        self, svc: MCPService, alice: UserContext, bob: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
+        bob: UserContext,
     ) -> None:
         record = make_record(
-            scope="shared", owner_id="root",
+            scope="shared",
+            owner_id="root",
             allowed_roles=("nonexistent",),
             allowed_users=("alice",),
         )
@@ -390,18 +425,29 @@ class TestGetTools:
         assert svc.get_tools(None) == []
 
     def test_hides_other_users_private_tools(
-        self, svc: MCPService, alice: UserContext, bob: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
+        bob: UserContext,
     ) -> None:
         alice_record = make_record(
-            id="srv-alice", slug="alice-srv", owner_id="alice",
+            id="srv-alice",
+            slug="alice-srv",
+            owner_id="alice",
             scope="private",
         )
         bob_record = make_record(
-            id="srv-bob", slug="bob-srv", owner_id="bob",
+            id="srv-bob",
+            slug="bob-srv",
+            owner_id="bob",
             scope="private",
         )
-        _install_client(svc, alice_record, tools=[MCPToolSpec(name="a_tool", description="", input_schema={})])
-        _install_client(svc, bob_record, tools=[MCPToolSpec(name="b_tool", description="", input_schema={})])
+        _install_client(
+            svc, alice_record, tools=[MCPToolSpec(name="a_tool", description="", input_schema={})]
+        )
+        _install_client(
+            svc, bob_record, tools=[MCPToolSpec(name="b_tool", description="", input_schema={})]
+        )
 
         alice_tools = [t.name for t in svc.get_tools(alice)]
         bob_tools = [t.name for t in svc.get_tools(bob)]
@@ -410,19 +456,28 @@ class TestGetTools:
         assert bob_tools == ["mcp__bob-srv__b_tool"]
 
     def test_public_tool_visible_to_everyone(
-        self, svc: MCPService, alice: UserContext, bob: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
+        bob: UserContext,
     ) -> None:
         record = make_record(
-            id="srv1", slug="weather", owner_id="root",
+            id="srv1",
+            slug="weather",
+            owner_id="root",
             scope="public",
         )
-        _install_client(svc, record, tools=[MCPToolSpec(name="forecast", description="", input_schema={})])
+        _install_client(
+            svc, record, tools=[MCPToolSpec(name="forecast", description="", input_schema={})]
+        )
 
         assert "mcp__weather__forecast" in {t.name for t in svc.get_tools(alice)}
         assert "mcp__weather__forecast" in {t.name for t in svc.get_tools(bob)}
 
     def test_disconnected_client_hidden(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         record = make_record(owner_id="alice")
         _install_client(svc, record, tools=[MCPToolSpec(name="t", description="", input_schema={})])
@@ -431,25 +486,32 @@ class TestGetTools:
         assert svc.get_tools(alice) == []
 
     def test_tool_definition_shape(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         record = make_record(
-            id="srv1", slug="cal", owner_id="alice",
+            id="srv1",
+            slug="cal",
+            owner_id="alice",
         )
         _install_client(
-            svc, record,
-            tools=[MCPToolSpec(
-                name="next_event",
-                description="Get the next calendar event",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "limit": {"type": "integer", "description": "Max events"},
-                        "q": {"type": "string", "description": "Search"},
+            svc,
+            record,
+            tools=[
+                MCPToolSpec(
+                    name="next_event",
+                    description="Get the next calendar event",
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "limit": {"type": "integer", "description": "Max events"},
+                            "q": {"type": "string", "description": "Search"},
+                        },
+                        "required": ["limit"],
                     },
-                    "required": ["limit"],
-                },
-            )],
+                )
+            ],
         )
         tools = svc.get_tools(alice)
         assert len(tools) == 1
@@ -472,27 +534,35 @@ class TestGetTools:
 class TestExecuteTool:
     @pytest.mark.asyncio
     async def test_dispatches_to_correct_backend(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         record = make_record(id="srv1", slug="weather", owner_id="alice")
         backend = _install_client(
-            svc, record,
+            svc,
+            record,
             tools=[MCPToolSpec(name="forecast", description="", input_schema={})],
         )
         set_current_user(alice)
         result = await svc.execute_tool(
-            "mcp__weather__forecast", {"city": "SF"},
+            "mcp__weather__forecast",
+            {"city": "SF"},
         )
         assert "called forecast" in result
         assert backend.call_log == [("forecast", {"city": "SF"})]
 
     @pytest.mark.asyncio
     async def test_raises_permission_error_for_hidden_server(
-        self, svc: MCPService, alice: UserContext, bob: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
+        bob: UserContext,
     ) -> None:
         record = make_record(id="srv1", slug="weather", owner_id="alice", scope="private")
         _install_client(
-            svc, record,
+            svc,
+            record,
             tools=[MCPToolSpec(name="forecast", description="", input_schema={})],
         )
         set_current_user(bob)
@@ -507,7 +577,9 @@ class TestExecuteTool:
 
     @pytest.mark.asyncio
     async def test_error_result_is_prefixed(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         record = make_record(id="srv1", slug="weather", owner_id="alice")
         backend = _install_client(svc, record)
@@ -540,41 +612,61 @@ class TestRemoteTransports:
 
     def test_http_record_requires_url(self) -> None:
         record = MCPServerRecord(
-            id="x", name="Remote", slug="remote",
-            transport="http", command=(), owner_id="alice",
+            id="x",
+            name="Remote",
+            slug="remote",
+            transport="http",
+            command=(),
+            owner_id="alice",
         )
         with pytest.raises(ValueError, match="URL"):
             MCPService._validate_record(record)
 
     def test_http_url_must_be_absolute(self) -> None:
         record = MCPServerRecord(
-            id="x", name="Remote", slug="remote",
-            transport="http", url="example.com/mcp",
-            command=(), owner_id="alice",
+            id="x",
+            name="Remote",
+            slug="remote",
+            transport="http",
+            url="example.com/mcp",
+            command=(),
+            owner_id="alice",
         )
         with pytest.raises(ValueError, match="http://"):
             MCPService._validate_record(record)
 
     def test_http_accepts_https_url(self) -> None:
         record = MCPServerRecord(
-            id="x", name="Remote", slug="remote",
-            transport="http", url="https://example.com/mcp",
-            command=(), owner_id="alice",
+            id="x",
+            name="Remote",
+            slug="remote",
+            transport="http",
+            url="https://example.com/mcp",
+            command=(),
+            owner_id="alice",
         )
         MCPService._validate_record(record)  # should not raise
 
     def test_sse_record_requires_url(self) -> None:
         record = MCPServerRecord(
-            id="x", name="Remote", slug="remote",
-            transport="sse", command=(), owner_id="alice",
+            id="x",
+            name="Remote",
+            slug="remote",
+            transport="sse",
+            command=(),
+            owner_id="alice",
         )
         with pytest.raises(ValueError, match="URL"):
             MCPService._validate_record(record)
 
     def test_stdio_rejects_auth(self) -> None:
         record = MCPServerRecord(
-            id="x", name="Local", slug="local",
-            transport="stdio", command=("true",), owner_id="alice",
+            id="x",
+            name="Local",
+            slug="local",
+            transport="stdio",
+            command=("true",),
+            owner_id="alice",
             auth=MCPAuthConfig(kind="bearer", bearer_token="secret"),
         )
         with pytest.raises(ValueError, match="Stdio"):
@@ -582,9 +674,13 @@ class TestRemoteTransports:
 
     def test_bearer_requires_token(self) -> None:
         record = MCPServerRecord(
-            id="x", name="Remote", slug="remote",
-            transport="http", url="https://example.com/mcp",
-            command=(), owner_id="alice",
+            id="x",
+            name="Remote",
+            slug="remote",
+            transport="http",
+            url="https://example.com/mcp",
+            command=(),
+            owner_id="alice",
             auth=MCPAuthConfig(kind="bearer", bearer_token=""),
         )
         with pytest.raises(ValueError, match="Bearer"):
@@ -594,6 +690,7 @@ class TestRemoteTransports:
 class TestAuthMerging:
     def test_masked_bearer_preserved(self) -> None:
         from gilbert.core.services.mcp import _merge_auth
+
         existing = MCPAuthConfig(kind="bearer", bearer_token="real-secret")
         merged = _merge_auth(existing, {"kind": "bearer", "bearer_token": "****"})
         assert merged.bearer_token == "real-secret"
@@ -601,18 +698,21 @@ class TestAuthMerging:
 
     def test_real_bearer_replaces(self) -> None:
         from gilbert.core.services.mcp import _merge_auth
+
         existing = MCPAuthConfig(kind="bearer", bearer_token="old")
         merged = _merge_auth(existing, {"kind": "bearer", "bearer_token": "new"})
         assert merged.bearer_token == "new"
 
     def test_switching_to_none_clears_kind(self) -> None:
         from gilbert.core.services.mcp import _merge_auth
+
         existing = MCPAuthConfig(kind="bearer", bearer_token="real")
         merged = _merge_auth(existing, {"kind": "none", "bearer_token": ""})
         assert merged.kind == "none"
 
     def test_scope_list_replaced(self) -> None:
         from gilbert.core.services.mcp import _merge_auth
+
         existing = MCPAuthConfig(kind="oauth", oauth_scopes=("read",))
         merged = _merge_auth(
             existing,
@@ -631,15 +731,21 @@ class TestBearerSerialization:
     ) -> None:
         # alice owns a bearer-auth record; bob shouldn't see the real token.
         record = MCPServerRecord(
-            id="a", name="Remote", slug="remote",
+            id="a",
+            name="Remote",
+            slug="remote",
             transport="stdio",  # use stdio to avoid real HTTP, validation
-            command=("true",), owner_id="alice", scope="public",
+            command=("true",),
+            owner_id="alice",
+            scope="public",
         )
         # Manually set the auth since stdio rejects bearer at validation
         # time; the serializer doesn't know or care about that rule.
         from dataclasses import replace
+
         record = replace(
-            record, auth=MCPAuthConfig(kind="bearer", bearer_token="real-secret"),
+            record,
+            auth=MCPAuthConfig(kind="bearer", bearer_token="real-secret"),
         )
         _install_client(svc, record)
         alice_view = svc._serialize_record(record, alice)
@@ -659,8 +765,12 @@ class TestValidation:
 
     def test_rejects_empty_command(self) -> None:
         record = MCPServerRecord(
-            id="x", name="X", slug="x", transport="stdio",
-            command=(), owner_id="alice",
+            id="x",
+            name="X",
+            slug="x",
+            transport="stdio",
+            command=(),
+            owner_id="alice",
         )
         with pytest.raises(ValueError, match="command"):
             MCPService._validate_record(record)
@@ -681,15 +791,20 @@ class TestValidation:
 
     def test_rejects_sampling_on_stdio(self) -> None:
         from dataclasses import replace
+
         record = replace(make_record(owner_id="alice"), allow_sampling=True)
         with pytest.raises(ValueError, match="remote MCP transports"):
             MCPService._validate_record(record)
 
     def test_rejects_sampling_with_zero_budget(self) -> None:
         record = MCPServerRecord(
-            id="x", name="Remote", slug="remote",
-            transport="http", url="https://example.com/mcp",
-            command=(), owner_id="alice",
+            id="x",
+            name="Remote",
+            slug="remote",
+            transport="http",
+            url="https://example.com/mcp",
+            command=(),
+            owner_id="alice",
             allow_sampling=True,
             sampling_budget_tokens=0,
         )
@@ -698,9 +813,13 @@ class TestValidation:
 
     def test_rejects_sampling_with_empty_profile(self) -> None:
         record = MCPServerRecord(
-            id="x", name="Remote", slug="remote",
-            transport="http", url="https://example.com/mcp",
-            command=(), owner_id="alice",
+            id="x",
+            name="Remote",
+            slug="remote",
+            transport="http",
+            url="https://example.com/mcp",
+            command=(),
+            owner_id="alice",
             allow_sampling=True,
             sampling_profile="",
         )
@@ -714,7 +833,9 @@ class TestValidation:
 class TestSlugUniqueness:
     @pytest.mark.asyncio
     async def test_reject_duplicate_slug_on_create(
-        self, svc: MCPService, register_fake_backend: type[FakeMCPBackend],
+        self,
+        svc: MCPService,
+        register_fake_backend: type[FakeMCPBackend],
     ) -> None:
         rec_a = make_record(id="a", slug="weather", owner_id="alice")
         rec_b = make_record(id="b", slug="weather", owner_id="bob")
@@ -724,7 +845,9 @@ class TestSlugUniqueness:
 
     @pytest.mark.asyncio
     async def test_update_allows_keeping_own_slug(
-        self, svc: MCPService, register_fake_backend: type[FakeMCPBackend],
+        self,
+        svc: MCPService,
+        register_fake_backend: type[FakeMCPBackend],
     ) -> None:
         rec = make_record(id="a", slug="weather", owner_id="alice", name="Old")
         await svc.create_server(rec)
@@ -734,7 +857,9 @@ class TestSlugUniqueness:
 
     @pytest.mark.asyncio
     async def test_update_rejects_taking_someone_elses_slug(
-        self, svc: MCPService, register_fake_backend: type[FakeMCPBackend],
+        self,
+        svc: MCPService,
+        register_fake_backend: type[FakeMCPBackend],
     ) -> None:
         await svc.create_server(
             make_record(id="a", slug="weather", owner_id="alice"),
@@ -761,6 +886,7 @@ class _FakeConn:
         # pytest's asyncio mode doesn't actually drive this, but the
         # Protocol asks for it so satisfy the shape.
         import asyncio
+
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
     @property
@@ -798,12 +924,22 @@ class TestWsHandlers:
         alice: UserContext,
         bob: UserContext,
     ) -> None:
-        await svc.create_server(make_record(
-            id="a", slug="alice-srv", owner_id="alice", scope="private",
-        ))
-        await svc.create_server(make_record(
-            id="b", slug="bob-srv", owner_id="bob", scope="private",
-        ))
+        await svc.create_server(
+            make_record(
+                id="a",
+                slug="alice-srv",
+                owner_id="alice",
+                scope="private",
+            )
+        )
+        await svc.create_server(
+            make_record(
+                id="b",
+                slug="bob-srv",
+                owner_id="bob",
+                scope="private",
+            )
+        )
         frame = {"id": 1}
         result = await svc._ws_list(_FakeConn(alice), frame)
         assert result is not None
@@ -819,12 +955,18 @@ class TestWsHandlers:
         alice: UserContext,
     ) -> None:
         # Admin creates a public server with an API key in env.
-        await svc.create_server(MCPServerRecord(
-            id="srv", name="Weather", slug="weather",
-            transport="stdio", command=("true",),
-            env={"API_KEY": "super-secret"},
-            scope="public", owner_id="root",
-        ))
+        await svc.create_server(
+            MCPServerRecord(
+                id="srv",
+                name="Weather",
+                slug="weather",
+                transport="stdio",
+                command=("true",),
+                env={"API_KEY": "super-secret"},
+                scope="public",
+                owner_id="root",
+            )
+        )
         # Alice can see the public server but env should be masked.
         result = await svc._ws_list(_FakeConn(alice), {"id": 1})
         assert result is not None
@@ -949,10 +1091,14 @@ class TestWsHandlers:
         alice: UserContext,
     ) -> None:
         record = MCPServerRecord(
-            id="a", name="Cal", slug="cal",
-            transport="stdio", command=("true",),
+            id="a",
+            name="Cal",
+            slug="cal",
+            transport="stdio",
+            command=("true",),
             env={"API_KEY": "real-secret", "DEBUG": "1"},
-            owner_id="alice", scope="private",
+            owner_id="alice",
+            scope="private",
         )
         await svc.create_server(record)
 
@@ -1090,7 +1236,8 @@ class TestResourceHandlers:
             ),
         ]
         result = await svc._ws_resources_list(
-            _FakeConn(alice), {"id": 1, "server_id": record.id},
+            _FakeConn(alice),
+            {"id": 1, "server_id": record.id},
         )
         assert result is not None
         assert result["type"] == "mcp.servers.resources.list.result"
@@ -1110,7 +1257,8 @@ class TestResourceHandlers:
         record = make_record(owner_id="alice", scope="private")
         _install_client(svc, record)
         result = await svc._ws_resources_list(
-            _FakeConn(bob), {"id": 1, "server_id": record.id},
+            _FakeConn(bob),
+            {"id": 1, "server_id": record.id},
         )
         assert result is not None
         assert result["type"] == "gilbert.error"
@@ -1127,7 +1275,8 @@ class TestResourceHandlers:
         svc._clients[record.id].connected = False
         svc._clients[record.id].last_error = "boom"
         result = await svc._ws_resources_list(
-            _FakeConn(alice), {"id": 1, "server_id": record.id},
+            _FakeConn(alice),
+            {"id": 1, "server_id": record.id},
         )
         assert result is not None
         assert result["type"] == "gilbert.error"
@@ -1171,7 +1320,8 @@ class TestResourceHandlers:
         record = make_record(owner_id="alice")
         _install_client(svc, record)
         result = await svc._ws_resources_read(
-            _FakeConn(alice), {"id": 1, "server_id": record.id},
+            _FakeConn(alice),
+            {"id": 1, "server_id": record.id},
         )
         assert result is not None
         assert result["type"] == "gilbert.error"
@@ -1200,7 +1350,9 @@ class TestPromptHandlers:
 
     @pytest.mark.asyncio
     async def test_list_returns_prompts(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         record = make_record(owner_id="alice")
         backend = _install_client(svc, record)
@@ -1215,7 +1367,8 @@ class TestPromptHandlers:
             ),
         ]
         result = await svc._ws_prompts_list(
-            _FakeConn(alice), {"id": 1, "server_id": record.id},
+            _FakeConn(alice),
+            {"id": 1, "server_id": record.id},
         )
         assert result is not None
         assert result["type"] == "mcp.servers.prompts.list.result"
@@ -1229,12 +1382,16 @@ class TestPromptHandlers:
 
     @pytest.mark.asyncio
     async def test_list_hidden_from_non_owner(
-        self, svc: MCPService, alice: UserContext, bob: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
+        bob: UserContext,
     ) -> None:
         record = make_record(owner_id="alice", scope="private")
         _install_client(svc, record)
         result = await svc._ws_prompts_list(
-            _FakeConn(bob), {"id": 1, "server_id": record.id},
+            _FakeConn(bob),
+            {"id": 1, "server_id": record.id},
         )
         assert result is not None
         assert result["type"] == "gilbert.error"
@@ -1242,7 +1399,9 @@ class TestPromptHandlers:
 
     @pytest.mark.asyncio
     async def test_get_renders_prompt_with_args(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         record = make_record(owner_id="alice")
         backend = _install_client(svc, record)
@@ -1252,7 +1411,8 @@ class TestPromptHandlers:
                 MCPPromptMessage(
                     role="user",
                     content=MCPContentBlock(
-                        type="text", text="Say hello to Alice",
+                        type="text",
+                        text="Say hello to Alice",
                     ),
                 ),
             ),
@@ -1278,7 +1438,9 @@ class TestPromptHandlers:
 
     @pytest.mark.asyncio
     async def test_get_missing_name_returns_400(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         record = make_record(owner_id="alice")
         _install_client(svc, record)
@@ -1292,7 +1454,9 @@ class TestPromptHandlers:
 
     @pytest.mark.asyncio
     async def test_get_invalid_arguments_type_returns_400(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         record = make_record(owner_id="alice")
         _install_client(svc, record)
@@ -1311,7 +1475,9 @@ class TestPromptHandlers:
 
     @pytest.mark.asyncio
     async def test_get_surfaces_backend_error(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         record = make_record(owner_id="alice")
         _install_client(svc, record)
@@ -1332,7 +1498,9 @@ class TestPromptHandlers:
 class TestMarshalling:
     def test_record_from_doc_roundtrip(self) -> None:
         original = make_record(
-            id="x", slug="cal", owner_id="alice",
+            id="x",
+            slug="cal",
+            owner_id="alice",
             scope="shared",
             allowed_roles=("user",),
             allowed_users=("bob",),
@@ -1375,7 +1543,9 @@ class FakeBridgeConn:
         raise AssertionError("unused in bridge tests")
 
     async def call_client(
-        self, frame: dict[str, Any], timeout: float = 30.0,
+        self,
+        frame: dict[str, Any],
+        timeout: float = 30.0,
     ) -> dict[str, Any]:
         self.call_log.append(frame)
         if self.responder is None:
@@ -1394,8 +1564,9 @@ class FakeBridgeConn:
         self._close_callbacks.clear()
 
 
-def _bridge_reply(tools: list[dict[str, Any]] | None = None,
-                  tool_results: dict[str, dict[str, Any]] | None = None) -> Any:
+def _bridge_reply(
+    tools: list[dict[str, Any]] | None = None, tool_results: dict[str, dict[str, Any]] | None = None
+) -> Any:
     """Build a responder that answers tools/list and tools/call."""
     tool_results = tool_results or {}
 
@@ -1421,7 +1592,9 @@ def _bridge_reply(tools: list[dict[str, Any]] | None = None,
 
 class TestBrowserBridge:
     async def test_announce_registers_session_tools(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         conn = FakeBridgeConn(alice)
         conn.responder = _bridge_reply(
@@ -1458,13 +1631,17 @@ class TestBrowserBridge:
         tools = svc.get_tools(alice)
         assert [t.name for t in tools] == ["mcp__fs__read_file"]
         other = UserContext(
-            user_id="carol", email="", display_name="Carol",
+            user_id="carol",
+            email="",
+            display_name="Carol",
             roles=frozenset({"user"}),
         )
         assert svc.get_tools(other) == []
 
     async def test_execute_session_tool_round_trips(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         conn = FakeBridgeConn(alice)
         conn.responder = _bridge_reply(
@@ -1477,29 +1654,35 @@ class TestBrowserBridge:
             },
         )
         await svc._ws_bridge_announce(
-            conn, {"id": "a1", "servers": [{"slug": "tool", "name": "Tool"}]},
+            conn,
+            {"id": "a1", "servers": [{"slug": "tool", "name": "Tool"}]},
         )
         set_current_user(alice)
         result = await svc.execute_tool(
-            "mcp__tool__echo", {"message": "hello"},
+            "mcp__tool__echo",
+            {"message": "hello"},
         )
         assert "hi!" in result
         # Two bridge calls: tools/list (announce probe) + tools/call.
         methods = [c["method"] for c in conn.call_log]
         assert methods == ["tools/list", "tools/call"]
         assert conn.call_log[1]["params"] == {
-            "name": "echo", "arguments": {"message": "hello"},
+            "name": "echo",
+            "arguments": {"message": "hello"},
         }
 
     async def test_disconnect_tears_down_session(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         conn = FakeBridgeConn(alice)
         conn.responder = _bridge_reply(
             tools=[{"name": "t", "description": "", "inputSchema": {}}],
         )
         await svc._ws_bridge_announce(
-            conn, {"id": "a", "servers": [{"slug": "fs", "name": "FS"}]},
+            conn,
+            {"id": "a", "servers": [{"slug": "fs", "name": "FS"}]},
         )
         assert svc.get_tools(alice)
 
@@ -1512,14 +1695,17 @@ class TestBrowserBridge:
         assert svc.get_tools(alice) == []
 
     async def test_second_tab_replaces_first(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         tab_one = FakeBridgeConn(alice)
         tab_one.responder = _bridge_reply(
             tools=[{"name": "a", "description": "", "inputSchema": {}}],
         )
         await svc._ws_bridge_announce(
-            tab_one, {"id": "1", "servers": [{"slug": "fs", "name": "FS"}]},
+            tab_one,
+            {"id": "1", "servers": [{"slug": "fs", "name": "FS"}]},
         )
 
         tab_two = FakeBridgeConn(alice)
@@ -1527,7 +1713,8 @@ class TestBrowserBridge:
             tools=[{"name": "b", "description": "", "inputSchema": {}}],
         )
         await svc._ws_bridge_announce(
-            tab_two, {"id": "2", "servers": [{"slug": "fs", "name": "FS"}]},
+            tab_two,
+            {"id": "2", "servers": [{"slug": "fs", "name": "FS"}]},
         )
 
         # Session now belongs to tab_two with its own tool set.
@@ -1547,13 +1734,18 @@ class TestBrowserBridge:
         assert "alice" not in svc._session_conn
 
     async def test_slug_collision_with_persisted_rejected(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
         register_fake_backend: type[FakeMCPBackend],
     ) -> None:
         # Install a persisted shared record visible to alice.
         shared = make_record(
-            id="shared", slug="fs", owner_id="root",
-            scope="shared", allowed_roles=("user",),
+            id="shared",
+            slug="fs",
+            owner_id="root",
+            scope="shared",
+            allowed_roles=("user",),
         )
         _install_client(svc, shared)
 
@@ -1562,7 +1754,8 @@ class TestBrowserBridge:
             tools=[{"name": "read", "description": "", "inputSchema": {}}],
         )
         result = await svc._ws_bridge_announce(
-            conn, {"id": "a", "servers": [{"slug": "fs", "name": "Mine"}]},
+            conn,
+            {"id": "a", "servers": [{"slug": "fs", "name": "Mine"}]},
         )
         assert result is not None
         assert result["results"][0]["ok"] is False
@@ -1572,7 +1765,9 @@ class TestBrowserBridge:
         assert "fs" not in svc._session_clients.get("alice", {})
 
     async def test_invalid_slug_rejected(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         conn = FakeBridgeConn(alice)
         result = await svc._ws_bridge_announce(
@@ -1586,7 +1781,9 @@ class TestBrowserBridge:
         assert conn.call_log == []
 
     async def test_probe_failure_surfaced(
-        self, svc: MCPService, alice: UserContext,
+        self,
+        svc: MCPService,
+        alice: UserContext,
     ) -> None:
         conn = FakeBridgeConn(alice)
 
@@ -1595,7 +1792,8 @@ class TestBrowserBridge:
 
         conn.responder = responder
         result = await svc._ws_bridge_announce(
-            conn, {"id": "a", "servers": [{"slug": "fs", "name": "FS"}]},
+            conn,
+            {"id": "a", "servers": [{"slug": "fs", "name": "FS"}]},
         )
         assert result is not None
         assert result["results"][0]["ok"] is False

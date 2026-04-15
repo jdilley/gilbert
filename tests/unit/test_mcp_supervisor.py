@@ -73,7 +73,9 @@ class ProgrammableBackend(MCPBackend):
         return [MCPToolSpec(name="ping", description="", input_schema={})]
 
     async def call_tool(
-        self, name: str, arguments: dict[str, Any],
+        self,
+        name: str,
+        arguments: dict[str, Any],
     ) -> MCPToolResult:
         return MCPToolResult(
             content=(MCPContentBlock(type="text", text="ok"),),
@@ -114,8 +116,11 @@ def _make_svc(ttl: int = 1) -> MCPService:
 
 def _record(id: str = "srv1", ttl: int = 1) -> MCPServerRecord:
     return MCPServerRecord(
-        id=id, name="Test", slug=f"s-{id}",
-        transport="stdio", command=("true",),
+        id=id,
+        name="Test",
+        slug=f"s-{id}",
+        transport="stdio",
+        command=("true",),
         owner_id="alice",
         tool_cache_ttl_seconds=ttl,
     )
@@ -124,7 +129,8 @@ def _record(id: str = "srv1", ttl: int = 1) -> MCPServerRecord:
 class TestSupervisorConnect:
     @pytest.mark.asyncio
     async def test_successful_connect_sets_connected(
-        self, programmable_backend: type[ProgrammableBackend],
+        self,
+        programmable_backend: type[ProgrammableBackend],
     ) -> None:
         programmable_backend.connect_outcomes = [True]
         svc = _make_svc()
@@ -143,7 +149,8 @@ class TestSupervisorConnect:
 
     @pytest.mark.asyncio
     async def test_reconnect_after_transient_failure(
-        self, programmable_backend: type[ProgrammableBackend],
+        self,
+        programmable_backend: type[ProgrammableBackend],
     ) -> None:
         """Two failed connects, then success — retry_count climbs then
         resets, and last_error is cleared on the successful attempt."""
@@ -169,7 +176,8 @@ class TestSupervisorConnect:
 
     @pytest.mark.asyncio
     async def test_backoff_surfaces_retry_state(
-        self, programmable_backend: type[ProgrammableBackend],
+        self,
+        programmable_backend: type[ProgrammableBackend],
     ) -> None:
         """While connect is failing, retry_count and next_retry_at are
         visible to the serializer before the next attempt fires."""
@@ -195,7 +203,8 @@ class TestSupervisorConnect:
 class TestSupervisorHealthCheck:
     @pytest.mark.asyncio
     async def test_health_check_failure_triggers_reconnect(
-        self, programmable_backend: type[ProgrammableBackend],
+        self,
+        programmable_backend: type[ProgrammableBackend],
     ) -> None:
         """Connected → list_tools (health check) fails → supervisor
         drops back to reconnect. The second connect succeeds and
@@ -236,7 +245,8 @@ class TestSupervisorHealthCheck:
 class TestSupervisorCancellation:
     @pytest.mark.asyncio
     async def test_stop_client_cancels_supervisor_during_backoff(
-        self, programmable_backend: type[ProgrammableBackend],
+        self,
+        programmable_backend: type[ProgrammableBackend],
     ) -> None:
         """Stopping a client mid-backoff must not raise and must close
         the backend cleanly."""
@@ -259,7 +269,8 @@ class TestSupervisorCancellation:
 
     @pytest.mark.asyncio
     async def test_stop_while_connected_closes_cleanly(
-        self, programmable_backend: type[ProgrammableBackend],
+        self,
+        programmable_backend: type[ProgrammableBackend],
     ) -> None:
         programmable_backend.connect_outcomes = [True]
         svc = _make_svc()
@@ -278,7 +289,8 @@ class TestSupervisorCancellation:
 class TestSerializedRetryState:
     @pytest.mark.asyncio
     async def test_retry_state_in_serialized_record(
-        self, programmable_backend: type[ProgrammableBackend],
+        self,
+        programmable_backend: type[ProgrammableBackend],
     ) -> None:
         from gilbert.interfaces.auth import UserContext
 
@@ -293,7 +305,9 @@ class TestSerializedRetryState:
             await asyncio.sleep(0.01)
 
         alice = UserContext(
-            user_id="alice", email="a@x", display_name="A",
+            user_id="alice",
+            email="a@x",
+            display_name="A",
             roles=frozenset({"user"}),
         )
         view = svc._serialize_record(entry.record, alice)

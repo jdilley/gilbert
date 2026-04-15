@@ -153,10 +153,7 @@ class AudioOutputService(Service):
             return await self._deliver_to_speakers(text, arguments)
         if destination == "chat":
             return await self._deliver_to_chat(text)
-        return (
-            f"Unknown destination '{destination}'. "
-            "Use 'chat' (default) or 'speakers'."
-        )
+        return f"Unknown destination '{destination}'. Use 'chat' (default) or 'speakers'."
 
     # --- Delivery paths ---
 
@@ -167,16 +164,11 @@ class AudioOutputService(Service):
 
         tts_svc = self._resolver.get_capability("text_to_speech")
         if not isinstance(tts_svc, TTSProvider):
-            return (
-                "Text-to-speech is not available. "
-                "Cannot generate audio for chat."
-            )
+            return "Text-to-speech is not available. Cannot generate audio for chat."
 
         # Voice ID "" tells the TTS service to use its configured default,
         # matching the convention in SpeakerService.announce().
-        request = SynthesisRequest(
-            text=text, voice_id="", output_format=AudioFormat.MP3
-        )
+        request = SynthesisRequest(text=text, voice_id="", output_format=AudioFormat.MP3)
         try:
             result = await tts_svc.synthesize(request)
         except Exception:
@@ -196,26 +188,17 @@ class AudioOutputService(Service):
         # chat UI. The /output/ prefix is a publicly-served static mount
         # in src/gilbert/web/__init__.py.
         url = f"/output/audio/{filename}"
-        duration_str = (
-            f" ({result.duration_seconds:.0f}s)"
-            if result.duration_seconds
-            else ""
-        )
+        duration_str = f" ({result.duration_seconds:.0f}s)" if result.duration_seconds else ""
         return f"Audio ready{duration_str}. [▶ Play or download]({url})"
 
-    async def _deliver_to_speakers(
-        self, text: str, arguments: dict[str, Any]
-    ) -> str:
+    async def _deliver_to_speakers(self, text: str, arguments: dict[str, Any]) -> str:
         """Delegate to SpeakerProvider.announce()."""
         if self._resolver is None:
             return "Audio output service is not ready."
 
         speaker_svc = self._resolver.get_capability("speaker_control")
         if not isinstance(speaker_svc, SpeakerProvider):
-            return (
-                "Speaker control is not available. "
-                "Cannot play audio on speakers."
-            )
+            return "Speaker control is not available. Cannot play audio on speakers."
 
         volume_raw = arguments.get("volume")
         try:
@@ -238,10 +221,7 @@ class AudioOutputService(Service):
             )
         except Exception:
             logger.exception("Speaker announcement failed from audio_output")
-            return (
-                "Failed to play audio on speakers. "
-                "See server logs for details."
-            )
+            return "Failed to play audio on speakers. See server logs for details."
 
         preview = text if len(text) <= 80 else text[:77] + "..."
         return f'Played on speakers: "{preview}"'

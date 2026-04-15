@@ -126,20 +126,27 @@ class InboxService(Service):
             name="inbox",
             capabilities=frozenset({"email", "ai_tools", "ws_handlers", "inbox"}),
             requires=frozenset({"entity_storage", "scheduler"}),
-            optional=frozenset({
-                "event_bus", "knowledge", "configuration", "access_control",
-            }),
-            events=frozenset({
-                "inbox.message.received",
-                "inbox.message.replied",
-                "inbox.message.sent",
-                "inbox.outbox.sent",
-                "inbox.outbox.failed",
-                "inbox.mailbox.created",
-                "inbox.mailbox.updated",
-                "inbox.mailbox.deleted",
-                "inbox.mailbox.shares.changed",
-            }),
+            optional=frozenset(
+                {
+                    "event_bus",
+                    "knowledge",
+                    "configuration",
+                    "access_control",
+                }
+            ),
+            events=frozenset(
+                {
+                    "inbox.message.received",
+                    "inbox.message.replied",
+                    "inbox.message.sent",
+                    "inbox.outbox.sent",
+                    "inbox.outbox.failed",
+                    "inbox.mailbox.created",
+                    "inbox.mailbox.updated",
+                    "inbox.mailbox.deleted",
+                    "inbox.mailbox.shares.changed",
+                }
+            ),
             ai_calls=frozenset({"inbox_compose", "inbox_reply"}),
             toggleable=True,
             toggle_description="Email inbox polling and outbox",
@@ -155,24 +162,42 @@ class InboxService(Service):
         self._storage = storage_svc.backend
 
         # Ensure indexes on all three collections.
-        await self._storage.ensure_index(IndexDefinition(
-            collection=_MAILBOXES_COLLECTION, fields=["owner_user_id"],
-        ))
-        await self._storage.ensure_index(IndexDefinition(
-            collection=_MESSAGES_COLLECTION, fields=["mailbox_id", "thread_id"],
-        ))
-        await self._storage.ensure_index(IndexDefinition(
-            collection=_MESSAGES_COLLECTION, fields=["mailbox_id", "date"],
-        ))
-        await self._storage.ensure_index(IndexDefinition(
-            collection=_MESSAGES_COLLECTION, fields=["mailbox_id", "sender_email"],
-        ))
-        await self._storage.ensure_index(IndexDefinition(
-            collection=_OUTBOX_COLLECTION, fields=["mailbox_id", "status", "send_at"],
-        ))
-        await self._storage.ensure_index(IndexDefinition(
-            collection=_OUTBOX_COLLECTION, fields=["created_by_user_id", "status"],
-        ))
+        await self._storage.ensure_index(
+            IndexDefinition(
+                collection=_MAILBOXES_COLLECTION,
+                fields=["owner_user_id"],
+            )
+        )
+        await self._storage.ensure_index(
+            IndexDefinition(
+                collection=_MESSAGES_COLLECTION,
+                fields=["mailbox_id", "thread_id"],
+            )
+        )
+        await self._storage.ensure_index(
+            IndexDefinition(
+                collection=_MESSAGES_COLLECTION,
+                fields=["mailbox_id", "date"],
+            )
+        )
+        await self._storage.ensure_index(
+            IndexDefinition(
+                collection=_MESSAGES_COLLECTION,
+                fields=["mailbox_id", "sender_email"],
+            )
+        )
+        await self._storage.ensure_index(
+            IndexDefinition(
+                collection=_OUTBOX_COLLECTION,
+                fields=["mailbox_id", "status", "send_at"],
+            )
+        )
+        await self._storage.ensure_index(
+            IndexDefinition(
+                collection=_OUTBOX_COLLECTION,
+                fields=["created_by_user_id", "status"],
+            )
+        )
 
         # Optional capabilities.
         event_bus_svc = resolver.get_capability("event_bus")
@@ -193,9 +218,12 @@ class InboxService(Service):
 
             if isinstance(config_svc, ConfigurationReader):
                 section = config_svc.get_section(self.config_namespace)
-                self._max_body_length = int(section.get(
-                    "max_body_length", self._max_body_length,
-                ))
+                self._max_body_length = int(
+                    section.get(
+                        "max_body_length",
+                        self._max_body_length,
+                    )
+                )
 
         self._enabled = bool(section.get("enabled", True))
         if not self._enabled:
@@ -227,8 +255,10 @@ class InboxService(Service):
             system=True,
         )
 
-        logger.info("Inbox service started (boot deferred, outbox tick every %ds)",
-                    _OUTBOX_TICK_INTERVAL_SEC)
+        logger.info(
+            "Inbox service started (boot deferred, outbox tick every %ds)",
+            _OUTBOX_TICK_INTERVAL_SEC,
+        )
 
     async def stop(self) -> None:
         if self._scheduler is not None:
@@ -245,8 +275,7 @@ class InboxService(Service):
             try:
                 await runtime.backend.close()
             except Exception:
-                logger.exception("Error closing backend for mailbox %s",
-                                 runtime.mailbox.id)
+                logger.exception("Error closing backend for mailbox %s", runtime.mailbox.id)
         self._runtimes.clear()
         logger.info("Inbox service stopped")
 
@@ -266,7 +295,8 @@ class InboxService(Service):
                     await self._start_runtime(mailbox)
                 except Exception:
                     logger.exception(
-                        "Inbox boot: failed to start runtime for %s", mailbox.id,
+                        "Inbox boot: failed to start runtime for %s",
+                        mailbox.id,
                     )
 
         logger.info("Inbox boot: %d runtime(s) started", len(self._runtimes))
@@ -307,11 +337,15 @@ class InboxService(Service):
         )
 
         self._runtimes[mailbox.id] = _MailboxRuntime(
-            mailbox=mailbox, backend=backend, poll_job_name=poll_job_name,
+            mailbox=mailbox,
+            backend=backend,
+            poll_job_name=poll_job_name,
         )
         logger.info(
             "Mailbox runtime started: id=%s backend=%s poll=%ds",
-            mailbox.id, mailbox.backend_name, mailbox.poll_interval_sec,
+            mailbox.id,
+            mailbox.backend_name,
+            mailbox.poll_interval_sec,
         )
 
     async def _stop_runtime(self, mailbox_id: str) -> None:
@@ -347,16 +381,20 @@ class InboxService(Service):
     def config_params(self) -> list[ConfigParam]:
         return [
             ConfigParam(
-                key="max_body_length", type=ToolParameterType.INTEGER,
+                key="max_body_length",
+                type=ToolParameterType.INTEGER,
                 description="Maximum email body length to store (characters).",
                 default=50000,
             ),
         ]
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
-        self._max_body_length = int(config.get(
-            "max_body_length", self._max_body_length,
-        ))
+        self._max_body_length = int(
+            config.get(
+                "max_body_length",
+                self._max_body_length,
+            )
+        )
 
     # ── ConfigAction provider (no-op — per-mailbox now) ──────────────
 
@@ -369,7 +407,9 @@ class InboxService(Service):
         )
 
     async def invoke_config_action(
-        self, key: str, payload: dict[str, Any],
+        self,
+        key: str,
+        payload: dict[str, Any],
     ) -> ConfigActionResult:
         return await invoke_backend_action(None, key, payload)
 
@@ -389,7 +429,9 @@ class InboxService(Service):
 
     def _require_access(self, mailbox: Mailbox, user_ctx: UserContext) -> None:
         if not can_access_mailbox(
-            user_ctx, mailbox, is_admin=self._is_admin(user_ctx),
+            user_ctx,
+            mailbox,
+            is_admin=self._is_admin(user_ctx),
         ):
             raise InboxPermissionError(
                 f"User {user_ctx.user_id!r} cannot access mailbox {mailbox.id!r}",
@@ -397,7 +439,9 @@ class InboxService(Service):
 
     def _require_admin(self, mailbox: Mailbox, user_ctx: UserContext) -> None:
         if not can_admin_mailbox(
-            user_ctx, mailbox, is_admin=self._is_admin(user_ctx),
+            user_ctx,
+            mailbox,
+            is_admin=self._is_admin(user_ctx),
         ):
             raise InboxPermissionError(
                 f"User {user_ctx.user_id!r} cannot administer mailbox {mailbox.id!r}",
@@ -414,15 +458,13 @@ class InboxService(Service):
         return await self._load_mailboxes()
 
     async def list_accessible_mailboxes(
-        self, user_ctx: UserContext,
+        self,
+        user_ctx: UserContext,
     ) -> list[Mailbox]:
         """List mailboxes the given user can access."""
         is_admin = self._is_admin(user_ctx)
         all_mailboxes = await self._load_mailboxes()
-        return [
-            m for m in all_mailboxes
-            if can_access_mailbox(user_ctx, m, is_admin=is_admin)
-        ]
+        return [m for m in all_mailboxes if can_access_mailbox(user_ctx, m, is_admin=is_admin)]
 
     async def get_mailbox(self, mailbox_id: str) -> Mailbox | None:
         row = await self._storage.get(_MAILBOXES_COLLECTION, mailbox_id)
@@ -437,7 +479,9 @@ class InboxService(Service):
         return mailbox
 
     async def create_mailbox(
-        self, mailbox: Mailbox, user_ctx: UserContext,
+        self,
+        mailbox: Mailbox,
+        user_ctx: UserContext,
     ) -> Mailbox:
         """Create a new mailbox. Creator becomes owner."""
         if not mailbox.id:
@@ -450,7 +494,9 @@ class InboxService(Service):
             raise ValueError(f"Mailbox id already exists: {mailbox.id}")
 
         await self._storage.put(
-            _MAILBOXES_COLLECTION, mailbox.id, mailbox.to_dict(),
+            _MAILBOXES_COLLECTION,
+            mailbox.id,
+            mailbox.to_dict(),
         )
         await self._refresh_cache()
 
@@ -467,7 +513,10 @@ class InboxService(Service):
         return mailbox
 
     async def update_mailbox(
-        self, mailbox_id: str, updates: dict[str, Any], user_ctx: UserContext,
+        self,
+        mailbox_id: str,
+        updates: dict[str, Any],
+        user_ctx: UserContext,
     ) -> Mailbox:
         """Update settings on an existing mailbox. Owner/admin only.
 
@@ -489,13 +538,20 @@ class InboxService(Service):
                 continue  # use share_* methods
             if not hasattr(mailbox, key):
                 continue
-            if key in ("backend_name", "backend_config", "poll_enabled",
-                       "poll_interval_sec", "email_address"):
+            if key in (
+                "backend_name",
+                "backend_config",
+                "poll_enabled",
+                "poll_interval_sec",
+                "email_address",
+            ):
                 needs_restart = True
             setattr(mailbox, key, value)
 
         await self._storage.put(
-            _MAILBOXES_COLLECTION, mailbox.id, mailbox.to_dict(),
+            _MAILBOXES_COLLECTION,
+            mailbox.id,
+            mailbox.to_dict(),
         )
         await self._refresh_cache()
 
@@ -512,7 +568,9 @@ class InboxService(Service):
         return mailbox
 
     async def delete_mailbox(
-        self, mailbox_id: str, user_ctx: UserContext,
+        self,
+        mailbox_id: str,
+        user_ctx: UserContext,
     ) -> None:
         """Delete a mailbox. Refuses if non-terminal outbox entries exist.
 
@@ -524,16 +582,20 @@ class InboxService(Service):
         self._require_admin(mailbox, user_ctx)
 
         # Refuse if there are non-terminal outbox entries.
-        non_terminal = await self._storage.query(Query(
-            collection=_OUTBOX_COLLECTION,
-            filters=[
-                Filter(field="mailbox_id", op=FilterOp.EQ, value=mailbox_id),
-                Filter(field="status", op=FilterOp.IN,
-                       value=[OutboxStatus.PENDING, OutboxStatus.SENDING,
-                              OutboxStatus.FAILED]),
-            ],
-            limit=1,
-        ))
+        non_terminal = await self._storage.query(
+            Query(
+                collection=_OUTBOX_COLLECTION,
+                filters=[
+                    Filter(field="mailbox_id", op=FilterOp.EQ, value=mailbox_id),
+                    Filter(
+                        field="status",
+                        op=FilterOp.IN,
+                        value=[OutboxStatus.PENDING, OutboxStatus.SENDING, OutboxStatus.FAILED],
+                    ),
+                ],
+                limit=1,
+            )
+        )
         if non_terminal:
             raise ValueError(
                 "Cannot delete mailbox with pending/failed outbox entries; "
@@ -543,17 +605,21 @@ class InboxService(Service):
         await self._stop_runtime(mailbox_id)
 
         # Cascade: messages and terminal outbox rows.
-        msgs = await self._storage.query(Query(
-            collection=_MESSAGES_COLLECTION,
-            filters=[Filter(field="mailbox_id", op=FilterOp.EQ, value=mailbox_id)],
-        ))
+        msgs = await self._storage.query(
+            Query(
+                collection=_MESSAGES_COLLECTION,
+                filters=[Filter(field="mailbox_id", op=FilterOp.EQ, value=mailbox_id)],
+            )
+        )
         for m in msgs:
             await self._storage.delete(_MESSAGES_COLLECTION, m["_id"])
 
-        outbox = await self._storage.query(Query(
-            collection=_OUTBOX_COLLECTION,
-            filters=[Filter(field="mailbox_id", op=FilterOp.EQ, value=mailbox_id)],
-        ))
+        outbox = await self._storage.query(
+            Query(
+                collection=_OUTBOX_COLLECTION,
+                filters=[Filter(field="mailbox_id", op=FilterOp.EQ, value=mailbox_id)],
+            )
+        )
         for o in outbox:
             await self._storage.delete(_OUTBOX_COLLECTION, o["_id"])
 
@@ -562,59 +628,81 @@ class InboxService(Service):
         await self._publish_mailbox_event("inbox.mailbox.deleted", mailbox)
 
     async def share_user(
-        self, mailbox_id: str, user_id: str, user_ctx: UserContext,
+        self,
+        mailbox_id: str,
+        user_id: str,
+        user_ctx: UserContext,
     ) -> Mailbox:
         mailbox = await self._require_mailbox(mailbox_id)
         self._require_admin(mailbox, user_ctx)
         if user_id not in mailbox.shared_with_users:
             mailbox.shared_with_users.append(user_id)
             await self._storage.put(
-                _MAILBOXES_COLLECTION, mailbox.id, mailbox.to_dict(),
+                _MAILBOXES_COLLECTION,
+                mailbox.id,
+                mailbox.to_dict(),
             )
             await self._publish_shares_changed(mailbox)
         return mailbox
 
     async def unshare_user(
-        self, mailbox_id: str, user_id: str, user_ctx: UserContext,
+        self,
+        mailbox_id: str,
+        user_id: str,
+        user_ctx: UserContext,
     ) -> Mailbox:
         mailbox = await self._require_mailbox(mailbox_id)
         self._require_admin(mailbox, user_ctx)
         if user_id in mailbox.shared_with_users:
             mailbox.shared_with_users.remove(user_id)
             await self._storage.put(
-                _MAILBOXES_COLLECTION, mailbox.id, mailbox.to_dict(),
+                _MAILBOXES_COLLECTION,
+                mailbox.id,
+                mailbox.to_dict(),
             )
             await self._publish_shares_changed(mailbox)
         return mailbox
 
     async def share_role(
-        self, mailbox_id: str, role: str, user_ctx: UserContext,
+        self,
+        mailbox_id: str,
+        role: str,
+        user_ctx: UserContext,
     ) -> Mailbox:
         mailbox = await self._require_mailbox(mailbox_id)
         self._require_admin(mailbox, user_ctx)
         if role not in mailbox.shared_with_roles:
             mailbox.shared_with_roles.append(role)
             await self._storage.put(
-                _MAILBOXES_COLLECTION, mailbox.id, mailbox.to_dict(),
+                _MAILBOXES_COLLECTION,
+                mailbox.id,
+                mailbox.to_dict(),
             )
             await self._publish_shares_changed(mailbox)
         return mailbox
 
     async def unshare_role(
-        self, mailbox_id: str, role: str, user_ctx: UserContext,
+        self,
+        mailbox_id: str,
+        role: str,
+        user_ctx: UserContext,
     ) -> Mailbox:
         mailbox = await self._require_mailbox(mailbox_id)
         self._require_admin(mailbox, user_ctx)
         if role in mailbox.shared_with_roles:
             mailbox.shared_with_roles.remove(role)
             await self._storage.put(
-                _MAILBOXES_COLLECTION, mailbox.id, mailbox.to_dict(),
+                _MAILBOXES_COLLECTION,
+                mailbox.id,
+                mailbox.to_dict(),
             )
             await self._publish_shares_changed(mailbox)
         return mailbox
 
     async def test_mailbox_connection(
-        self, mailbox_id: str, user_ctx: UserContext,
+        self,
+        mailbox_id: str,
+        user_ctx: UserContext,
     ) -> dict[str, Any]:
         """Probe a mailbox's backend — returns {'ok': bool, 'error': str}."""
         mailbox = await self._require_mailbox(mailbox_id)
@@ -642,31 +730,35 @@ class InboxService(Service):
             return
         from gilbert.interfaces.events import Event
 
-        await self._event_bus.publish(Event(
-            event_type=event_type,
-            data={
-                "mailbox_id": mailbox.id,
-                "name": mailbox.name,
-                "owner_user_id": mailbox.owner_user_id,
-            },
-            source="inbox",
-        ))
+        await self._event_bus.publish(
+            Event(
+                event_type=event_type,
+                data={
+                    "mailbox_id": mailbox.id,
+                    "name": mailbox.name,
+                    "owner_user_id": mailbox.owner_user_id,
+                },
+                source="inbox",
+            )
+        )
 
     async def _publish_shares_changed(self, mailbox: Mailbox) -> None:
         if self._event_bus is None:
             return
         from gilbert.interfaces.events import Event
 
-        await self._event_bus.publish(Event(
-            event_type="inbox.mailbox.shares.changed",
-            data={
-                "mailbox_id": mailbox.id,
-                "owner_user_id": mailbox.owner_user_id,
-                "shared_with_users": list(mailbox.shared_with_users),
-                "shared_with_roles": list(mailbox.shared_with_roles),
-            },
-            source="inbox",
-        ))
+        await self._event_bus.publish(
+            Event(
+                event_type="inbox.mailbox.shares.changed",
+                data={
+                    "mailbox_id": mailbox.id,
+                    "owner_user_id": mailbox.owner_user_id,
+                    "shared_with_users": list(mailbox.shared_with_users),
+                    "shared_with_roles": list(mailbox.shared_with_roles),
+                },
+                source="inbox",
+            )
+        )
 
     # ── Polling ──────────────────────────────────────────────────────
 
@@ -676,6 +768,7 @@ class InboxService(Service):
             if runtime is None:
                 return
             await self._poll_runtime(runtime)
+
         return _run
 
     async def _poll_runtime(self, runtime: _MailboxRuntime) -> None:
@@ -685,7 +778,8 @@ class InboxService(Service):
 
         try:
             all_ids = await backend.list_message_ids(
-                query="in:inbox is:unread", max_results=100,
+                query="in:inbox is:unread",
+                max_results=100,
             )
         except Exception:
             logger.exception("Inbox poll (%s): failed to list messages", mailbox.id)
@@ -716,8 +810,7 @@ class InboxService(Service):
             try:
                 await backend.mark_read(mid)
             except Exception:
-                logger.warning("Inbox poll (%s): failed to mark %s as read",
-                               mailbox.id, mid)
+                logger.warning("Inbox poll (%s): failed to mark %s as read", mailbox.id, mid)
 
             new_count += 1
 
@@ -725,20 +818,22 @@ class InboxService(Service):
                 from gilbert.interfaces.events import Event
 
                 original_sender = (msg.headers or {}).get("x-original-sender", "")
-                await self._event_bus.publish(Event(
-                    event_type="inbox.message.received",
-                    data={
-                        "mailbox_id": mailbox.id,
-                        "message_id": msg.message_id,
-                        "thread_id": msg.thread_id,
-                        "subject": msg.subject,
-                        "sender_email": msg.sender.email,
-                        "sender_name": msg.sender.name,
-                        "is_inbound": is_inbound,
-                        "original_sender": original_sender,
-                    },
-                    source="inbox",
-                ))
+                await self._event_bus.publish(
+                    Event(
+                        event_type="inbox.message.received",
+                        data={
+                            "mailbox_id": mailbox.id,
+                            "message_id": msg.message_id,
+                            "thread_id": msg.thread_id,
+                            "subject": msg.subject,
+                            "sender_email": msg.sender.email,
+                            "sender_name": msg.sender.name,
+                            "is_inbound": is_inbound,
+                            "original_sender": original_sender,
+                        },
+                        source="inbox",
+                    )
+                )
 
         if new_count:
             logger.info("Inbox poll (%s): %d new message(s)", mailbox.id, new_count)
@@ -749,7 +844,10 @@ class InboxService(Service):
         return msg.sender.email.lower() == mailbox.email_address.lower()
 
     async def _persist_message(
-        self, msg: EmailMessage, mailbox: Mailbox, is_inbound: bool,
+        self,
+        msg: EmailMessage,
+        mailbox: Mailbox,
+        is_inbound: bool,
     ) -> None:
         body_text = msg.body_text
         if len(body_text) > self._max_body_length:
@@ -758,21 +856,25 @@ class InboxService(Service):
         if len(body_html) > self._max_body_length:
             body_html = body_html[: self._max_body_length]
 
-        await self._storage.put(_MESSAGES_COLLECTION, msg.message_id, {
-            "mailbox_id": mailbox.id,
-            "message_id": msg.message_id,
-            "thread_id": msg.thread_id,
-            "subject": msg.subject,
-            "sender_email": msg.sender.email,
-            "sender_name": msg.sender.name,
-            "to": [{"email": a.email, "name": a.name} for a in msg.to],
-            "cc": [{"email": a.email, "name": a.name} for a in msg.cc],
-            "body_text": body_text,
-            "body_html": body_html,
-            "date": msg.date.isoformat(),
-            "in_reply_to": msg.in_reply_to,
-            "is_inbound": is_inbound,
-        })
+        await self._storage.put(
+            _MESSAGES_COLLECTION,
+            msg.message_id,
+            {
+                "mailbox_id": mailbox.id,
+                "message_id": msg.message_id,
+                "thread_id": msg.thread_id,
+                "subject": msg.subject,
+                "sender_email": msg.sender.email,
+                "sender_name": msg.sender.name,
+                "to": [{"email": a.email, "name": a.name} for a in msg.to],
+                "cc": [{"email": a.email, "name": a.name} for a in msg.cc],
+                "body_text": body_text,
+                "body_html": body_html,
+                "date": msg.date.isoformat(),
+                "in_reply_to": msg.in_reply_to,
+                "is_inbound": is_inbound,
+            },
+        )
 
     # ── Messages: search / get / thread / stats ──────────────────────
 
@@ -808,17 +910,18 @@ class InboxService(Service):
             filters.append(Filter(field="mailbox_id", op=FilterOp.IN, value=ids))
 
         if sender:
-            filters.append(Filter(field="sender_email", op=FilterOp.CONTAINS,
-                                  value=sender.lower()))
+            filters.append(Filter(field="sender_email", op=FilterOp.CONTAINS, value=sender.lower()))
         if subject:
             filters.append(Filter(field="subject", op=FilterOp.CONTAINS, value=subject))
 
-        results = await self._storage.query(Query(
-            collection=_MESSAGES_COLLECTION,
-            filters=filters,
-            sort=[SortField(field="date", descending=True)],
-            limit=limit,
-        ))
+        results = await self._storage.query(
+            Query(
+                collection=_MESSAGES_COLLECTION,
+                filters=filters,
+                sort=[SortField(field="date", descending=True)],
+                limit=limit,
+            )
+        )
 
         if not include_body:
             for r in results:
@@ -841,7 +944,9 @@ class InboxService(Service):
         return dict(record)
 
     async def get_thread(
-        self, thread_id: str, mailbox_id: str | None = None,
+        self,
+        thread_id: str,
+        mailbox_id: str | None = None,
     ) -> list[dict[str, Any]]:
         user_ctx = get_current_user()
 
@@ -854,17 +959,22 @@ class InboxService(Service):
             if not mailbox_ids:
                 return []
 
-        return list(await self._storage.query(Query(
-            collection=_MESSAGES_COLLECTION,
-            filters=[
-                Filter(field="mailbox_id", op=FilterOp.IN, value=mailbox_ids),
-                Filter(field="thread_id", op=FilterOp.EQ, value=thread_id),
-            ],
-            sort=[SortField(field="date", descending=False)],
-        )))
+        return list(
+            await self._storage.query(
+                Query(
+                    collection=_MESSAGES_COLLECTION,
+                    filters=[
+                        Filter(field="mailbox_id", op=FilterOp.IN, value=mailbox_ids),
+                        Filter(field="thread_id", op=FilterOp.EQ, value=thread_id),
+                    ],
+                    sort=[SortField(field="date", descending=False)],
+                )
+            )
+        )
 
     async def get_stats(
-        self, mailbox_id: str | None = None,
+        self,
+        mailbox_id: str | None = None,
     ) -> dict[str, int]:
         user_ctx = get_current_user()
 
@@ -877,17 +987,21 @@ class InboxService(Service):
             if not mailbox_ids:
                 return {"total": 0, "inbound": 0}
 
-        total = await self._storage.count(Query(
-            collection=_MESSAGES_COLLECTION,
-            filters=[Filter(field="mailbox_id", op=FilterOp.IN, value=mailbox_ids)],
-        ))
-        inbound = await self._storage.count(Query(
-            collection=_MESSAGES_COLLECTION,
-            filters=[
-                Filter(field="mailbox_id", op=FilterOp.IN, value=mailbox_ids),
-                Filter(field="is_inbound", op=FilterOp.EQ, value=True),
-            ],
-        ))
+        total = await self._storage.count(
+            Query(
+                collection=_MESSAGES_COLLECTION,
+                filters=[Filter(field="mailbox_id", op=FilterOp.IN, value=mailbox_ids)],
+            )
+        )
+        inbound = await self._storage.count(
+            Query(
+                collection=_MESSAGES_COLLECTION,
+                filters=[
+                    Filter(field="mailbox_id", op=FilterOp.IN, value=mailbox_ids),
+                    Filter(field="is_inbound", op=FilterOp.EQ, value=True),
+                ],
+            )
+        )
         return {"total": total, "inbound": inbound}
 
     # ── Direct send (bypass outbox) ──────────────────────────────────
@@ -913,41 +1027,52 @@ class InboxService(Service):
             raise RuntimeError(f"Mailbox {mailbox_id} runtime is not active")
 
         sent_id = await runtime.backend.send(
-            to=to, subject=subject,
-            body_html=body_html, body_text=body_text, cc=cc,
-            attachments=attachments, reply_to=reply_to, from_name=from_name,
+            to=to,
+            subject=subject,
+            body_html=body_html,
+            body_text=body_text,
+            cc=cc,
+            attachments=attachments,
+            reply_to=reply_to,
+            from_name=from_name,
         )
 
         now = datetime.now(UTC)
-        await self._storage.put(_MESSAGES_COLLECTION, sent_id, {
-            "mailbox_id": mailbox.id,
-            "message_id": sent_id,
-            "thread_id": sent_id,  # new thread
-            "subject": subject,
-            "sender_email": mailbox.email_address,
-            "sender_name": from_name,
-            "to": [{"email": a.email, "name": a.name} for a in to],
-            "cc": [{"email": a.email, "name": a.name} for a in (cc or [])],
-            "body_text": body_text or body_html,
-            "body_html": body_html,
-            "date": now.isoformat(),
-            "in_reply_to": "",
-            "is_inbound": False,
-        })
+        await self._storage.put(
+            _MESSAGES_COLLECTION,
+            sent_id,
+            {
+                "mailbox_id": mailbox.id,
+                "message_id": sent_id,
+                "thread_id": sent_id,  # new thread
+                "subject": subject,
+                "sender_email": mailbox.email_address,
+                "sender_name": from_name,
+                "to": [{"email": a.email, "name": a.name} for a in to],
+                "cc": [{"email": a.email, "name": a.name} for a in (cc or [])],
+                "body_text": body_text or body_html,
+                "body_html": body_html,
+                "date": now.isoformat(),
+                "in_reply_to": "",
+                "is_inbound": False,
+            },
+        )
 
         if self._event_bus is not None:
             from gilbert.interfaces.events import Event
 
-            await self._event_bus.publish(Event(
-                event_type="inbox.message.sent",
-                data={
-                    "mailbox_id": mailbox.id,
-                    "message_id": sent_id,
-                    "subject": subject,
-                    "to": [a.email for a in to],
-                },
-                source="inbox",
-            ))
+            await self._event_bus.publish(
+                Event(
+                    event_type="inbox.message.sent",
+                    data={
+                        "mailbox_id": mailbox.id,
+                        "message_id": sent_id,
+                        "subject": subject,
+                        "to": [a.email for a in to],
+                    },
+                    source="inbox",
+                )
+            )
 
         return sent_id
 
@@ -978,8 +1103,7 @@ class InboxService(Service):
                 f"Message {message_id} does not belong to mailbox {mailbox.id}",
             )
 
-        to = [EmailAddress(email=record["sender_email"],
-                           name=record.get("sender_name", ""))]
+        to = [EmailAddress(email=record["sender_email"], name=record.get("sender_name", ""))]
         subject = record["subject"]
         thread_id = record.get("thread_id", "")
         in_reply_to = record.get("in_reply_to", "")
@@ -998,37 +1122,41 @@ class InboxService(Service):
         )
 
         now = datetime.now(UTC)
-        await self._storage.put(_MESSAGES_COLLECTION, sent_id, {
-            "mailbox_id": mailbox.id,
-            "message_id": sent_id,
-            "thread_id": thread_id,
-            "subject": (
-                f"Re: {subject}" if not subject.startswith("Re:") else subject
-            ),
-            "sender_email": mailbox.email_address,
-            "sender_name": from_name,
-            "to": [{"email": a.email, "name": a.name} for a in to],
-            "cc": [{"email": a.email, "name": a.name} for a in (cc or [])],
-            "body_text": body_text or body_html,
-            "body_html": body_html,
-            "date": now.isoformat(),
-            "in_reply_to": in_reply_to,
-            "is_inbound": False,
-        })
+        await self._storage.put(
+            _MESSAGES_COLLECTION,
+            sent_id,
+            {
+                "mailbox_id": mailbox.id,
+                "message_id": sent_id,
+                "thread_id": thread_id,
+                "subject": (f"Re: {subject}" if not subject.startswith("Re:") else subject),
+                "sender_email": mailbox.email_address,
+                "sender_name": from_name,
+                "to": [{"email": a.email, "name": a.name} for a in to],
+                "cc": [{"email": a.email, "name": a.name} for a in (cc or [])],
+                "body_text": body_text or body_html,
+                "body_html": body_html,
+                "date": now.isoformat(),
+                "in_reply_to": in_reply_to,
+                "is_inbound": False,
+            },
+        )
 
         if self._event_bus is not None:
             from gilbert.interfaces.events import Event
 
-            await self._event_bus.publish(Event(
-                event_type="inbox.message.replied",
-                data={
-                    "mailbox_id": mailbox.id,
-                    "message_id": sent_id,
-                    "thread_id": thread_id,
-                    "in_reply_to_message": message_id,
-                },
-                source="inbox",
-            ))
+            await self._event_bus.publish(
+                Event(
+                    event_type="inbox.message.replied",
+                    data={
+                        "mailbox_id": mailbox.id,
+                        "message_id": sent_id,
+                        "thread_id": thread_id,
+                        "in_reply_to_message": message_id,
+                    },
+                    source="inbox",
+                )
+            )
 
         return sent_id
 
@@ -1064,7 +1192,9 @@ class InboxService(Service):
         return outbox_id
 
     async def cancel_outbox(
-        self, outbox_id: str, user_ctx: UserContext,
+        self,
+        outbox_id: str,
+        user_ctx: UserContext,
     ) -> bool:
         """Cancel a pending/failed outbox entry. Any user with access
         to the mailbox may cancel — not just the draft creator.
@@ -1105,11 +1235,13 @@ class InboxService(Service):
         if status is not None:
             filters.append(Filter(field="status", op=FilterOp.EQ, value=status.value))
 
-        rows = await self._storage.query(Query(
-            collection=_OUTBOX_COLLECTION,
-            filters=filters,
-            sort=[SortField(field="send_at", descending=False)],
-        ))
+        rows = await self._storage.query(
+            Query(
+                collection=_OUTBOX_COLLECTION,
+                filters=filters,
+                sort=[SortField(field="send_at", descending=False)],
+            )
+        )
         return [self._row_to_outbox_entry(r) for r in rows]
 
     def _row_to_outbox_entry(self, row: dict[str, Any]) -> OutboxEntry:
@@ -1136,16 +1268,17 @@ class InboxService(Service):
         self._outbox_busy = True
         try:
             now = datetime.now(UTC).isoformat()
-            due = await self._storage.query(Query(
-                collection=_OUTBOX_COLLECTION,
-                filters=[
-                    Filter(field="status", op=FilterOp.EQ,
-                           value=OutboxStatus.PENDING.value),
-                    Filter(field="send_at", op=FilterOp.LTE, value=now),
-                ],
-                sort=[SortField(field="send_at", descending=False)],
-                limit=20,
-            ))
+            due = await self._storage.query(
+                Query(
+                    collection=_OUTBOX_COLLECTION,
+                    filters=[
+                        Filter(field="status", op=FilterOp.EQ, value=OutboxStatus.PENDING.value),
+                        Filter(field="send_at", op=FilterOp.LTE, value=now),
+                    ],
+                    sort=[SortField(field="send_at", descending=False)],
+                    limit=20,
+                )
+            )
             for row in due:
                 await self._send_outbox_row(row)
         except Exception:
@@ -1200,37 +1333,41 @@ class InboxService(Service):
             await self._storage.put(_OUTBOX_COLLECTION, outbox_id, row)
 
             # Persist sent message in the messages collection too.
-            await self._storage.put(_MESSAGES_COLLECTION, sent_id, {
-                "mailbox_id": mailbox.id,
-                "message_id": sent_id,
-                "thread_id": draft.thread_id or sent_id,
-                "subject": draft.subject,
-                "sender_email": mailbox.email_address,
-                "sender_name": draft.from_name,
-                "to": [{"email": a.email, "name": a.name} for a in draft.to],
-                "cc": [
-                    {"email": a.email, "name": a.name} for a in (draft.cc or [])
-                ],
-                "body_text": draft.body_text or draft.body_html,
-                "body_html": draft.body_html,
-                "date": now.isoformat(),
-                "in_reply_to": draft.in_reply_to,
-                "is_inbound": False,
-            })
+            await self._storage.put(
+                _MESSAGES_COLLECTION,
+                sent_id,
+                {
+                    "mailbox_id": mailbox.id,
+                    "message_id": sent_id,
+                    "thread_id": draft.thread_id or sent_id,
+                    "subject": draft.subject,
+                    "sender_email": mailbox.email_address,
+                    "sender_name": draft.from_name,
+                    "to": [{"email": a.email, "name": a.name} for a in draft.to],
+                    "cc": [{"email": a.email, "name": a.name} for a in (draft.cc or [])],
+                    "body_text": draft.body_text or draft.body_html,
+                    "body_html": draft.body_html,
+                    "date": now.isoformat(),
+                    "in_reply_to": draft.in_reply_to,
+                    "is_inbound": False,
+                },
+            )
 
             if self._event_bus is not None:
                 from gilbert.interfaces.events import Event
 
-                await self._event_bus.publish(Event(
-                    event_type="inbox.outbox.sent",
-                    data={
-                        "mailbox_id": mailbox.id,
-                        "outbox_id": outbox_id,
-                        "message_id": sent_id,
-                        "subject": draft.subject,
-                    },
-                    source="inbox",
-                ))
+                await self._event_bus.publish(
+                    Event(
+                        event_type="inbox.outbox.sent",
+                        data={
+                            "mailbox_id": mailbox.id,
+                            "outbox_id": outbox_id,
+                            "message_id": sent_id,
+                            "subject": draft.subject,
+                        },
+                        source="inbox",
+                    )
+                )
         except Exception as exc:
             logger.exception("Outbox send failed for %s", outbox_id)
             row["status"] = OutboxStatus.FAILED.value
@@ -1241,20 +1378,23 @@ class InboxService(Service):
             if self._event_bus is not None:
                 from gilbert.interfaces.events import Event
 
-                await self._event_bus.publish(Event(
-                    event_type="inbox.outbox.failed",
-                    data={
-                        "mailbox_id": mailbox.id,
-                        "outbox_id": outbox_id,
-                        "error": str(exc),
-                    },
-                    source="inbox",
-                ))
+                await self._event_bus.publish(
+                    Event(
+                        event_type="inbox.outbox.failed",
+                        data={
+                            "mailbox_id": mailbox.id,
+                            "outbox_id": outbox_id,
+                            "error": str(exc),
+                        },
+                        source="inbox",
+                    )
+                )
 
     # ── Attachments ──────────────────────────────────────────────────
 
     async def _resolve_attachments(
-        self, document_ids: list[str] | None,
+        self,
+        document_ids: list[str] | None,
     ) -> list[EmailAttachment]:
         """Resolve knowledge store document IDs to email attachments."""
         if not document_ids or self._knowledge is None:
@@ -1273,7 +1413,7 @@ class InboxService(Service):
                 for sid, b in self._knowledge.backends.items():
                     if sid == doc_id[: len(sid)]:
                         backend = b
-                        path = doc_id[len(sid) + 1:]
+                        path = doc_id[len(sid) + 1 :]
                         break
                 if backend is None:
                     for sid, b in self._knowledge.backends.items():
@@ -1289,11 +1429,13 @@ class InboxService(Service):
                     logger.warning("Document not found: %s", doc_id)
                     continue
 
-                attachments.append(EmailAttachment(
-                    filename=content.meta.name,
-                    data=content.data,
-                    mime_type=content.meta.mime_type,
-                ))
+                attachments.append(
+                    EmailAttachment(
+                        filename=content.meta.name,
+                        data=content.data,
+                        mime_type=content.meta.mime_type,
+                    )
+                )
             except Exception:
                 logger.warning("Failed to resolve attachment: %s", doc_id, exc_info=True)
         return attachments
@@ -1369,8 +1511,7 @@ class InboxService(Service):
                 slash_command="read",
                 slash_help="Read a message: /inbox read <mailbox_id> <message_id>",
                 description=(
-                    "Read the full content of a single email message in a "
-                    "specific mailbox."
+                    "Read the full content of a single email message in a specific mailbox."
                 ),
                 parameters=[
                     ToolParameter(
@@ -1506,12 +1647,14 @@ class InboxService(Service):
             access = determine_access(user_ctx, m, is_admin=is_admin)
             if access is None:
                 continue
-            out.append({
-                "id": m.id,
-                "name": m.name,
-                "email_address": m.email_address,
-                "access": access.value,
-            })
+            out.append(
+                {
+                    "id": m.id,
+                    "name": m.name,
+                    "email_address": m.email_address,
+                    "access": access.value,
+                }
+            )
         if not out:
             return "You have no accessible mailboxes."
         return json.dumps(out, indent=2)
@@ -1577,22 +1720,23 @@ class InboxService(Service):
         if not record:
             return f"Message {message_id} not found."
         if record.get("mailbox_id") != mailbox.id:
-            return (
-                f"Message {message_id} does not belong to mailbox {mailbox.id}."
-            )
+            return f"Message {message_id} does not belong to mailbox {mailbox.id}."
 
-        return json.dumps({
-            "mailbox_id": mailbox.id,
-            "message_id": record.get("_id", ""),
-            "thread_id": record.get("thread_id", ""),
-            "date": record.get("date", ""),
-            "subject": record.get("subject", ""),
-            "from": f"{record.get('sender_name', '')} <{record.get('sender_email', '')}>",
-            "to": record.get("to", []),
-            "cc": record.get("cc", []),
-            "body": record.get("body_text", ""),
-            "is_inbound": record.get("is_inbound", True),
-        }, indent=2)
+        return json.dumps(
+            {
+                "mailbox_id": mailbox.id,
+                "message_id": record.get("_id", ""),
+                "thread_id": record.get("thread_id", ""),
+                "date": record.get("date", ""),
+                "subject": record.get("subject", ""),
+                "from": f"{record.get('sender_name', '')} <{record.get('sender_email', '')}>",
+                "to": record.get("to", []),
+                "cc": record.get("cc", []),
+                "body": record.get("body_text", ""),
+                "is_inbound": record.get("is_inbound", True),
+            },
+            indent=2,
+        )
 
     async def _tool_reply(self, args: dict[str, Any]) -> str:
         user_ctx = get_current_user()
@@ -1744,20 +1888,24 @@ class InboxService(Service):
             if not snippet:
                 body = m.get("body_text", "")
                 snippet = body[:120] + ("..." if len(body) > 120 else "")
-            summaries.append({
-                "mailbox_id": m.get("mailbox_id", ""),
-                "message_id": m.get("_id", ""),
-                "thread_id": m.get("thread_id", ""),
-                "subject": m.get("subject", ""),
-                "sender_email": m.get("sender_email", ""),
-                "sender_name": m.get("sender_name", ""),
-                "date": m.get("date", ""),
-                "is_inbound": m.get("is_inbound", True),
-                "snippet": snippet,
-            })
+            summaries.append(
+                {
+                    "mailbox_id": m.get("mailbox_id", ""),
+                    "message_id": m.get("_id", ""),
+                    "thread_id": m.get("thread_id", ""),
+                    "subject": m.get("subject", ""),
+                    "sender_email": m.get("sender_email", ""),
+                    "sender_name": m.get("sender_name", ""),
+                    "date": m.get("date", ""),
+                    "is_inbound": m.get("is_inbound", True),
+                    "snippet": snippet,
+                }
+            )
         return {
-            "type": "inbox.message.list.result", "ref": frame.get("id"),
-            "messages": summaries, "total": len(summaries),
+            "type": "inbox.message.list.result",
+            "ref": frame.get("id"),
+            "messages": summaries,
+            "total": len(summaries),
         }
 
     async def _ws_message_get(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any]:
@@ -1769,7 +1917,8 @@ class InboxService(Service):
             return self._err(frame, "Message not found", 404)
 
         return {
-            "type": "inbox.message.get.result", "ref": frame.get("id"),
+            "type": "inbox.message.get.result",
+            "ref": frame.get("id"),
             "mailbox_id": record.get("mailbox_id", ""),
             "message_id": record.get("_id", ""),
             "thread_id": record.get("thread_id", ""),
@@ -1797,22 +1946,25 @@ class InboxService(Service):
 
         result = []
         for m in messages:
-            result.append({
-                "mailbox_id": m.get("mailbox_id", ""),
-                "message_id": m.get("_id", ""),
-                "thread_id": m.get("thread_id", ""),
-                "subject": m.get("subject", ""),
-                "sender_email": m.get("sender_email", ""),
-                "sender_name": m.get("sender_name", ""),
-                "date": m.get("date", ""),
-                "to": m.get("to", []),
-                "cc": m.get("cc", []),
-                "body_text": m.get("body_text", ""),
-                "body_html": m.get("body_html", ""),
-                "is_inbound": m.get("is_inbound", True),
-            })
+            result.append(
+                {
+                    "mailbox_id": m.get("mailbox_id", ""),
+                    "message_id": m.get("_id", ""),
+                    "thread_id": m.get("thread_id", ""),
+                    "subject": m.get("subject", ""),
+                    "sender_email": m.get("sender_email", ""),
+                    "sender_name": m.get("sender_name", ""),
+                    "date": m.get("date", ""),
+                    "to": m.get("to", []),
+                    "cc": m.get("cc", []),
+                    "body_text": m.get("body_text", ""),
+                    "body_html": m.get("body_html", ""),
+                    "is_inbound": m.get("is_inbound", True),
+                }
+            )
         return {
-            "type": "inbox.thread.get.result", "ref": frame.get("id"),
+            "type": "inbox.thread.get.result",
+            "ref": frame.get("id"),
             "messages": result,
         }
 
@@ -1833,21 +1985,24 @@ class InboxService(Service):
 
         out: list[dict[str, Any]] = []
         for entry in entries:
-            out.append({
-                "id": entry.id,
-                "mailbox_id": entry.mailbox_id,
-                "status": entry.status.value,
-                "send_at": entry.send_at,
-                "created_by_user_id": entry.created_by_user_id,
-                "created_at": entry.created_at,
-                "sent_at": entry.sent_at,
-                "error": entry.error,
-                "retry_count": entry.retry_count,
-                "subject": entry.draft.subject,
-                "to": [a.email for a in entry.draft.to],
-            })
+            out.append(
+                {
+                    "id": entry.id,
+                    "mailbox_id": entry.mailbox_id,
+                    "status": entry.status.value,
+                    "send_at": entry.send_at,
+                    "created_by_user_id": entry.created_by_user_id,
+                    "created_at": entry.created_at,
+                    "sent_at": entry.sent_at,
+                    "error": entry.error,
+                    "retry_count": entry.retry_count,
+                    "subject": entry.draft.subject,
+                    "to": [a.email for a in entry.draft.to],
+                }
+            )
         return {
-            "type": "inbox.outbox.list.result", "ref": frame.get("id"),
+            "type": "inbox.outbox.list.result",
+            "ref": frame.get("id"),
             "entries": out,
         }
 
@@ -1862,14 +2017,18 @@ class InboxService(Service):
         if not ok:
             return self._err(frame, "Outbox entry not found or not cancellable", 404)
         return {
-            "type": "inbox.outbox.cancel.result", "ref": frame.get("id"),
+            "type": "inbox.outbox.cancel.result",
+            "ref": frame.get("id"),
             "status": "cancelled",
         }
 
     # ---- Mailboxes ----
 
     def _mailbox_payload(
-        self, mailbox: Mailbox, user_ctx: UserContext, is_admin: bool,
+        self,
+        mailbox: Mailbox,
+        user_ctx: UserContext,
+        is_admin: bool,
     ) -> dict[str, Any]:
         access = determine_access(user_ctx, mailbox, is_admin=is_admin)
         return {
@@ -1898,7 +2057,8 @@ class InboxService(Service):
                 continue
             out.append(self._mailbox_payload(m, user_ctx, is_admin))
         return {
-            "type": "inbox.mailboxes.list.result", "ref": frame.get("id"),
+            "type": "inbox.mailboxes.list.result",
+            "ref": frame.get("id"),
             "mailboxes": out,
         }
 
@@ -1912,7 +2072,8 @@ class InboxService(Service):
         if determine_access(user_ctx, mailbox, is_admin=is_admin) is None:
             return self._err(frame, "Forbidden", 403)
         return {
-            "type": "inbox.mailboxes.get.result", "ref": frame.get("id"),
+            "type": "inbox.mailboxes.get.result",
+            "ref": frame.get("id"),
             "mailbox": self._mailbox_payload(mailbox, user_ctx, is_admin),
         }
 
@@ -1936,7 +2097,8 @@ class InboxService(Service):
 
         is_admin = self._is_admin(user_ctx)
         return {
-            "type": "inbox.mailboxes.create.result", "ref": frame.get("id"),
+            "type": "inbox.mailboxes.create.result",
+            "ref": frame.get("id"),
             "mailbox": self._mailbox_payload(created, user_ctx, is_admin),
         }
 
@@ -1954,7 +2116,8 @@ class InboxService(Service):
 
         is_admin = self._is_admin(conn.user_ctx)
         return {
-            "type": "inbox.mailboxes.update.result", "ref": frame.get("id"),
+            "type": "inbox.mailboxes.update.result",
+            "ref": frame.get("id"),
             "mailbox": self._mailbox_payload(mailbox, conn.user_ctx, is_admin),
         }
 
@@ -1969,7 +2132,8 @@ class InboxService(Service):
         except ValueError as e:
             return self._err(frame, str(e), 409)
         return {
-            "type": "inbox.mailboxes.delete.result", "ref": frame.get("id"),
+            "type": "inbox.mailboxes.delete.result",
+            "ref": frame.get("id"),
             "status": "ok",
         }
 
@@ -1982,7 +2146,8 @@ class InboxService(Service):
         except MailboxNotFoundError as e:
             return self._err(frame, str(e), 404)
         return {
-            "type": "inbox.mailboxes.test_connection.result", "ref": frame.get("id"),
+            "type": "inbox.mailboxes.test_connection.result",
+            "ref": frame.get("id"),
             **result,
         }
 
@@ -1999,7 +2164,8 @@ class InboxService(Service):
             return self._err(frame, str(e), 404)
         is_admin = self._is_admin(conn.user_ctx)
         return {
-            "type": "inbox.mailboxes.share_user.result", "ref": frame.get("id"),
+            "type": "inbox.mailboxes.share_user.result",
+            "ref": frame.get("id"),
             "mailbox": self._mailbox_payload(mailbox, conn.user_ctx, is_admin),
         }
 
@@ -2016,7 +2182,8 @@ class InboxService(Service):
             return self._err(frame, str(e), 404)
         is_admin = self._is_admin(conn.user_ctx)
         return {
-            "type": "inbox.mailboxes.unshare_user.result", "ref": frame.get("id"),
+            "type": "inbox.mailboxes.unshare_user.result",
+            "ref": frame.get("id"),
             "mailbox": self._mailbox_payload(mailbox, conn.user_ctx, is_admin),
         }
 
@@ -2033,7 +2200,8 @@ class InboxService(Service):
             return self._err(frame, str(e), 404)
         is_admin = self._is_admin(conn.user_ctx)
         return {
-            "type": "inbox.mailboxes.share_role.result", "ref": frame.get("id"),
+            "type": "inbox.mailboxes.share_role.result",
+            "ref": frame.get("id"),
             "mailbox": self._mailbox_payload(mailbox, conn.user_ctx, is_admin),
         }
 
@@ -2061,7 +2229,8 @@ class InboxService(Service):
             ]
             backends.append({"name": name, "config_params": params})
         return {
-            "type": "inbox.backends.list.result", "ref": frame.get("id"),
+            "type": "inbox.backends.list.result",
+            "ref": frame.get("id"),
             "backends": backends,
         }
 
@@ -2078,7 +2247,8 @@ class InboxService(Service):
             return self._err(frame, str(e), 404)
         is_admin = self._is_admin(conn.user_ctx)
         return {
-            "type": "inbox.mailboxes.unshare_role.result", "ref": frame.get("id"),
+            "type": "inbox.mailboxes.unshare_role.result",
+            "ref": frame.get("id"),
             "mailbox": self._mailbox_payload(mailbox, conn.user_ctx, is_admin),
         }
 

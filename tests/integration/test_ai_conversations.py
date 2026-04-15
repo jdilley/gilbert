@@ -1,6 +1,5 @@
 """Integration tests — AI conversation persistence with real SQLite."""
 
-
 from gilbert.core.services.ai import AIService
 from gilbert.interfaces.ai import Message, MessageRole
 from gilbert.interfaces.tools import ToolCall, ToolResult
@@ -27,9 +26,7 @@ async def test_save_and_load_conversation(sqlite_storage: SQLiteStorage) -> None
     # Load
     loaded = await sqlite_storage.get("ai_conversations", conv_id)
     assert loaded is not None
-    loaded_messages = [
-        AIService._deserialize_message(m) for m in loaded["messages"]
-    ]
+    loaded_messages = [AIService._deserialize_message(m) for m in loaded["messages"]]
 
     assert len(loaded_messages) == 4
     assert loaded_messages[0].role == MessageRole.USER
@@ -71,9 +68,7 @@ async def test_conversation_with_tool_calls(sqlite_storage: SQLiteStorage) -> No
 
     loaded = await sqlite_storage.get("ai_conversations", conv_id)
     assert loaded is not None
-    loaded_messages = [
-        AIService._deserialize_message(m) for m in loaded["messages"]
-    ]
+    loaded_messages = [AIService._deserialize_message(m) for m in loaded["messages"]]
 
     # Verify tool call
     assert loaded_messages[1].tool_calls[0].tool_name == "get_weather"
@@ -111,9 +106,7 @@ async def test_conversation_with_error_tool_result(
 
     loaded = await sqlite_storage.get("ai_conversations", "test-err")
     assert loaded is not None
-    loaded_messages = [
-        AIService._deserialize_message(m) for m in loaded["messages"]
-    ]
+    loaded_messages = [AIService._deserialize_message(m) for m in loaded["messages"]]
 
     assert loaded_messages[0].tool_results[0].is_error is True
     assert loaded_messages[0].tool_results[0].content == "Connection refused"

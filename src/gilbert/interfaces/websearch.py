@@ -48,12 +48,16 @@ class WebSearchBackend(ABC):
 
     @abstractmethod
     async def search(
-        self, query: str, count: int = 5,
+        self,
+        query: str,
+        count: int = 5,
     ) -> list[WebSearchResult]:
         """Execute a web search and return results."""
 
     async def search_images(
-        self, query: str, count: int = 5,
+        self,
+        query: str,
+        count: int = 5,
     ) -> list[str]:
         """Search for images and return a list of image URLs.
 

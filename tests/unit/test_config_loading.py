@@ -37,11 +37,13 @@ class TestPluginsConfigModel:
         assert cfg.config == {}
 
     def test_from_dict(self) -> None:
-        cfg = PluginsConfig.model_validate({
-            "directories": ["/path/to/plugins"],
-            "sources": [{"source": "./local-plugin", "enabled": True}],
-            "config": {"my-plugin": {"key": "value"}},
-        })
+        cfg = PluginsConfig.model_validate(
+            {
+                "directories": ["/path/to/plugins"],
+                "sources": [{"source": "./local-plugin", "enabled": True}],
+                "config": {"my-plugin": {"key": "value"}},
+            }
+        )
         assert cfg.directories == ["/path/to/plugins"]
         assert len(cfg.sources) == 1
         assert cfg.config == {"my-plugin": {"key": "value"}}
@@ -53,40 +55,56 @@ class TestConfigWithPluginDefaults:
     def test_plugin_defaults_merged(self, tmp_path: Path) -> None:
         # Write a minimal gilbert.yaml
         config_file = tmp_path / "gilbert.yaml"
-        config_file.write_text(yaml.dump({
-            "plugins": {"directories": [], "sources": []},
-        }))
+        config_file.write_text(
+            yaml.dump(
+                {
+                    "plugins": {"directories": [], "sources": []},
+                }
+            )
+        )
 
         with (
             patch("gilbert.config.DEFAULT_CONFIG_PATH", config_file),
             patch("gilbert.config.OVERRIDE_CONFIG_PATH", tmp_path / "nonexistent.yaml"),
             patch("gilbert.config.DATA_DIR", tmp_path / ".gilbert"),
         ):
-            result = load_config(plugin_defaults={
-                "my-plugin": {"interval": 30, "debug": False},
-            })
+            result = load_config(
+                plugin_defaults={
+                    "my-plugin": {"interval": 30, "debug": False},
+                }
+            )
 
         assert result.plugins.config == {"my-plugin": {"interval": 30, "debug": False}}
 
     def test_user_overrides_win_over_plugin_defaults(self, tmp_path: Path) -> None:
         config_file = tmp_path / "gilbert.yaml"
-        config_file.write_text(yaml.dump({
-            "plugins": {"directories": [], "sources": []},
-        }))
+        config_file.write_text(
+            yaml.dump(
+                {
+                    "plugins": {"directories": [], "sources": []},
+                }
+            )
+        )
 
         override_file = tmp_path / "override.yaml"
-        override_file.write_text(yaml.dump({
-            "plugins": {"config": {"my-plugin": {"interval": 60}}},
-        }))
+        override_file.write_text(
+            yaml.dump(
+                {
+                    "plugins": {"config": {"my-plugin": {"interval": 60}}},
+                }
+            )
+        )
 
         with (
             patch("gilbert.config.DEFAULT_CONFIG_PATH", config_file),
             patch("gilbert.config.OVERRIDE_CONFIG_PATH", override_file),
             patch("gilbert.config.DATA_DIR", tmp_path / ".gilbert"),
         ):
-            result = load_config(plugin_defaults={
-                "my-plugin": {"interval": 30, "debug": False},
-            })
+            result = load_config(
+                plugin_defaults={
+                    "my-plugin": {"interval": 30, "debug": False},
+                }
+            )
 
         # User override wins for interval, plugin default retained for debug
         assert result.plugins.config["my-plugin"]["interval"] == 60
@@ -94,11 +112,15 @@ class TestConfigWithPluginDefaults:
 
     def test_legacy_list_format_migrated(self, tmp_path: Path) -> None:
         config_file = tmp_path / "gilbert.yaml"
-        config_file.write_text(yaml.dump({
-            "plugins": [
-                {"source": "./some-plugin", "enabled": True},
-            ],
-        }))
+        config_file.write_text(
+            yaml.dump(
+                {
+                    "plugins": [
+                        {"source": "./some-plugin", "enabled": True},
+                    ],
+                }
+            )
+        )
 
         with (
             patch("gilbert.config.DEFAULT_CONFIG_PATH", config_file),
@@ -112,9 +134,13 @@ class TestConfigWithPluginDefaults:
 
     def test_no_plugin_defaults(self, tmp_path: Path) -> None:
         config_file = tmp_path / "gilbert.yaml"
-        config_file.write_text(yaml.dump({
-            "plugins": {"directories": ["/some/dir"]},
-        }))
+        config_file.write_text(
+            yaml.dump(
+                {
+                    "plugins": {"directories": ["/some/dir"]},
+                }
+            )
+        )
 
         with (
             patch("gilbert.config.DEFAULT_CONFIG_PATH", config_file),

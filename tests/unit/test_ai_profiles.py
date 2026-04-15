@@ -110,7 +110,10 @@ class StubToolProvider(Service):
     """Tool provider with configurable tools."""
 
     def __init__(
-        self, name: str, tools: list[ToolDefinition], results: dict[str, str] | None = None,
+        self,
+        name: str,
+        tools: list[ToolDefinition],
+        results: dict[str, str] | None = None,
     ) -> None:
         self._name = name
         self._tools = tools
@@ -134,11 +137,15 @@ class StubToolProvider(Service):
 
 # --- Test tools ---
 
-TOOL_PUBLIC = ToolDefinition(name="public_tool", description="Everyone can use", required_role="everyone")
+TOOL_PUBLIC = ToolDefinition(
+    name="public_tool", description="Everyone can use", required_role="everyone"
+)
 TOOL_USER = ToolDefinition(name="user_tool", description="Users only", required_role="user")
 TOOL_ADMIN = ToolDefinition(name="admin_tool", description="Admins only", required_role="admin")
 TOOL_SALES = ToolDefinition(name="sales_lead", description="Sales lead tool", required_role="user")
-TOOL_SEARCH = ToolDefinition(name="search_music", description="Search music", required_role="everyone")
+TOOL_SEARCH = ToolDefinition(
+    name="search_music", description="Search music", required_role="everyone"
+)
 
 ALL_TOOLS = [TOOL_PUBLIC, TOOL_USER, TOOL_ADMIN, TOOL_SALES, TOOL_SEARCH]
 
@@ -159,20 +166,24 @@ def stub_backend() -> StubAIBackend:
 @pytest.fixture
 def tool_provider() -> StubToolProvider:
     return StubToolProvider(
-        "test_tools", ALL_TOOLS,
+        "test_tools",
+        ALL_TOOLS,
         results={t.name: json.dumps({"ok": True}) for t in ALL_TOOLS},
     )
 
 
 @pytest.fixture
 async def resolver(
-    stub_storage: StubStorage, stub_backend: StubAIBackend, tool_provider: StubToolProvider,
+    stub_storage: StubStorage,
+    stub_backend: StubAIBackend,
+    tool_provider: StubToolProvider,
 ) -> ServiceResolver:
     storage_svc = StorageService(stub_storage)
     acl_svc = AccessControlService()
 
     # Persona stub
     from unittest.mock import MagicMock
+
     persona_svc = MagicMock()
     persona_svc.persona = "Test persona"
     persona_svc.is_customized = True
@@ -217,7 +228,9 @@ async def acl_svc(resolver: ServiceResolver) -> AccessControlService:
 
 @pytest.fixture
 async def ai_svc(
-    stub_backend: StubAIBackend, resolver: ServiceResolver, acl_svc: AccessControlService,
+    stub_backend: StubAIBackend,
+    resolver: ServiceResolver,
+    acl_svc: AccessControlService,
 ) -> AIService:
     """Started AI service with profiles loaded."""
     svc = AIService()
@@ -232,14 +245,23 @@ async def ai_svc(
 
 # --- User contexts ---
 
+
 def _admin() -> UserContext:
-    return UserContext(user_id="admin1", email="a@test.com", display_name="Admin", roles=frozenset({"admin"}))
+    return UserContext(
+        user_id="admin1", email="a@test.com", display_name="Admin", roles=frozenset({"admin"})
+    )
+
 
 def _user() -> UserContext:
-    return UserContext(user_id="user1", email="u@test.com", display_name="User", roles=frozenset({"user"}))
+    return UserContext(
+        user_id="user1", email="u@test.com", display_name="User", roles=frozenset({"user"})
+    )
+
 
 def _everyone() -> UserContext:
-    return UserContext(user_id="guest1", email="g@test.com", display_name="Guest", roles=frozenset({"everyone"}))
+    return UserContext(
+        user_id="guest1", email="g@test.com", display_name="Guest", roles=frozenset({"everyone"})
+    )
 
 
 # =============================================================================
@@ -287,14 +309,18 @@ class TestProfileResolution:
 
 class TestProfileCRUD:
     async def test_set_profile_creates(self, ai_svc: AIService) -> None:
-        p = AIContextProfile(name="custom", description="Custom", tool_mode="include", tools=["user_tool"])
+        p = AIContextProfile(
+            name="custom", description="Custom", tool_mode="include", tools=["user_tool"]
+        )
         await ai_svc.set_profile(p)
         assert "custom" in {pr.name for pr in ai_svc.list_profiles()}
 
     async def test_set_profile_updates(self, ai_svc: AIService) -> None:
         p = AIContextProfile(name="custom", description="v1", tool_mode="all")
         await ai_svc.set_profile(p)
-        p2 = AIContextProfile(name="custom", description="v2", tool_mode="exclude", tools=["admin_tool"])
+        p2 = AIContextProfile(
+            name="custom", description="v2", tool_mode="exclude", tools=["admin_tool"]
+        )
         await ai_svc.set_profile(p2)
         found = [pr for pr in ai_svc.list_profiles() if pr.name == "custom"]
         assert len(found) == 1
@@ -351,7 +377,9 @@ class TestToolModeFiltering:
         assert len(tools) == len(ALL_TOOLS)
 
     async def test_include_mode_only_listed(self, ai_svc: AIService) -> None:
-        profile = AIContextProfile(name="test", tool_mode="include", tools=["user_tool", "public_tool"])
+        profile = AIContextProfile(
+            name="test", tool_mode="include", tools=["user_tool", "public_tool"]
+        )
         tools = ai_svc._discover_tools(user_ctx=_admin(), profile=profile)
         assert set(tools.keys()) == {"user_tool", "public_tool"}
 
@@ -361,7 +389,9 @@ class TestToolModeFiltering:
         assert len(tools) == 0
 
     async def test_exclude_mode_removes_listed(self, ai_svc: AIService) -> None:
-        profile = AIContextProfile(name="test", tool_mode="exclude", tools=["admin_tool", "sales_lead"])
+        profile = AIContextProfile(
+            name="test", tool_mode="exclude", tools=["admin_tool", "sales_lead"]
+        )
         tools = ai_svc._discover_tools(user_ctx=_admin(), profile=profile)
         assert "admin_tool" not in tools
         assert "sales_lead" not in tools
@@ -421,7 +451,8 @@ class TestToolRolesOverrides:
     async def test_tool_roles_lowers_requirement(self, ai_svc: AIService) -> None:
         """Profile can lower a tool's role requirement for its context."""
         profile = AIContextProfile(
-            name="test", tool_mode="all",
+            name="test",
+            tool_mode="all",
             tool_roles={"admin_tool": "everyone"},
         )
         tools = ai_svc._discover_tools(user_ctx=_everyone(), profile=profile)
@@ -430,7 +461,8 @@ class TestToolRolesOverrides:
     async def test_tool_roles_raises_requirement(self, ai_svc: AIService) -> None:
         """Profile can raise a tool's role requirement for its context."""
         profile = AIContextProfile(
-            name="test", tool_mode="all",
+            name="test",
+            tool_mode="all",
             tool_roles={"public_tool": "admin"},
         )
         tools = ai_svc._discover_tools(user_ctx=_user(), profile=profile)
@@ -438,7 +470,8 @@ class TestToolRolesOverrides:
 
     async def test_tool_roles_only_affects_specified_tools(self, ai_svc: AIService) -> None:
         profile = AIContextProfile(
-            name="test", tool_mode="all",
+            name="test",
+            tool_mode="all",
             tool_roles={"admin_tool": "everyone"},
         )
         tools = ai_svc._discover_tools(user_ctx=_everyone(), profile=profile)
@@ -455,7 +488,8 @@ class TestToolRolesOverrides:
 
 class TestDefenseInDepth:
     async def test_execution_recheck_blocks_unauthorized(
-        self, ai_svc: AIService,
+        self,
+        ai_svc: AIService,
     ) -> None:
         """If RBAC would block the tool, execution returns permission denied."""
         # Build tools dict with an admin tool
@@ -465,33 +499,44 @@ class TestDefenseInDepth:
         tool_calls = [ToolCall(tool_call_id="tc1", tool_name="admin_tool", arguments={})]
 
         results, _ui = await ai_svc._execute_tool_calls(
-            tool_calls, tools_by_name, user_ctx=_user(), profile=None,
+            tool_calls,
+            tools_by_name,
+            user_ctx=_user(),
+            profile=None,
         )
         assert len(results) == 1
         assert results[0].is_error
         assert "Permission denied" in results[0].content
 
     async def test_execution_recheck_allows_with_profile_role_override(
-        self, ai_svc: AIService, tool_provider: StubToolProvider,
+        self,
+        ai_svc: AIService,
+        tool_provider: StubToolProvider,
     ) -> None:
         """Profile tool_roles override should apply in defense-in-depth too."""
         tools_by_name: dict[str, tuple[Any, ToolDefinition]] = {
             "admin_tool": (tool_provider, TOOL_ADMIN),
         }
         profile = AIContextProfile(
-            name="test", tool_mode="all",
+            name="test",
+            tool_mode="all",
             tool_roles={"admin_tool": "everyone"},
         )
         tool_calls = [ToolCall(tool_call_id="tc1", tool_name="admin_tool", arguments={})]
 
         results, _ui = await ai_svc._execute_tool_calls(
-            tool_calls, tools_by_name, user_ctx=_everyone(), profile=profile,
+            tool_calls,
+            tools_by_name,
+            user_ctx=_everyone(),
+            profile=profile,
         )
         assert len(results) == 1
         assert not results[0].is_error
 
     async def test_system_user_bypasses_execution_recheck(
-        self, ai_svc: AIService, tool_provider: StubToolProvider,
+        self,
+        ai_svc: AIService,
+        tool_provider: StubToolProvider,
     ) -> None:
         tools_by_name: dict[str, tuple[Any, ToolDefinition]] = {
             "admin_tool": (tool_provider, TOOL_ADMIN),
@@ -499,7 +544,10 @@ class TestDefenseInDepth:
         tool_calls = [ToolCall(tool_call_id="tc1", tool_name="admin_tool", arguments={})]
 
         results, _ui = await ai_svc._execute_tool_calls(
-            tool_calls, tools_by_name, user_ctx=UserContext.SYSTEM, profile=None,
+            tool_calls,
+            tools_by_name,
+            user_ctx=UserContext.SYSTEM,
+            profile=None,
         )
         assert len(results) == 1
         assert not results[0].is_error
@@ -519,19 +567,27 @@ class TestDefenseInDepth:
 
 class TestChatWithProfile:
     async def test_chat_with_include_profile(
-        self, ai_svc: AIService, stub_backend: StubAIBackend,
+        self,
+        ai_svc: AIService,
+        stub_backend: StubAIBackend,
     ) -> None:
         """Tool calls should only see tools in the profile."""
         # Set up a profile that only includes sales_lead
-        await ai_svc.set_profile(AIContextProfile(
-            name="sales_only", tool_mode="include", tools=["sales_lead"],
-        ))
+        await ai_svc.set_profile(
+            AIContextProfile(
+                name="sales_only",
+                tool_mode="include",
+                tools=["sales_lead"],
+            )
+        )
         await ai_svc.set_assignment("test_call", "sales_only")
 
-        stub_backend.queue_response(AIResponse(
-            message=Message(role=MessageRole.ASSISTANT, content="done"),
-            model="stub",
-        ))
+        stub_backend.queue_response(
+            AIResponse(
+                message=Message(role=MessageRole.ASSISTANT, content="done"),
+                model="stub",
+            )
+        )
 
         await ai_svc.chat("test", ai_call="test_call", user_ctx=UserContext.SYSTEM)
 
@@ -541,13 +597,17 @@ class TestChatWithProfile:
         assert tool_names == {"sales_lead"}
 
     async def test_chat_with_text_only_profile(
-        self, ai_svc: AIService, stub_backend: StubAIBackend,
+        self,
+        ai_svc: AIService,
+        stub_backend: StubAIBackend,
     ) -> None:
         """text_only profile should pass no tools to the AI."""
-        stub_backend.queue_response(AIResponse(
-            message=Message(role=MessageRole.ASSISTANT, content="hello"),
-            model="stub",
-        ))
+        stub_backend.queue_response(
+            AIResponse(
+                message=Message(role=MessageRole.ASSISTANT, content="hello"),
+                model="stub",
+            )
+        )
 
         await ai_svc.chat("test", ai_call="greeting", user_ctx=UserContext.SYSTEM)
 
@@ -555,13 +615,17 @@ class TestChatWithProfile:
         assert stub_backend.requests[0].tools == []
 
     async def test_chat_with_no_ai_call_gets_all_tools(
-        self, ai_svc: AIService, stub_backend: StubAIBackend,
+        self,
+        ai_svc: AIService,
+        stub_backend: StubAIBackend,
     ) -> None:
         """No ai_call means no profile filtering — all tools available."""
-        stub_backend.queue_response(AIResponse(
-            message=Message(role=MessageRole.ASSISTANT, content="ok"),
-            model="stub",
-        ))
+        stub_backend.queue_response(
+            AIResponse(
+                message=Message(role=MessageRole.ASSISTANT, content="ok"),
+                model="stub",
+            )
+        )
 
         await ai_svc.chat("test", ai_call=None, user_ctx=UserContext.SYSTEM)
 
@@ -570,20 +634,28 @@ class TestChatWithProfile:
         assert tool_names == {t.name for t in ALL_TOOLS}
 
     async def test_chat_exclude_profile_hides_tools(
-        self, ai_svc: AIService, stub_backend: StubAIBackend,
+        self,
+        ai_svc: AIService,
+        stub_backend: StubAIBackend,
     ) -> None:
         """Exclude profile hides listed tools."""
         # Create a custom exclude profile and assign it
-        await ai_svc.set_profile(AIContextProfile(
-            name="exclude_test", description="Excludes user_tool",
-            tool_mode="exclude", tools=["user_tool"],
-        ))
+        await ai_svc.set_profile(
+            AIContextProfile(
+                name="exclude_test",
+                description="Excludes user_tool",
+                tool_mode="exclude",
+                tools=["user_tool"],
+            )
+        )
         await ai_svc.set_assignment("exclude_call", "exclude_test")
 
-        stub_backend.queue_response(AIResponse(
-            message=Message(role=MessageRole.ASSISTANT, content="ok"),
-            model="stub",
-        ))
+        stub_backend.queue_response(
+            AIResponse(
+                message=Message(role=MessageRole.ASSISTANT, content="ok"),
+                model="stub",
+            )
+        )
 
         await ai_svc.chat("test", ai_call="exclude_call", user_ctx=_admin())
 
@@ -612,20 +684,25 @@ class TestDateTimeContext:
         assert any(d in result for d in days)
 
     async def test_default_prompt_includes_date(
-        self, ai_svc: AIService,
+        self,
+        ai_svc: AIService,
     ) -> None:
         """_build_system_prompt should start with the date context."""
         prompt = await ai_svc._build_system_prompt()
         assert prompt.startswith("Current date and time:")
 
     async def test_custom_prompt_includes_date(
-        self, ai_svc: AIService, stub_backend: StubAIBackend,
+        self,
+        ai_svc: AIService,
+        stub_backend: StubAIBackend,
     ) -> None:
         """When a custom system_prompt is provided, date context is prepended."""
-        stub_backend.queue_response(AIResponse(
-            message=Message(role=MessageRole.ASSISTANT, content="ok"),
-            model="stub",
-        ))
+        stub_backend.queue_response(
+            AIResponse(
+                message=Message(role=MessageRole.ASSISTANT, content="ok"),
+                model="stub",
+            )
+        )
 
         await ai_svc.chat(
             "test",
@@ -663,16 +740,19 @@ class TestServiceInfoAiCalls:
 
     def test_greeting_service_declares_ai_calls(self) -> None:
         from gilbert.core.services.greeting import GreetingService
+
         svc = GreetingService()
         assert "greeting" in svc.service_info().ai_calls
 
     def test_roast_service_declares_ai_calls(self) -> None:
         from gilbert.core.services.roast import RoastService
+
         svc = RoastService()
         assert "roast" in svc.service_info().ai_calls
 
     def test_inbox_ai_chat_declares_ai_calls(self) -> None:
         from gilbert.core.services.inbox_ai_chat import InboxAIChatService
+
         svc = InboxAIChatService()
         assert "inbox_ai_chat" in svc.service_info().ai_calls
 
@@ -692,12 +772,15 @@ class TestProfileTools:
         assert "default" in names
 
     async def test_set_profile_tool(self, ai_svc: AIService) -> None:
-        result = await ai_svc.execute_tool("set_ai_profile", {
-            "name": "new_profile",
-            "description": "Test",
-            "tool_mode": "include",
-            "tools": ["user_tool"],
-        })
+        result = await ai_svc.execute_tool(
+            "set_ai_profile",
+            {
+                "name": "new_profile",
+                "description": "Test",
+                "tool_mode": "include",
+                "tools": ["user_tool"],
+            },
+        )
         data = json.loads(result)
         assert data["status"] == "saved"
         assert "new_profile" in {p.name for p in ai_svc.list_profiles()}
@@ -714,10 +797,13 @@ class TestProfileTools:
         assert "error" in data
 
     async def test_assign_profile_tool(self, ai_svc: AIService) -> None:
-        result = await ai_svc.execute_tool("assign_ai_profile", {
-            "call_name": "test_call",
-            "profile": "text_only",
-        })
+        result = await ai_svc.execute_tool(
+            "assign_ai_profile",
+            {
+                "call_name": "test_call",
+                "profile": "text_only",
+            },
+        )
         data = json.loads(result)
         assert data["status"] == "assigned"
         assert ai_svc.list_assignments()["test_call"] == "text_only"

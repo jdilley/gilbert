@@ -104,7 +104,10 @@ class _RemoteMCPBackend(MCPBackend):
         await self.connect_with_auth(record, auth=None)
 
     async def connect_with_auth(
-        self, record: MCPServerRecord, *, auth: httpx.Auth | None,
+        self,
+        record: MCPServerRecord,
+        *,
+        auth: httpx.Auth | None,
     ) -> None:
         """Connect with an optional ``httpx.Auth`` override.
 
@@ -219,11 +222,15 @@ class _RemoteMCPBackend(MCPBackend):
         return [_translate_prompt_spec(p) for p in result.prompts]
 
     async def get_prompt(
-        self, name: str, arguments: dict[str, str],
+        self,
+        name: str,
+        arguments: dict[str, str],
     ) -> MCPPromptResult:
         result = await self._submit(
             _PendingRequest(
-                kind="get_prompt", name=name, arguments=dict(arguments),
+                kind="get_prompt",
+                name=name,
+                arguments=dict(arguments),
             ),
         )
         return _translate_prompt_result(result)
@@ -280,8 +287,7 @@ class _RemoteMCPBackend(MCPBackend):
                 self._fail_pending(exc)
                 return
             err = ConnectionError(
-                f"failed to connect to {record.url}: "
-                f"{type(exc).__name__}: {exc}".strip(": "),
+                f"failed to connect to {record.url}: {type(exc).__name__}: {exc}".strip(": "),
             )
             err.__cause__ = exc if isinstance(exc, Exception) else None
             self._connect_error = err
@@ -341,7 +347,8 @@ class _RemoteMCPBackend(MCPBackend):
                         result = await session.list_tools()
                     elif req.kind == "call_tool":
                         result = await session.call_tool(
-                            req.name, req.arguments or {},
+                            req.name,
+                            req.arguments or {},
                         )
                     elif req.kind == "list_resources":
                         result = await session.list_resources()
@@ -351,7 +358,8 @@ class _RemoteMCPBackend(MCPBackend):
                         result = await session.list_prompts()
                     elif req.kind == "get_prompt":
                         result = await session.get_prompt(
-                            req.name, req.arguments or None,
+                            req.name,
+                            req.arguments or None,
                         )
                     else:  # pragma: no cover
                         raise ValueError(f"unknown request kind: {req.kind}")
@@ -386,7 +394,9 @@ class _RemoteMCPBackend(MCPBackend):
     ) -> None:
         if isinstance(message, Exception):
             logger.debug(
-                "MCP transport error for %s: %s", self._server_label(), message,
+                "MCP transport error for %s: %s",
+                self._server_label(),
+                message,
             )
             return
         if isinstance(message, mcp_types.ServerNotification):
@@ -421,7 +431,9 @@ class HttpMCPBackend(_RemoteMCPBackend):
     ) -> Any:
         assert record.url is not None
         return streamablehttp_client(
-            url=record.url, headers=headers, auth=auth,
+            url=record.url,
+            headers=headers,
+            auth=auth,
         )
 
 
@@ -459,8 +471,6 @@ def _as_exception(exc: BaseException) -> Exception:
     if isinstance(exc, Exception):
         return exc
     return RuntimeError(str(exc))
-
-
 
 
 # ── module-level helpers ──────────────────────────────────────────────
@@ -507,7 +517,8 @@ def _translate_prompt_result(result: Any) -> MCPPromptResult:
         role: Any = role_raw if role_raw in ("user", "assistant", "system") else "user"
         content = getattr(m, "content", None)
         block = (
-            _translate_block(content) if content is not None
+            _translate_block(content)
+            if content is not None
             else MCPContentBlock(type="text", text="")
         )
         messages.append(MCPPromptMessage(role=role, content=block))
@@ -527,12 +538,18 @@ def _translate_resource_content(content: Any) -> MCPResourceContent:
     text = getattr(content, "text", None)
     if text is not None:
         return MCPResourceContent(
-            uri=uri, kind="text", mime_type=mime, text=str(text),
+            uri=uri,
+            kind="text",
+            mime_type=mime,
+            text=str(text),
         )
     blob = getattr(content, "blob", None)
     if blob is not None:
         return MCPResourceContent(
-            uri=uri, kind="blob", mime_type=mime, data=str(blob),
+            uri=uri,
+            kind="blob",
+            mime_type=mime,
+            data=str(blob),
         )
     return MCPResourceContent(uri=uri, kind="text", mime_type=mime)
 

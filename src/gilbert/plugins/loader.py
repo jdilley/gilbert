@@ -74,7 +74,9 @@ class PluginLoader:
     """Loads plugins from directories, local paths, or GitHub URLs."""
 
     def __init__(self, cache_dir: str | None = None) -> None:
-        self._cache_dir = Path(cache_dir) if cache_dir else Path(tempfile.gettempdir()) / "gilbert-plugins"
+        self._cache_dir = (
+            Path(cache_dir) if cache_dir else Path(tempfile.gettempdir()) / "gilbert-plugins"
+        )
 
     # --- Directory scanning ---
 
@@ -215,7 +217,8 @@ class PluginLoader:
 
         module_name = f"{pkg_name}.plugin"
         spec = importlib.util.spec_from_file_location(
-            module_name, plugin_file,
+            module_name,
+            plugin_file,
             submodule_search_locations=[],
         )
         if spec is None or spec.loader is None:
@@ -328,7 +331,9 @@ class PluginLoader:
 
         logger.info(
             "Plugin installed: %s v%s -> %s",
-            manifest.name, manifest.version, target,
+            manifest.name,
+            manifest.version,
+            target,
         )
         return InstalledPluginInfo(
             name=manifest.name,
@@ -336,15 +341,18 @@ class PluginLoader:
             description=manifest.description,
             source_url=url,
             install_path=target,
-            manifest=PluginManifest(target, {
-                "name": manifest.name,
-                "version": manifest.version,
-                "description": manifest.description,
-                "provides": manifest.provides,
-                "requires": manifest.requires,
-                "depends_on": manifest.depends_on,
-                "config": manifest.config,
-            }),
+            manifest=PluginManifest(
+                target,
+                {
+                    "name": manifest.name,
+                    "version": manifest.version,
+                    "description": manifest.description,
+                    "provides": manifest.provides,
+                    "requires": manifest.requires,
+                    "depends_on": manifest.depends_on,
+                    "config": manifest.config,
+                },
+            ),
         )
 
     async def uninstall(self, name: str, install_dir: Path) -> None:
@@ -531,8 +539,7 @@ class PluginLoader:
             raise PluginError("plugin.yaml missing required 'name'")
         if not _VALID_NAME_RE.match(name):
             raise PluginError(
-                f"Invalid plugin name {name!r}: must match "
-                "[a-zA-Z][a-zA-Z0-9_-]*",
+                f"Invalid plugin name {name!r}: must match [a-zA-Z][a-zA-Z0-9_-]*",
             )
         if not version or not isinstance(version, str):
             raise PluginError("plugin.yaml missing required 'version'")
@@ -559,7 +566,9 @@ class PluginLoader:
         module_name = f"{pkg_name}.plugin"
         try:
             spec = importlib.util.spec_from_file_location(
-                module_name, plugin_file, submodule_search_locations=[],
+                module_name,
+                plugin_file,
+                submodule_search_locations=[],
             )
             if spec is None or spec.loader is None:
                 raise PluginError(f"Could not load module spec from {plugin_file}")

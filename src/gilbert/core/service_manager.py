@@ -75,9 +75,7 @@ class ServiceManager(ServiceResolver):
 
         total = len(self._started)
         failed = len(self._failed)
-        logger.info(
-            "Service startup complete: %d started, %d failed", total, failed
-        )
+        logger.info("Service startup complete: %d started, %d failed", total, failed)
 
     async def stop_all(self) -> None:
         """Stop all started services in reverse order."""
@@ -153,9 +151,7 @@ class ServiceManager(ServiceResolver):
 
     # --- Hot-swap ---
 
-    async def restart_service(
-        self, name: str, new_instance: Service | None = None
-    ) -> None:
+    async def restart_service(self, name: str, new_instance: Service | None = None) -> None:
         """Restart a service, optionally replacing it with a new instance.
 
         Stops the old service, swaps in the new instance (if given),
@@ -288,13 +284,15 @@ class ServiceManager(ServiceResolver):
         if self._event_bus is None:
             return
         try:
-            await self._event_bus.publish(Event(
-                event_type=event_type,
-                data={
-                    "service": name,
-                    "capabilities": sorted(info.capabilities),
-                },
-                source=name,
-            ))
+            await self._event_bus.publish(
+                Event(
+                    event_type=event_type,
+                    data={
+                        "service": name,
+                        "capabilities": sorted(info.capabilities),
+                    },
+                    source=name,
+                )
+            )
         except Exception:
             logger.debug("Failed to publish service event: %s", event_type)

@@ -17,6 +17,7 @@ from gilbert.interfaces.email import EmailAddress, EmailAttachment
 
 # ── Mailbox model ────────────────────────────────────────────────────
 
+
 @dataclass
 class Mailbox:
     """A configured inbox — one email account, owned by a user.
@@ -91,8 +92,12 @@ class MailboxAccess(StrEnum):
 # helpers intentionally don't import any concrete service so they stay
 # in the interfaces layer.
 
+
 def can_access_mailbox(
-    user_ctx: UserContext, mailbox: Mailbox, *, is_admin: bool = False,
+    user_ctx: UserContext,
+    mailbox: Mailbox,
+    *,
+    is_admin: bool = False,
 ) -> bool:
     """Can this user read/send/reply/queue through this mailbox?
 
@@ -111,7 +116,10 @@ def can_access_mailbox(
 
 
 def can_admin_mailbox(
-    user_ctx: UserContext, mailbox: Mailbox, *, is_admin: bool = False,
+    user_ctx: UserContext,
+    mailbox: Mailbox,
+    *,
+    is_admin: bool = False,
 ) -> bool:
     """Can this user edit mailbox settings, change shares, or delete it?
 
@@ -124,7 +132,10 @@ def can_admin_mailbox(
 
 
 def determine_access(
-    user_ctx: UserContext, mailbox: Mailbox, *, is_admin: bool = False,
+    user_ctx: UserContext,
+    mailbox: Mailbox,
+    *,
+    is_admin: bool = False,
 ) -> MailboxAccess | None:
     """Return how the user has access to this mailbox, or None if none.
 
@@ -144,6 +155,7 @@ def determine_access(
 
 
 # ── Outbox ────────────────────────────────────────────────────────────
+
 
 class OutboxStatus(StrEnum):
     """Lifecycle of a queued outbound message."""
@@ -184,14 +196,16 @@ class OutboxDraft:
             "body_text": self.body_text,
             "cc": (
                 [{"email": a.email, "name": a.name} for a in self.cc]
-                if self.cc is not None else None
+                if self.cc is not None
+                else None
             ),
             "in_reply_to": self.in_reply_to,
             "thread_id": self.thread_id,
             "attach_documents": list(self.attach_documents),
             "reply_to": (
                 {"email": self.reply_to.email, "name": self.reply_to.name}
-                if self.reply_to is not None else None
+                if self.reply_to is not None
+                else None
             ),
             "from_name": self.from_name,
         }
@@ -214,14 +228,12 @@ class OutboxDraft:
             subject=str(data.get("subject", "")),
             body_html=str(data.get("body_html", "")),
             body_text=str(data.get("body_text", "")),
-            cc=(
-                [_addr(a) for a in raw_cc]
-                if isinstance(raw_cc, list) else None
-            ),
+            cc=([_addr(a) for a in raw_cc] if isinstance(raw_cc, list) else None),
             in_reply_to=str(data.get("in_reply_to", "")),
             thread_id=str(data.get("thread_id", "")),
             attach_documents=cast(
-                "list[str]", data.get("attach_documents") or [],
+                "list[str]",
+                data.get("attach_documents") or [],
             ),
             reply_to=_addr(raw_reply_to) if isinstance(raw_reply_to, dict) else None,
             from_name=str(data.get("from_name", "")),
@@ -245,6 +257,7 @@ class OutboxEntry:
 
 
 # ── Provider protocol (what plugins consume) ─────────────────────────
+
 
 @runtime_checkable
 class InboxProvider(Protocol):
@@ -293,7 +306,9 @@ class InboxProvider(Protocol):
         ...
 
     async def get_thread(
-        self, thread_id: str, mailbox_id: str | None = None,
+        self,
+        thread_id: str,
+        mailbox_id: str | None = None,
     ) -> list[dict[str, object]]:
         """Get all messages in a thread, sorted by date ascending."""
         ...
@@ -316,7 +331,8 @@ class InboxProvider(Protocol):
         ...
 
     async def list_accessible_mailboxes(
-        self, user_ctx: UserContext,
+        self,
+        user_ctx: UserContext,
     ) -> list[Mailbox]:
         """Return every mailbox the user can access."""
         ...

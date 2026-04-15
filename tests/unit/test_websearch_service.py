@@ -84,9 +84,11 @@ def resolver() -> MagicMock:
 
 @pytest.fixture
 async def started_service(
-    service: WebSearchService, stub_backend: StubSearchBackend,
+    service: WebSearchService,
+    stub_backend: StubSearchBackend,
 ) -> WebSearchService:
     import httpx
+
     await stub_backend.initialize(service._settings)
     service._http_client = httpx.AsyncClient(timeout=30, follow_redirects=True)
     return service
@@ -104,7 +106,8 @@ class TestServiceLifecycle:
 
     @pytest.mark.asyncio
     async def test_start_initializes_backend(
-        self, started_service: WebSearchService,
+        self,
+        started_service: WebSearchService,
         stub_backend: StubSearchBackend,
     ) -> None:
         assert stub_backend.initialized
@@ -112,11 +115,12 @@ class TestServiceLifecycle:
 
     @pytest.mark.asyncio
     async def test_stop_closes_backend(
-        self, started_service: WebSearchService, stub_backend: StubSearchBackend,
+        self,
+        started_service: WebSearchService,
+        stub_backend: StubSearchBackend,
     ) -> None:
         await started_service.stop()
         assert not stub_backend.initialized
-
 
 
 # --- ToolProvider ---
@@ -138,14 +142,23 @@ class TestToolProvider:
 class TestToolExecution:
     @pytest.mark.asyncio
     async def test_search_returns_results(
-        self, started_service: WebSearchService, stub_backend: StubSearchBackend,
+        self,
+        started_service: WebSearchService,
+        stub_backend: StubSearchBackend,
     ) -> None:
-        stub_backend.set_results([
-            WebSearchResult(title="Result 1", url="https://example.com/1", snippet="First result"),
-            WebSearchResult(title="Result 2", url="https://example.com/2", snippet="Second result"),
-        ])
+        stub_backend.set_results(
+            [
+                WebSearchResult(
+                    title="Result 1", url="https://example.com/1", snippet="First result"
+                ),
+                WebSearchResult(
+                    title="Result 2", url="https://example.com/2", snippet="Second result"
+                ),
+            ]
+        )
         result = await started_service.execute_tool(
-            "web_search", {"query": "test query"},
+            "web_search",
+            {"query": "test query"},
         )
         assert "Result 1" in result
         assert "https://example.com/1" in result
@@ -153,47 +166,64 @@ class TestToolExecution:
 
     @pytest.mark.asyncio
     async def test_search_with_ai_summary(
-        self, started_service: WebSearchService, stub_backend: StubSearchBackend,
+        self,
+        started_service: WebSearchService,
+        stub_backend: StubSearchBackend,
     ) -> None:
-        stub_backend.set_results([
-            WebSearchResult(title="AI Summary", url="", snippet="The answer is 42"),
-            WebSearchResult(title="Source", url="https://example.com", snippet="Details"),
-        ])
+        stub_backend.set_results(
+            [
+                WebSearchResult(title="AI Summary", url="", snippet="The answer is 42"),
+                WebSearchResult(title="Source", url="https://example.com", snippet="Details"),
+            ]
+        )
         result = await started_service.execute_tool(
-            "web_search", {"query": "meaning of life"},
+            "web_search",
+            {"query": "meaning of life"},
         )
         assert "AI Summary" in result
         assert "The answer is 42" in result
 
     @pytest.mark.asyncio
     async def test_search_no_results(
-        self, started_service: WebSearchService, stub_backend: StubSearchBackend,
+        self,
+        started_service: WebSearchService,
+        stub_backend: StubSearchBackend,
     ) -> None:
         stub_backend.set_results([])
         result = await started_service.execute_tool(
-            "web_search", {"query": "obscure query"},
+            "web_search",
+            {"query": "obscure query"},
         )
         assert "No results" in result
 
     @pytest.mark.asyncio
     async def test_search_empty_query(
-        self, started_service: WebSearchService,
+        self,
+        started_service: WebSearchService,
     ) -> None:
         result = await started_service.execute_tool(
-            "web_search", {"query": ""},
+            "web_search",
+            {"query": ""},
         )
         assert "error" in result
 
     @pytest.mark.asyncio
     async def test_search_respects_count(
-        self, started_service: WebSearchService, stub_backend: StubSearchBackend,
+        self,
+        started_service: WebSearchService,
+        stub_backend: StubSearchBackend,
     ) -> None:
-        stub_backend.set_results([
-            WebSearchResult(title=f"R{i}", url=f"https://example.com/{i}", snippet=f"Result {i}")
-            for i in range(10)
-        ])
+        stub_backend.set_results(
+            [
+                WebSearchResult(
+                    title=f"R{i}", url=f"https://example.com/{i}", snippet=f"Result {i}"
+                )
+                for i in range(10)
+            ]
+        )
         result = await started_service.execute_tool(
-            "web_search", {"query": "test", "count": 2},
+            "web_search",
+            {"query": "test", "count": 2},
         )
         assert "R0" in result
         assert "R1" in result
@@ -201,14 +231,21 @@ class TestToolExecution:
 
     @pytest.mark.asyncio
     async def test_count_capped_at_10(
-        self, started_service: WebSearchService, stub_backend: StubSearchBackend,
+        self,
+        started_service: WebSearchService,
+        stub_backend: StubSearchBackend,
     ) -> None:
-        stub_backend.set_results([
-            WebSearchResult(title=f"R{i}", url=f"https://example.com/{i}", snippet=f"Result {i}")
-            for i in range(20)
-        ])
+        stub_backend.set_results(
+            [
+                WebSearchResult(
+                    title=f"R{i}", url=f"https://example.com/{i}", snippet=f"Result {i}"
+                )
+                for i in range(20)
+            ]
+        )
         result = await started_service.execute_tool(
-            "web_search", {"query": "test", "count": 50},
+            "web_search",
+            {"query": "test", "count": 50},
         )
         # Should cap at 10
         assert "R9" in result
@@ -220,14 +257,16 @@ class TestToolExecution:
         svc._backend = ErrorSearchBackend()
         svc._enabled = True
         result = await svc.execute_tool(
-            "web_search", {"query": "test"},
+            "web_search",
+            {"query": "test"},
         )
         assert "error" in result.lower()
         assert "Search failed" in result
 
     @pytest.mark.asyncio
     async def test_unknown_tool(
-        self, started_service: WebSearchService,
+        self,
+        started_service: WebSearchService,
     ) -> None:
         with pytest.raises(KeyError, match="Unknown tool"):
             await started_service.execute_tool("nonexistent", {})
@@ -239,14 +278,19 @@ class TestToolExecution:
 class TestImageSearch:
     @pytest.mark.asyncio
     async def test_image_search_returns_markdown(
-        self, started_service: WebSearchService, stub_backend: StubSearchBackend,
+        self,
+        started_service: WebSearchService,
+        stub_backend: StubSearchBackend,
     ) -> None:
-        stub_backend.set_image_urls([
-            "https://example.com/img1.jpg",
-            "https://example.com/img2.jpg",
-        ])
+        stub_backend.set_image_urls(
+            [
+                "https://example.com/img1.jpg",
+                "https://example.com/img2.jpg",
+            ]
+        )
         result = await started_service.execute_tool(
-            "image_search", {"query": "sunset"},
+            "image_search",
+            {"query": "sunset"},
         )
         assert "![sunset - image 1](https://example.com/img1.jpg)" in result
         assert "![sunset - image 2](https://example.com/img2.jpg)" in result
@@ -254,11 +298,14 @@ class TestImageSearch:
 
     @pytest.mark.asyncio
     async def test_image_search_no_results(
-        self, started_service: WebSearchService, stub_backend: StubSearchBackend,
+        self,
+        started_service: WebSearchService,
+        stub_backend: StubSearchBackend,
     ) -> None:
         stub_backend.set_image_urls([])
         result = await started_service.execute_tool(
-            "image_search", {"query": "nonexistent"},
+            "image_search",
+            {"query": "nonexistent"},
         )
         data = json.loads(result)
         assert data["images"] == []
@@ -266,20 +313,25 @@ class TestImageSearch:
 
     @pytest.mark.asyncio
     async def test_image_search_empty_query(
-        self, started_service: WebSearchService,
+        self,
+        started_service: WebSearchService,
     ) -> None:
         result = await started_service.execute_tool(
-            "image_search", {"query": ""},
+            "image_search",
+            {"query": ""},
         )
         assert "error" in result
 
     @pytest.mark.asyncio
     async def test_image_search_count_capped_at_5(
-        self, started_service: WebSearchService, stub_backend: StubSearchBackend,
+        self,
+        started_service: WebSearchService,
+        stub_backend: StubSearchBackend,
     ) -> None:
         stub_backend.set_image_urls([f"https://example.com/{i}.jpg" for i in range(10)])
         result = await started_service.execute_tool(
-            "image_search", {"query": "test", "count": 20},
+            "image_search",
+            {"query": "test", "count": 20},
         )
         # Should have at most 5 images
         assert "image 5" in result
@@ -292,14 +344,16 @@ class TestImageSearch:
 class TestFetchUrl:
     @pytest.mark.asyncio
     async def test_fetch_empty_url(
-        self, started_service: WebSearchService,
+        self,
+        started_service: WebSearchService,
     ) -> None:
         result = await started_service.execute_tool("fetch_url", {"url": ""})
         assert "error" in result
 
     @pytest.mark.asyncio
     async def test_fetch_html_page(
-        self, started_service: WebSearchService,
+        self,
+        started_service: WebSearchService,
     ) -> None:
         html = (
             "<html><head><title>Test</title></head>"
@@ -319,7 +373,8 @@ class TestFetchUrl:
         started_service._http_client.get = mock_get
 
         result = await started_service.execute_tool(
-            "fetch_url", {"url": "https://example.com"},
+            "fetch_url",
+            {"url": "https://example.com"},
         )
         assert "Hello" in result
         assert "World" in result
@@ -328,7 +383,8 @@ class TestFetchUrl:
 
     @pytest.mark.asyncio
     async def test_fetch_with_links(
-        self, started_service: WebSearchService,
+        self,
+        started_service: WebSearchService,
     ) -> None:
         html = (
             "<html><body>"
@@ -349,7 +405,8 @@ class TestFetchUrl:
         started_service._http_client.get = mock_get
 
         result = await started_service.execute_tool(
-            "fetch_url", {"url": "https://example.com", "include_links": True},
+            "fetch_url",
+            {"url": "https://example.com", "include_links": True},
         )
         assert "Link A" in result
         assert "https://a.com" in result
@@ -357,7 +414,8 @@ class TestFetchUrl:
 
     @pytest.mark.asyncio
     async def test_fetch_plain_text(
-        self, started_service: WebSearchService,
+        self,
+        started_service: WebSearchService,
     ) -> None:
         async def mock_get(url: str, **kwargs: Any) -> MagicMock:
             resp = MagicMock()
@@ -371,13 +429,15 @@ class TestFetchUrl:
         started_service._http_client.get = mock_get
 
         result = await started_service.execute_tool(
-            "fetch_url", {"url": "https://example.com/file.txt"},
+            "fetch_url",
+            {"url": "https://example.com/file.txt"},
         )
         assert "Just plain text content" in result
 
     @pytest.mark.asyncio
     async def test_fetch_unsupported_content_type(
-        self, started_service: WebSearchService,
+        self,
+        started_service: WebSearchService,
     ) -> None:
         async def mock_get(url: str, **kwargs: Any) -> MagicMock:
             resp = MagicMock()
@@ -391,13 +451,15 @@ class TestFetchUrl:
         started_service._http_client.get = mock_get
 
         result = await started_service.execute_tool(
-            "fetch_url", {"url": "https://example.com/file.pdf"},
+            "fetch_url",
+            {"url": "https://example.com/file.pdf"},
         )
         assert "Unsupported content type" in result
 
     @pytest.mark.asyncio
     async def test_fetch_prepends_https(
-        self, started_service: WebSearchService,
+        self,
+        started_service: WebSearchService,
     ) -> None:
         """URLs without scheme should get https:// prepended."""
         call_urls: list[str] = []
@@ -415,7 +477,8 @@ class TestFetchUrl:
         started_service._http_client.get = mock_get
 
         await started_service.execute_tool(
-            "fetch_url", {"url": "example.com"},
+            "fetch_url",
+            {"url": "example.com"},
         )
         assert call_urls[0] == "https://example.com"
 
@@ -426,7 +489,8 @@ class TestFetchUrl:
 class TestFetchUrlRaw:
     @pytest.mark.asyncio
     async def test_fetch_raw_returns_unprocessed(
-        self, started_service: WebSearchService,
+        self,
+        started_service: WebSearchService,
     ) -> None:
         html = "<html><head><title>Test</title></head><body><script>var x=1;</script><p>Hello</p></body></html>"
 
@@ -441,7 +505,8 @@ class TestFetchUrlRaw:
         started_service._http_client.get = mock_get
 
         result = await started_service.execute_tool(
-            "fetch_url_raw", {"url": "https://example.com"},
+            "fetch_url_raw",
+            {"url": "https://example.com"},
         )
         # Raw should include script tags and HTML markup — not stripped
         assert "<script>" in result
@@ -449,7 +514,8 @@ class TestFetchUrlRaw:
 
     @pytest.mark.asyncio
     async def test_fetch_raw_empty_url(
-        self, started_service: WebSearchService,
+        self,
+        started_service: WebSearchService,
     ) -> None:
         result = await started_service.execute_tool("fetch_url_raw", {"url": ""})
         assert "error" in result

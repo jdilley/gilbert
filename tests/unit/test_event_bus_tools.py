@@ -49,11 +49,14 @@ async def test_tool_publish_event(service: EventBusService, bus: InMemoryEventBu
 
     bus.subscribe("user.reminder", handler)
 
-    result = await service.execute_tool("publish_event", {
-        "event_type": "user.reminder",
-        "data": {"message": "Take out the trash"},
-        "source": "ai",
-    })
+    result = await service.execute_tool(
+        "publish_event",
+        {
+            "event_type": "user.reminder",
+            "data": {"message": "Take out the trash"},
+            "source": "ai",
+        },
+    )
     parsed = json.loads(result)
     assert parsed["status"] == "ok"
     assert parsed["event_type"] == "user.reminder"
@@ -64,9 +67,7 @@ async def test_tool_publish_event(service: EventBusService, bus: InMemoryEventBu
     assert received[0].source == "ai"
 
 
-async def test_tool_publish_event_defaults(
-    service: EventBusService, bus: InMemoryEventBus
-) -> None:
+async def test_tool_publish_event_defaults(service: EventBusService, bus: InMemoryEventBus) -> None:
     received: list[Event] = []
 
     async def handler(e: Event) -> None:

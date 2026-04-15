@@ -44,7 +44,9 @@ class TestTranslateBlock:
     def test_resource_block(self) -> None:
         backend = StdioMCPBackend()
         resource = SimpleNamespace(
-            uri="file:///a.txt", text="contents", mimeType="text/plain",
+            uri="file:///a.txt",
+            text="contents",
+            mimeType="text/plain",
         )
         block = SimpleNamespace(type="resource", resource=resource)
         result = backend._translate_block(block)

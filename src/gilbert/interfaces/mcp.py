@@ -301,7 +301,9 @@ class MCPBackend(ABC):
         return []
 
     async def get_prompt(
-        self, name: str, arguments: dict[str, str],
+        self,
+        name: str,
+        arguments: dict[str, str],
     ) -> MCPPromptResult:
         """Render a prompt template with the given argument values."""
         raise NotImplementedError(

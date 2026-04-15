@@ -119,11 +119,13 @@ class SpeakerService(Service):
         from gilbert.interfaces.storage import IndexDefinition
 
         storage = self._get_storage_backend()
-        await storage.ensure_index(IndexDefinition(
-            collection=_ALIAS_COLLECTION,
-            fields=["alias"],
-            unique=True,
-        ))
+        await storage.ensure_index(
+            IndexDefinition(
+                collection=_ALIAS_COLLECTION,
+                fields=["alias"],
+                unique=True,
+            )
+        )
 
         # Populate speaker cache for dynamic choices
         try:
@@ -172,17 +174,21 @@ class SpeakerService(Service):
 
         params = [
             ConfigParam(
-                key="backend", type=ToolParameterType.STRING,
+                key="backend",
+                type=ToolParameterType.STRING,
                 description="Speaker backend type.",
-                default="sonos", restart_required=True,
+                default="sonos",
+                restart_required=True,
                 choices=tuple(SpeakerBackend.registered_backends().keys()),
             ),
             ConfigParam(
-                key="default_announce_volume", type=ToolParameterType.INTEGER,
+                key="default_announce_volume",
+                type=ToolParameterType.INTEGER,
                 description="Default volume level for announcements (0-100). Unset means use current volume.",
             ),
             ConfigParam(
-                key="default_announce_speakers", type=ToolParameterType.ARRAY,
+                key="default_announce_speakers",
+                type=ToolParameterType.ARRAY,
                 description="Default speakers for announcements (empty = all).",
                 default=[],
                 choices_from="speakers",
@@ -196,12 +202,19 @@ class SpeakerService(Service):
             backend_cls = backends.get(self._backend_name)
             backend_params = backend_cls.backend_config_params() if backend_cls else []
         for bp in backend_params:
-            params.append(ConfigParam(
-                key=f"settings.{bp.key}", type=bp.type,
-                description=bp.description, default=bp.default,
-                restart_required=bp.restart_required, sensitive=bp.sensitive,
-                choices=bp.choices, multiline=bp.multiline, backend_param=True,
-            ))
+            params.append(
+                ConfigParam(
+                    key=f"settings.{bp.key}",
+                    type=bp.type,
+                    description=bp.description,
+                    default=bp.default,
+                    restart_required=bp.restart_required,
+                    sensitive=bp.sensitive,
+                    choices=bp.choices,
+                    multiline=bp.multiline,
+                    backend_param=True,
+                )
+            )
         return params
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
@@ -216,7 +229,9 @@ class SpeakerService(Service):
         )
 
     async def invoke_config_action(
-        self, key: str, payload: dict[str, Any],
+        self,
+        key: str,
+        payload: dict[str, Any],
     ) -> ConfigActionResult:
         return await invoke_backend_action(self._backend, key, payload)
 
@@ -233,30 +248,32 @@ class SpeakerService(Service):
         speakers = await backend.list_speakers()
         for s in speakers:
             if s.name.lower() == alias.lower():
-                raise ValueError(
-                    f"Alias '{alias}' collides with existing speaker name '{s.name}'"
-                )
+                raise ValueError(f"Alias '{alias}' collides with existing speaker name '{s.name}'")
 
         # Check alias doesn't collide with another alias
         storage = self._get_storage_backend()
         from gilbert.interfaces.storage import Filter, FilterOp, Query
 
-        existing = await storage.query(Query(
-            collection=_ALIAS_COLLECTION,
-            filters=[Filter(field="alias", op=FilterOp.EQ, value=alias.lower())],
-        ))
+        existing = await storage.query(
+            Query(
+                collection=_ALIAS_COLLECTION,
+                filters=[Filter(field="alias", op=FilterOp.EQ, value=alias.lower())],
+            )
+        )
         if existing:
             existing_id = existing[0].get("speaker_id", "")
             if existing_id != speaker_id:
-                raise ValueError(
-                    f"Alias '{alias}' is already assigned to speaker '{existing_id}'"
-                )
+                raise ValueError(f"Alias '{alias}' is already assigned to speaker '{existing_id}'")
 
-        await storage.put(_ALIAS_COLLECTION, f"{speaker_id}:{alias.lower()}", {
-            "speaker_id": speaker_id,
-            "alias": alias.lower(),
-            "display_alias": alias,
-        })
+        await storage.put(
+            _ALIAS_COLLECTION,
+            f"{speaker_id}:{alias.lower()}",
+            {
+                "speaker_id": speaker_id,
+                "alias": alias.lower(),
+                "display_alias": alias,
+            },
+        )
         logger.info("Alias '%s' assigned to speaker %s", alias, speaker_id)
 
     async def remove_alias(self, alias: str) -> None:
@@ -264,10 +281,12 @@ class SpeakerService(Service):
         storage = self._get_storage_backend()
         from gilbert.interfaces.storage import Filter, FilterOp, Query
 
-        results = await storage.query(Query(
-            collection=_ALIAS_COLLECTION,
-            filters=[Filter(field="alias", op=FilterOp.EQ, value=alias.lower())],
-        ))
+        results = await storage.query(
+            Query(
+                collection=_ALIAS_COLLECTION,
+                filters=[Filter(field="alias", op=FilterOp.EQ, value=alias.lower())],
+            )
+        )
         for r in results:
             await storage.delete(_ALIAS_COLLECTION, r["_id"])
         logger.info("Alias '%s' removed", alias)
@@ -285,10 +304,12 @@ class SpeakerService(Service):
         storage = self._get_storage_backend()
         from gilbert.interfaces.storage import Filter, FilterOp, Query
 
-        results = await storage.query(Query(
-            collection=_ALIAS_COLLECTION,
-            filters=[Filter(field="alias", op=FilterOp.EQ, value=name.lower())],
-        ))
+        results = await storage.query(
+            Query(
+                collection=_ALIAS_COLLECTION,
+                filters=[Filter(field="alias", op=FilterOp.EQ, value=name.lower())],
+            )
+        )
         if results:
             sid = results[0].get("speaker_id")
             return str(sid) if sid is not None else None
@@ -338,7 +359,8 @@ class SpeakerService(Service):
             return "127.0.0.1"
 
     async def _resolve_target_ids(
-        self, speaker_names: list[str] | None,
+        self,
+        speaker_names: list[str] | None,
     ) -> list[str]:
         """Resolve speaker names to IDs with fallback logic.
 
@@ -396,14 +418,16 @@ class SpeakerService(Service):
         target_ids = await self._resolve_target_ids(speaker_names)
         await self.prepare_speakers(target_ids)
 
-        await self._require_backend().play_uri(PlayRequest(
-            uri=uri,
-            speaker_ids=target_ids,
-            volume=volume,
-            title=title,
-            position_seconds=position_seconds,
-            didl_meta=didl_meta,
-        ))
+        await self._require_backend().play_uri(
+            PlayRequest(
+                uri=uri,
+                speaker_ids=target_ids,
+                volume=volume,
+                title=title,
+                position_seconds=position_seconds,
+                didl_meta=didl_meta,
+            )
+        )
 
     async def stop_speakers(
         self,
@@ -540,7 +564,7 @@ class SpeakerService(Service):
             # Find first MP3 frame sync (0xFF 0xFB/0xFA/0xF3/0xF2)
             for i in range(min(len(audio_data) - 1, 4096)):
                 if audio_data[i] == 0xFF and (audio_data[i + 1] & 0xE0) == 0xE0:
-                    header = audio_data[i:i + 4]
+                    header = audio_data[i : i + 4]
                     if len(header) < 4:
                         return 0
                     # MPEG version, layer, bitrate index
@@ -550,8 +574,21 @@ class SpeakerService(Service):
                     # MPEG1 Layer3 bitrate table
                     if version == 3 and layer == 1 and 1 <= br_idx <= 14:
                         bitrates = [
-                            0, 32, 40, 48, 56, 64, 80, 96,
-                            112, 128, 160, 192, 224, 256, 320,
+                            0,
+                            32,
+                            40,
+                            48,
+                            56,
+                            64,
+                            80,
+                            96,
+                            112,
+                            128,
+                            160,
+                            192,
+                            224,
+                            256,
+                            320,
                         ]
                         kbps = bitrates[br_idx]
                         return len(audio_data) / (kbps * 125)
@@ -732,8 +769,7 @@ class SpeakerService(Service):
                 slash_group="speaker",
                 slash_command="announce",
                 slash_help=(
-                    "Speak text on speakers via TTS: "
-                    "/speaker announce \"<text>\" [speakers] [volume]"
+                    'Speak text on speakers via TTS: /speaker announce "<text>" [speakers] [volume]'
                 ),
                 description=(
                     "Announce a message over speakers using text-to-speech. "
@@ -767,46 +803,48 @@ class SpeakerService(Service):
 
         # Add grouping tools if the backend supports it
         if self._backend is not None and self._backend.supports_grouping:
-            tools.extend([
-                ToolDefinition(
-                    name="list_speaker_groups",
-                    slash_group="speaker",
-                    slash_command="groups",
-                    slash_help="List speaker groups: /speaker groups",
-                    description="List current speaker groups.",
-                    required_role="user",
-                ),
-                ToolDefinition(
-                    name="group_speakers",
-                    slash_group="speaker",
-                    slash_command="group",
-                    slash_help="Group speakers for sync playback: /speaker group <s1>,<s2>",
-                    description="Group speakers together for synchronized playback.",
-                    parameters=[
-                        ToolParameter(
-                            name="speakers",
-                            type=ToolParameterType.ARRAY,
-                            description="Speaker names or aliases to group together (at least 2).",
-                        ),
-                    ],
-                    required_role="user",
-                ),
-                ToolDefinition(
-                    name="ungroup_speakers",
-                    slash_group="speaker",
-                    slash_command="ungroup",
-                    slash_help="Remove speakers from groups: /speaker ungroup <s1>,<s2>",
-                    description="Remove speakers from their groups.",
-                    parameters=[
-                        ToolParameter(
-                            name="speakers",
-                            type=ToolParameterType.ARRAY,
-                            description="Speaker names or aliases to ungroup.",
-                        ),
-                    ],
-                    required_role="user",
-                ),
-            ])
+            tools.extend(
+                [
+                    ToolDefinition(
+                        name="list_speaker_groups",
+                        slash_group="speaker",
+                        slash_command="groups",
+                        slash_help="List speaker groups: /speaker groups",
+                        description="List current speaker groups.",
+                        required_role="user",
+                    ),
+                    ToolDefinition(
+                        name="group_speakers",
+                        slash_group="speaker",
+                        slash_command="group",
+                        slash_help="Group speakers for sync playback: /speaker group <s1>,<s2>",
+                        description="Group speakers together for synchronized playback.",
+                        parameters=[
+                            ToolParameter(
+                                name="speakers",
+                                type=ToolParameterType.ARRAY,
+                                description="Speaker names or aliases to group together (at least 2).",
+                            ),
+                        ],
+                        required_role="user",
+                    ),
+                    ToolDefinition(
+                        name="ungroup_speakers",
+                        slash_group="speaker",
+                        slash_command="ungroup",
+                        slash_help="Remove speakers from groups: /speaker ungroup <s1>,<s2>",
+                        description="Remove speakers from their groups.",
+                        parameters=[
+                            ToolParameter(
+                                name="speakers",
+                                type=ToolParameterType.ARRAY,
+                                description="Speaker names or aliases to ungroup.",
+                            ),
+                        ],
+                        required_role="user",
+                    ),
+                ]
+            )
 
         return tools
 
@@ -939,23 +977,27 @@ class SpeakerService(Service):
         except RuntimeError as e:
             return json.dumps({"error": str(e)})
 
-        return json.dumps({
-            "status": "announced",
-            "text": text,
-            "audio_file": file_path,
-        })
+        return json.dumps(
+            {
+                "status": "announced",
+                "text": text,
+                "audio_file": file_path,
+            }
+        )
 
     async def _tool_list_groups(self) -> str:
         groups = await self._require_backend().list_groups()
-        return json.dumps([
-            {
-                "group_id": g.group_id,
-                "name": g.name,
-                "coordinator_id": g.coordinator_id,
-                "member_ids": g.member_ids,
-            }
-            for g in groups
-        ])
+        return json.dumps(
+            [
+                {
+                    "group_id": g.group_id,
+                    "name": g.name,
+                    "coordinator_id": g.coordinator_id,
+                    "member_ids": g.member_ids,
+                }
+                for g in groups
+            ]
+        )
 
     async def _tool_group_speakers(self, arguments: dict[str, Any]) -> str:
         speaker_names: list[str] = arguments["speakers"]
@@ -966,12 +1008,14 @@ class SpeakerService(Service):
         except ValueError as e:
             return json.dumps({"error": str(e)})
 
-        return json.dumps({
-            "status": "grouped",
-            "group_id": group.group_id,
-            "name": group.name,
-            "member_ids": group.member_ids,
-        })
+        return json.dumps(
+            {
+                "status": "grouped",
+                "group_id": group.group_id,
+                "name": group.name,
+                "member_ids": group.member_ids,
+            }
+        )
 
     async def _tool_ungroup_speakers(self, arguments: dict[str, Any]) -> str:
         speaker_names: list[str] = arguments["speakers"]

@@ -148,11 +148,14 @@ async def test_one_shot_timer_fires() -> None:
 
 
 async def test_tool_set_timer(service: SchedulerService) -> None:
-    result = await service.execute_tool("set_timer", {
-        "name": "pizza",
-        "seconds": 300,
-        "message": "Pizza is ready!",
-    })
+    result = await service.execute_tool(
+        "set_timer",
+        {
+            "name": "pizza",
+            "seconds": 300,
+            "message": "Pizza is ready!",
+        },
+    )
     parsed = json.loads(result)
     assert parsed["status"] == "set"
     assert parsed["name"] == "pizza"
@@ -163,22 +166,28 @@ async def test_tool_set_timer(service: SchedulerService) -> None:
 
 
 async def test_tool_set_alarm_interval(service: SchedulerService) -> None:
-    result = await service.execute_tool("set_alarm", {
-        "name": "check-mail",
-        "type": "interval",
-        "interval_seconds": 60,
-    })
+    result = await service.execute_tool(
+        "set_alarm",
+        {
+            "name": "check-mail",
+            "type": "interval",
+            "interval_seconds": 60,
+        },
+    )
     parsed = json.loads(result)
     assert parsed["status"] == "set"
 
 
 async def test_tool_set_alarm_daily(service: SchedulerService) -> None:
-    result = await service.execute_tool("set_alarm", {
-        "name": "standup",
-        "type": "daily",
-        "hour": 9,
-        "minute": 0,
-    })
+    result = await service.execute_tool(
+        "set_alarm",
+        {
+            "name": "standup",
+            "type": "daily",
+            "hour": 9,
+            "minute": 0,
+        },
+    )
     parsed = json.loads(result)
     assert parsed["status"] == "set"
 
@@ -430,9 +439,7 @@ async def test_build_action_mutual_exclusion() -> None:
     svc = SchedulerService()
     # Reach into the builder directly without a resolver — the mutual-
     # exclusion check runs before tool validation, so no resolver needed.
-    action, err = svc._build_action_from_args(
-        {"tool": "x", "ai_prompt": "y"}
-    )
+    action, err = svc._build_action_from_args({"tool": "x", "ai_prompt": "y"})
     assert err is not None
     assert "only one of 'tool', 'ai_prompt', or 'steps'" in err
 
@@ -462,9 +469,7 @@ async def test_build_action_tool_arguments_must_be_dict() -> None:
     svc = SchedulerService()
     fake = _FakeTool()
     svc._resolver = _resolver_with(tools=[fake], acl=_FakeACL())
-    action, err = svc._build_action_from_args(
-        {"tool": "test_tool", "tool_arguments": "not a dict"}
-    )
+    action, err = svc._build_action_from_args({"tool": "test_tool", "tool_arguments": "not a dict"})
     assert err is not None
     assert "tool_arguments" in err
 
@@ -486,9 +491,7 @@ async def test_build_action_tool_ok() -> None:
 @pytest.mark.asyncio
 async def test_build_action_ai_prompt_ok() -> None:
     svc = SchedulerService()
-    action, err = svc._build_action_from_args(
-        {"ai_prompt": "Announce at 6pm"}
-    )
+    action, err = svc._build_action_from_args({"ai_prompt": "Announce at 6pm"})
     assert err is None
     assert action.type == ScheduledActionType.AI_PROMPT
     assert action.ai_prompt == "Announce at 6pm"
@@ -616,9 +619,7 @@ async def test_dispatch_event_action_publishes_event() -> None:
             published.append(event)
 
     svc._event_bus = _Bus()
-    action = ScheduledAction(
-        type=ScheduledActionType.EVENT, message="pizza done"
-    )
+    action = ScheduledAction(type=ScheduledActionType.EVENT, message="pizza done")
     await svc._dispatch_action("pizza-timer", action, owner="u1", event_type="timer.fired")
     assert len(published) == 1
     assert published[0].event_type == "timer.fired"
@@ -634,18 +635,17 @@ async def test_build_action_steps_ok() -> None:
     music = _FakeTool(tool_name="music_play")
     stopper = _FakeTool(tool_name="music_stop")
     announcer = _FakeTool(tool_name="audio_output")
-    svc._resolver = _resolver_with(
-        tools=[music, stopper, announcer], acl=_FakeACL()
-    )
+    svc._resolver = _resolver_with(tools=[music, stopper, announcer], acl=_FakeACL())
 
-    action, err = svc._build_action_from_args({
-        "steps": [
-            {"tool": "music_play", "tool_arguments": {"q": "random"}},
-            {"tool": "music_stop", "tool_arguments": {},
-             "delay_before_seconds": 5},
-            {"tool": "audio_output", "tool_arguments": {"text": "hi"}},
-        ],
-    })
+    action, err = svc._build_action_from_args(
+        {
+            "steps": [
+                {"tool": "music_play", "tool_arguments": {"q": "random"}},
+                {"tool": "music_stop", "tool_arguments": {}, "delay_before_seconds": 5},
+                {"tool": "audio_output", "tool_arguments": {"text": "hi"}},
+            ],
+        }
+    )
     assert err is None
     assert action.type == ScheduledActionType.SEQUENCE
     assert len(action.steps) == 3
@@ -678,9 +678,11 @@ async def test_build_action_steps_rejects_non_list() -> None:
 async def test_build_action_steps_missing_tool_rejected() -> None:
     svc = SchedulerService()
     svc._resolver = _resolver_with(tools=[_FakeTool()], acl=_FakeACL())
-    action, err = svc._build_action_from_args({
-        "steps": [{"tool_arguments": {"x": 1}}],
-    })
+    action, err = svc._build_action_from_args(
+        {
+            "steps": [{"tool_arguments": {"x": 1}}],
+        }
+    )
     assert err is not None
     assert "missing 'tool'" in err
 
@@ -689,9 +691,11 @@ async def test_build_action_steps_missing_tool_rejected() -> None:
 async def test_build_action_steps_unknown_tool_rejected() -> None:
     svc = SchedulerService()
     svc._resolver = _resolver_with(tools=[_FakeTool()], acl=_FakeACL())
-    action, err = svc._build_action_from_args({
-        "steps": [{"tool": "does_not_exist"}],
-    })
+    action, err = svc._build_action_from_args(
+        {
+            "steps": [{"tool": "does_not_exist"}],
+        }
+    )
     assert err is not None
     assert "does_not_exist" in err
     assert "Unknown tool" in err
@@ -705,14 +709,17 @@ async def test_build_action_steps_rbac_enforced_per_step() -> None:
     user_tool = _FakeTool(tool_name="user_tool", required_role="user")
     admin_tool = _FakeTool(tool_name="admin_only", required_role="admin")
     svc._resolver = _resolver_with(
-        tools=[user_tool, admin_tool], acl=_FakeACL(user_level=100),
+        tools=[user_tool, admin_tool],
+        acl=_FakeACL(user_level=100),
     )
-    action, err = svc._build_action_from_args({
-        "steps": [
-            {"tool": "user_tool"},
-            {"tool": "admin_only"},
-        ],
-    })
+    action, err = svc._build_action_from_args(
+        {
+            "steps": [
+                {"tool": "user_tool"},
+                {"tool": "admin_only"},
+            ],
+        }
+    )
     assert err is not None
     assert "admin_only" in err
     assert "permission" in err.lower()
@@ -722,9 +729,11 @@ async def test_build_action_steps_rbac_enforced_per_step() -> None:
 async def test_build_action_steps_invalid_tool_arguments() -> None:
     svc = SchedulerService()
     svc._resolver = _resolver_with(tools=[_FakeTool()], acl=_FakeACL())
-    action, err = svc._build_action_from_args({
-        "steps": [{"tool": "test_tool", "tool_arguments": "not a dict"}],
-    })
+    action, err = svc._build_action_from_args(
+        {
+            "steps": [{"tool": "test_tool", "tool_arguments": "not a dict"}],
+        }
+    )
     assert err is not None
     assert "tool_arguments" in err
 
@@ -733,9 +742,11 @@ async def test_build_action_steps_invalid_tool_arguments() -> None:
 async def test_build_action_steps_invalid_delay_rejected() -> None:
     svc = SchedulerService()
     svc._resolver = _resolver_with(tools=[_FakeTool()], acl=_FakeACL())
-    action, err = svc._build_action_from_args({
-        "steps": [{"tool": "test_tool", "delay_before_seconds": "soon"}],
-    })
+    action, err = svc._build_action_from_args(
+        {
+            "steps": [{"tool": "test_tool", "delay_before_seconds": "soon"}],
+        }
+    )
     assert err is not None
     assert "delay_before_seconds" in err
 
@@ -744,9 +755,11 @@ async def test_build_action_steps_invalid_delay_rejected() -> None:
 async def test_build_action_steps_negative_delay_clamped_to_zero() -> None:
     svc = SchedulerService()
     svc._resolver = _resolver_with(tools=[_FakeTool()], acl=_FakeACL())
-    action, err = svc._build_action_from_args({
-        "steps": [{"tool": "test_tool", "delay_before_seconds": -3}],
-    })
+    action, err = svc._build_action_from_args(
+        {
+            "steps": [{"tool": "test_tool", "delay_before_seconds": -3}],
+        }
+    )
     assert err is None
     assert action.steps[0].delay_before_seconds == 0.0
 
@@ -755,10 +768,12 @@ async def test_build_action_steps_negative_delay_clamped_to_zero() -> None:
 async def test_build_action_steps_mutually_exclusive_with_tool() -> None:
     svc = SchedulerService()
     svc._resolver = _resolver_with(tools=[_FakeTool()], acl=_FakeACL())
-    action, err = svc._build_action_from_args({
-        "tool": "test_tool",
-        "steps": [{"tool": "test_tool"}],
-    })
+    action, err = svc._build_action_from_args(
+        {
+            "tool": "test_tool",
+            "steps": [{"tool": "test_tool"}],
+        }
+    )
     assert err is not None
     assert "only one of" in err
 
@@ -767,10 +782,12 @@ async def test_build_action_steps_mutually_exclusive_with_tool() -> None:
 async def test_build_action_steps_mutually_exclusive_with_ai_prompt() -> None:
     svc = SchedulerService()
     svc._resolver = _resolver_with(tools=[_FakeTool()], acl=_FakeACL())
-    action, err = svc._build_action_from_args({
-        "ai_prompt": "do stuff",
-        "steps": [{"tool": "test_tool"}],
-    })
+    action, err = svc._build_action_from_args(
+        {
+            "ai_prompt": "do stuff",
+            "steps": [{"tool": "test_tool"}],
+        }
+    )
     assert err is not None
     assert "only one of" in err
 
@@ -794,9 +811,7 @@ async def test_dispatch_sequence_runs_steps_in_order() -> None:
             ActionStep(tool="tool_c", tool_arguments={"i": 3}),
         ],
     )
-    await svc._dispatch_action(
-        "seq-test", action, owner="u1", event_type="alarm.fired"
-    )
+    await svc._dispatch_action("seq-test", action, owner="u1", event_type="alarm.fired")
     assert len(tool_a.calls) == 1
     assert tool_a.calls[0]["arguments"] == {"i": 1}
     assert len(tool_b.calls) == 1
@@ -829,13 +844,12 @@ async def test_dispatch_sequence_respects_delays() -> None:
     )
 
     from unittest.mock import patch
+
     with patch(
         "gilbert.core.services.scheduler.asyncio.sleep",
         side_effect=fake_sleep,
     ):
-        await svc._dispatch_action(
-            "delay-test", action, owner="u1", event_type="alarm.fired"
-        )
+        await svc._dispatch_action("delay-test", action, owner="u1", event_type="alarm.fired")
 
     # Only the second step had a delay — only one sleep call with 5s
     assert sleep_calls == [5.0]
@@ -861,9 +875,7 @@ async def test_dispatch_sequence_continues_after_failed_step() -> None:
             ActionStep(tool="good_c"),
         ],
     )
-    await svc._dispatch_action(
-        "resilient", action, owner="u1", event_type="alarm.fired"
-    )
+    await svc._dispatch_action("resilient", action, owner="u1", event_type="alarm.fired")
 
     assert len(good_a.calls) == 1
     assert len(bad.calls) == 1
@@ -883,9 +895,7 @@ async def test_dispatch_sequence_unknown_tool_skipped_not_fatal() -> None:
             ActionStep(tool="good"),
         ],
     )
-    await svc._dispatch_action(
-        "unknown", action, owner="u1", event_type="alarm.fired"
-    )
+    await svc._dispatch_action("unknown", action, owner="u1", event_type="alarm.fired")
     assert len(good.calls) == 1
 
 
@@ -893,12 +903,8 @@ async def test_dispatch_sequence_unknown_tool_skipped_not_fatal() -> None:
 async def test_dispatch_sequence_empty_steps_no_crash() -> None:
     svc = SchedulerService()
     svc._resolver = _resolver_with(tools=[])
-    action = ScheduledAction(
-        type=ScheduledActionType.SEQUENCE, steps=[]
-    )
-    await svc._dispatch_action(
-        "empty", action, owner="u1", event_type="alarm.fired"
-    )
+    action = ScheduledAction(type=ScheduledActionType.SEQUENCE, steps=[])
+    await svc._dispatch_action("empty", action, owner="u1", event_type="alarm.fired")
 
 
 @pytest.mark.asyncio
@@ -914,9 +920,7 @@ async def test_dispatch_sequence_step_with_empty_tool_skipped() -> None:
             ActionStep(tool="good"),
         ],
     )
-    await svc._dispatch_action(
-        "malformed", action, owner="u1", event_type="alarm.fired"
-    )
+    await svc._dispatch_action("malformed", action, owner="u1", event_type="alarm.fired")
     assert len(good.calls) == 1
 
 
@@ -928,9 +932,7 @@ async def test_set_alarm_with_steps_end_to_end() -> None:
     music = _FakeTool(tool_name="music_play")
     stopper = _FakeTool(tool_name="music_stop")
     announcer = _FakeTool(tool_name="audio_output")
-    svc._resolver = _resolver_with(
-        tools=[music, stopper, announcer], acl=_FakeACL()
-    )
+    svc._resolver = _resolver_with(tools=[music, stopper, announcer], acl=_FakeACL())
 
     result = await svc.execute_tool(
         "set_alarm",
@@ -939,16 +941,19 @@ async def test_set_alarm_with_steps_end_to_end() -> None:
             "type": "interval",
             "interval_seconds": 99999,
             "steps": [
-                {"tool": "music_play",
-                 "tool_arguments": {"query": "random", "speakers": ["Bedroom"]}},
-                {"tool": "music_stop",
-                 "tool_arguments": {"speakers": ["Bedroom"]}},
-                {"tool": "audio_output",
-                 "tool_arguments": {
-                     "text": "wake up",
-                     "destination": "speakers",
-                     "speaker_names": ["Bedroom"],
-                 }},
+                {
+                    "tool": "music_play",
+                    "tool_arguments": {"query": "random", "speakers": ["Bedroom"]},
+                },
+                {"tool": "music_stop", "tool_arguments": {"speakers": ["Bedroom"]}},
+                {
+                    "tool": "audio_output",
+                    "tool_arguments": {
+                        "text": "wake up",
+                        "destination": "speakers",
+                        "speaker_names": ["Bedroom"],
+                    },
+                },
             ],
         },
     )
@@ -1102,9 +1107,7 @@ async def test_set_alarm_with_tool_action_registers_and_persists() -> None:
         def create_namespaced(self, ns: str) -> Any:
             return fake_storage
 
-    svc._resolver = _resolver_with(
-        tools=[fake_tool], acl=_FakeACL(), storage=_FakeStorageSvc()
-    )
+    svc._resolver = _resolver_with(tools=[fake_tool], acl=_FakeACL(), storage=_FakeStorageSvc())
     svc._storage = fake_storage  # type: ignore[assignment]
 
     result = await svc.execute_tool(
@@ -1281,16 +1284,12 @@ async def test_persistence_drops_expired_one_shot_timers() -> None:
 @pytest.mark.asyncio
 async def test_on_config_changed_updates_rate_limiter() -> None:
     svc = SchedulerService()
-    await svc.on_config_changed(
-        {"alarm_ai_max_calls": 7, "alarm_ai_window_seconds": 123}
-    )
+    await svc.on_config_changed({"alarm_ai_max_calls": 7, "alarm_ai_window_seconds": 123})
     status = svc._ai_rate_limiter.status()
     assert status["max_calls"] == 7
     assert status["window_seconds"] == 123
     # Disable via zero
-    await svc.on_config_changed(
-        {"alarm_ai_max_calls": 0, "alarm_ai_window_seconds": 60}
-    )
+    await svc.on_config_changed({"alarm_ai_max_calls": 0, "alarm_ai_window_seconds": 60})
     assert svc._ai_rate_limiter.try_acquire() is False
 
 
@@ -1343,12 +1342,8 @@ async def test_ws_get_ws_handlers_returns_expected_keys() -> None:
 
 @pytest.mark.asyncio
 async def test_ws_job_list_returns_serialized_jobs(service: SchedulerService) -> None:
-    service.add_job(
-        "sys-poll", Schedule.every(5), AsyncMock(), system=True
-    )
-    service.add_job(
-        "user-beep", Schedule.every(10), AsyncMock(), system=False, owner="alice"
-    )
+    service.add_job("sys-poll", Schedule.every(5), AsyncMock(), system=True)
+    service.add_job("user-beep", Schedule.every(10), AsyncMock(), system=False, owner="alice")
     conn = _FakeConn()
     response = await service._ws_job_list(conn, {"id": "req-1"})
     assert response is not None
@@ -1431,9 +1426,7 @@ async def test_ws_job_get_missing_name_returns_400(service: SchedulerService) ->
 
 @pytest.mark.asyncio
 async def test_ws_job_enable_disable_toggle(service: SchedulerService) -> None:
-    service.add_job(
-        "toggleable", Schedule.every(5), AsyncMock(), system=False, owner="alice"
-    )
+    service.add_job("toggleable", Schedule.every(5), AsyncMock(), system=False, owner="alice")
     conn = _FakeConn()
 
     # Disable
@@ -1460,9 +1453,7 @@ async def test_ws_job_enable_unknown_returns_404(service: SchedulerService) -> N
 
 @pytest.mark.asyncio
 async def test_ws_job_remove_admin_can_remove_any(service: SchedulerService) -> None:
-    service.add_job(
-        "others-job", Schedule.every(5), AsyncMock(), system=False, owner="bob"
-    )
+    service.add_job("others-job", Schedule.every(5), AsyncMock(), system=False, owner="bob")
     # Admin connection
     admin_conn = _FakeConn(user_id="alice", roles=frozenset({"admin"}), user_level=0)
     response = await service._ws_job_remove(admin_conn, {"id": "r", "name": "others-job"})
@@ -1473,9 +1464,7 @@ async def test_ws_job_remove_admin_can_remove_any(service: SchedulerService) -> 
 
 @pytest.mark.asyncio
 async def test_ws_job_remove_user_blocked_from_others(service: SchedulerService) -> None:
-    service.add_job(
-        "bobs-job", Schedule.every(5), AsyncMock(), system=False, owner="bob"
-    )
+    service.add_job("bobs-job", Schedule.every(5), AsyncMock(), system=False, owner="bob")
     user_conn = _FakeConn(user_id="alice", roles=frozenset({"user"}), user_level=100)
     response = await service._ws_job_remove(user_conn, {"id": "r", "name": "bobs-job"})
     assert response is not None
@@ -1487,9 +1476,7 @@ async def test_ws_job_remove_user_blocked_from_others(service: SchedulerService)
 
 @pytest.mark.asyncio
 async def test_ws_job_remove_user_can_remove_own(service: SchedulerService) -> None:
-    service.add_job(
-        "alices-job", Schedule.every(5), AsyncMock(), system=False, owner="alice"
-    )
+    service.add_job("alices-job", Schedule.every(5), AsyncMock(), system=False, owner="alice")
     user_conn = _FakeConn(user_id="alice", roles=frozenset({"user"}), user_level=100)
     response = await service._ws_job_remove(user_conn, {"id": "r", "name": "alices-job"})
     assert response is not None

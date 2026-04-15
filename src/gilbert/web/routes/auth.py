@@ -112,10 +112,7 @@ async def external_login_callback(provider_type: str, request: Request) -> Any:
     # Decode the local origin from ``state`` — set by ``/start``.
     raw_state = request.query_params.get("state", "")
     try:
-        local_origin = (
-            base64.urlsafe_b64decode(raw_state.encode()).decode()
-            if raw_state else ""
-        )
+        local_origin = base64.urlsafe_b64decode(raw_state.encode()).decode() if raw_state else ""
     except Exception:
         local_origin = ""
 
@@ -136,7 +133,8 @@ async def external_login_callback(provider_type: str, request: Request) -> Any:
 
     if user_ctx is None:
         return _login_error_redirect(
-            local_origin, f"{provider_type} authentication failed",
+            local_origin,
+            f"{provider_type} authentication failed",
         )
 
     if local_origin and user_ctx.session_id:
@@ -207,9 +205,7 @@ async def session_handoff(request: Request) -> Any:
     auth_svc = _get_auth_service(request)
     user_ctx = await auth_svc.validate_session(token)
     if user_ctx is None:
-        return RedirectResponse(
-            url="/auth/login?error=Invalid+session", status_code=303
-        )
+        return RedirectResponse(url="/auth/login?error=Invalid+session", status_code=303)
 
     resp = RedirectResponse(url="/", status_code=303)
     resp.set_cookie(
@@ -261,13 +257,15 @@ def _build_auth_response(user_ctx: UserContext, is_form: bool) -> Response:
     if is_form:
         resp = RedirectResponse(url="/", status_code=303)
     else:
-        resp = JSONResponse({
-            "user_id": user_ctx.user_id,
-            "email": user_ctx.email,
-            "display_name": user_ctx.display_name,
-            "roles": sorted(user_ctx.roles),
-            "session_id": user_ctx.session_id,
-        })
+        resp = JSONResponse(
+            {
+                "user_id": user_ctx.user_id,
+                "email": user_ctx.email,
+                "display_name": user_ctx.display_name,
+                "roles": sorted(user_ctx.roles),
+                "session_id": user_ctx.session_id,
+            }
+        )
 
     if user_ctx.session_id:
         resp.set_cookie(

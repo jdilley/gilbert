@@ -126,9 +126,7 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
         should persist the cleared flag plus the newly-registered
         services so the UI stops showing the restart warning.
         """
-        loaded_names = {
-            entry.plugin.metadata().name for entry in gilbert.list_loaded_plugins()
-        }
+        loaded_names = {entry.plugin.metadata().name for entry in gilbert.list_loaded_plugins()}
         for name, record in list(self._records.items()):
             if not record.needs_restart:
                 continue
@@ -142,7 +140,8 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
             await self._persist_record(record)
             logger.info(
                 "Plugin %s finished deferred load (registered: %s)",
-                name, record.registered_services,
+                name,
+                record.registered_services,
             )
 
     async def stop(self) -> None:
@@ -176,7 +175,8 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
             if not install_path.exists():
                 logger.warning(
                     "Registry row references missing install dir, dropping: %s -> %s",
-                    name, install_path,
+                    name,
+                    install_path,
                 )
                 try:
                     await self._storage.delete(_INSTALL_COLLECTION, name)
@@ -240,7 +240,9 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
         Returns the new ``_RuntimeRecord`` on success.
         """
         info: InstalledPluginInfo = await self._loader.install_from_url(
-            source_url, self._install_dir, force=force,
+            source_url,
+            self._install_dir,
+            force=force,
         )
         installed_at = datetime.now(UTC).isoformat()
 
@@ -295,7 +297,8 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
                 except Exception:
                     logger.exception(
                         "Failed to start service %s from plugin %s",
-                        svc_name, info.name,
+                        svc_name,
+                        info.name,
                     )
                     raise
 
@@ -303,11 +306,13 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
             # down on app shutdown alongside boot-loaded plugins.
             from gilbert.core.app import LoadedPlugin
 
-            gilbert.add_loaded_plugin(LoadedPlugin(
-                plugin=plugin,
-                install_path=info.install_path,
-                registered_services=registered,
-            ))
+            gilbert.add_loaded_plugin(
+                LoadedPlugin(
+                    plugin=plugin,
+                    install_path=info.install_path,
+                    registered_services=registered,
+                )
+            )
 
             record = _RuntimeRecord(
                 name=info.name,
@@ -322,7 +327,9 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
             self._records[info.name] = record
             logger.info(
                 "Plugin installed and loaded: %s v%s (services: %s)",
-                info.name, info.version, registered,
+                info.name,
+                info.version,
+                registered,
             )
             return record
 
@@ -375,7 +382,8 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
                 except Exception:
                     logger.exception(
                         "Failed to stop/unregister service %s for plugin %s",
-                        svc_name, name,
+                        svc_name,
+                        name,
                     )
             gilbert.remove_loaded_plugin(name)
         else:
@@ -388,7 +396,8 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
                 except Exception:
                     logger.exception(
                         "Failed to stop/unregister service %s for plugin %s",
-                        svc_name, name,
+                        svc_name,
+                        name,
                     )
 
         await self._delete_record(name)
@@ -417,19 +426,21 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
             meta = entry.plugin.metadata()
             loaded_names.add(meta.name)
             record = self._records.get(meta.name)
-            results.append({
-                "name": meta.name,
-                "version": meta.version,
-                "description": meta.description,
-                "install_path": str(entry.install_path),
-                "source": _bucket_for(entry.install_path, bucket_dirs),
-                "source_url": record.source_url if record else None,
-                "installed_at": record.installed_at if record else None,
-                "registered_services": list(entry.registered_services),
-                "running": True,
-                "uninstallable": meta.name in self._records,
-                "needs_restart": bool(record and record.needs_restart),
-            })
+            results.append(
+                {
+                    "name": meta.name,
+                    "version": meta.version,
+                    "description": meta.description,
+                    "install_path": str(entry.install_path),
+                    "source": _bucket_for(entry.install_path, bucket_dirs),
+                    "source_url": record.source_url if record else None,
+                    "installed_at": record.installed_at if record else None,
+                    "registered_services": list(entry.registered_services),
+                    "running": True,
+                    "uninstallable": meta.name in self._records,
+                    "needs_restart": bool(record and record.needs_restart),
+                }
+            )
 
         # Registry rows whose plugins didn't actually load (e.g. a previous
         # boot-time load failed, or a deferred install waiting for restart).
@@ -437,19 +448,21 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
         for name, record in self._records.items():
             if name in loaded_names:
                 continue
-            results.append({
-                "name": record.name,
-                "version": record.version,
-                "description": record.description,
-                "install_path": str(record.install_path),
-                "source": _bucket_for(record.install_path, bucket_dirs),
-                "source_url": record.source_url,
-                "installed_at": record.installed_at,
-                "registered_services": list(record.registered_services),
-                "running": False,
-                "uninstallable": True,
-                "needs_restart": record.needs_restart,
-            })
+            results.append(
+                {
+                    "name": record.name,
+                    "version": record.version,
+                    "description": record.description,
+                    "install_path": str(record.install_path),
+                    "source": _bucket_for(record.install_path, bucket_dirs),
+                    "source_url": record.source_url,
+                    "installed_at": record.installed_at,
+                    "registered_services": list(record.registered_services),
+                    "running": False,
+                    "uninstallable": True,
+                    "needs_restart": record.needs_restart,
+                }
+            )
 
         results.sort(key=lambda r: r["name"])
         return results
@@ -497,10 +510,7 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
                 name="plugin_install",
                 slash_group="plugin",
                 slash_command="install",
-                slash_help=(
-                    "Install a plugin from a GitHub URL or archive: "
-                    "/plugin install <url>"
-                ),
+                slash_help=("Install a plugin from a GitHub URL or archive: /plugin install <url>"),
                 description=(
                     "Download and install a plugin at runtime from a "
                     "GitHub URL (whole-repo or /tree/<ref>/<subpath>) "
@@ -517,10 +527,7 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
                     ToolParameter(
                         name="force",
                         type=ToolParameterType.BOOLEAN,
-                        description=(
-                            "Reinstall over an existing installation of "
-                            "the same name."
-                        ),
+                        description=("Reinstall over an existing installation of the same name."),
                         required=False,
                     ),
                 ],
@@ -593,28 +600,28 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
                     record = await self.install(gilbert, url, force=force)
                 except PluginError as exc:
                     return json.dumps({"status": "error", "error": str(exc)})
-                return json.dumps({
-                    "status": (
-                        "installed_restart_required"
-                        if record.needs_restart
-                        else "installed"
-                    ),
-                    "name": record.name,
-                    "version": record.version,
-                    "source_url": record.source_url,
-                    "registered_services": record.registered_services,
-                    "needs_restart": record.needs_restart,
-                    "message": (
-                        f"Plugin {record.name} v{record.version} installed. "
-                        "It declares third-party Python dependencies, so a "
-                        "restart is required to finish loading it — run "
-                        "``/plugin restart`` to trigger the supervised "
-                        "restart (``gilbert.sh`` will re-run ``uv sync`` "
-                        "and relaunch automatically)."
-                        if record.needs_restart
-                        else f"Plugin {record.name} v{record.version} installed and loaded."
-                    ),
-                })
+                return json.dumps(
+                    {
+                        "status": (
+                            "installed_restart_required" if record.needs_restart else "installed"
+                        ),
+                        "name": record.name,
+                        "version": record.version,
+                        "source_url": record.source_url,
+                        "registered_services": record.registered_services,
+                        "needs_restart": record.needs_restart,
+                        "message": (
+                            f"Plugin {record.name} v{record.version} installed. "
+                            "It declares third-party Python dependencies, so a "
+                            "restart is required to finish loading it — run "
+                            "``/plugin restart`` to trigger the supervised "
+                            "restart (``gilbert.sh`` will re-run ``uv sync`` "
+                            "and relaunch automatically)."
+                            if record.needs_restart
+                            else f"Plugin {record.name} v{record.version} installed and loaded."
+                        ),
+                    }
+                )
             case "plugin_uninstall":
                 target = str(arguments.get("name") or "").strip()
                 if not target:
@@ -628,24 +635,24 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
                 rows = self.list_installed(gilbert)
                 return json.dumps({"plugins": rows})
             case "plugin_restart_host":
-                pending = [
-                    r.name for r in self._records.values() if r.needs_restart
-                ]
+                pending = [r.name for r in self._records.values() if r.needs_restart]
                 gilbert.request_restart()
-                return json.dumps({
-                    "status": "restart_requested",
-                    "pending_plugins": pending,
-                    "message": (
-                        "Gilbert is shutting down. The supervisor loop "
-                        "in gilbert.sh will re-run ``uv sync`` and "
-                        "relaunch automatically. "
-                        + (
-                            f"Deferred plugins waiting to load: {', '.join(pending)}."
-                            if pending
-                            else "No deferred plugins are waiting."
-                        )
-                    ),
-                })
+                return json.dumps(
+                    {
+                        "status": "restart_requested",
+                        "pending_plugins": pending,
+                        "message": (
+                            "Gilbert is shutting down. The supervisor loop "
+                            "in gilbert.sh will re-run ``uv sync`` and "
+                            "relaunch automatically. "
+                            + (
+                                f"Deferred plugins waiting to load: {', '.join(pending)}."
+                                if pending
+                                else "No deferred plugins are waiting."
+                            )
+                        ),
+                    }
+                )
             case _:
                 raise KeyError(f"Unknown tool: {name}")
 
@@ -680,7 +687,9 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
         }
 
     async def _ws_plugins_list(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any]:
         gilbert = conn.manager.gilbert
         if gilbert is None:
@@ -692,7 +701,9 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
         }
 
     async def _ws_plugins_install(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any]:
         gilbert = conn.manager.gilbert
         if gilbert is None:
@@ -727,7 +738,9 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
         }
 
     async def _ws_plugins_restart_host(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any]:
         """Ask the host process to exit with the restart exit code.
 
@@ -749,7 +762,9 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
         }
 
     async def _ws_plugins_uninstall(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any]:
         gilbert = conn.manager.gilbert
         if gilbert is None:
@@ -803,7 +818,9 @@ def _plugin_declares_python_deps(plugin_dir: Path) -> bool:
             data = tomllib.load(f)
     except Exception:
         logger.debug(
-            "Failed to parse %s — assuming no deps", pyproject, exc_info=True,
+            "Failed to parse %s — assuming no deps",
+            pyproject,
+            exc_info=True,
         )
         return False
     project = data.get("project", {})

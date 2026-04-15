@@ -57,7 +57,9 @@ class GreetingService(Service):
             name="greeting",
             capabilities=frozenset({"greeting", "ai_tools"}),
             requires=frozenset({"event_bus", "entity_storage"}),
-            optional=frozenset({"ai", "speaker_control", "text_to_speech", "presence", "configuration"}),
+            optional=frozenset(
+                {"ai", "speaker_control", "text_to_speech", "presence", "configuration"}
+            ),
             ai_calls=frozenset({"greeting"}),
             events=frozenset({"greeting.announced"}),
             toggleable=True,
@@ -123,7 +125,8 @@ class GreetingService(Service):
 
         logger.info(
             "Greeting service started (window=%d:00-%d:00)",
-            self._start_hour, self._cutoff_hour,
+            self._start_hour,
+            self._cutoff_hour,
         )
 
     async def stop(self) -> None:
@@ -143,28 +146,33 @@ class GreetingService(Service):
     def config_params(self) -> list[ConfigParam]:
         return [
             ConfigParam(
-                key="start_hour", type=ToolParameterType.INTEGER,
+                key="start_hour",
+                type=ToolParameterType.INTEGER,
                 description="Hour of day to start greeting (0-23).",
                 default=6,
             ),
             ConfigParam(
-                key="cutoff_hour", type=ToolParameterType.INTEGER,
+                key="cutoff_hour",
+                type=ToolParameterType.INTEGER,
                 description="Hour of day to stop greeting (0-23).",
                 default=14,
             ),
             ConfigParam(
-                key="timezone", type=ToolParameterType.STRING,
+                key="timezone",
+                type=ToolParameterType.STRING,
                 description="Timezone for greeting window.",
                 default="UTC",
             ),
             ConfigParam(
-                key="style", type=ToolParameterType.STRING,
+                key="style",
+                type=ToolParameterType.STRING,
                 description="Custom style instructions for AI greeting generation.",
                 default="",
                 multiline=True,
             ),
             ConfigParam(
-                key="speakers", type=ToolParameterType.ARRAY,
+                key="speakers",
+                type=ToolParameterType.ARRAY,
                 description="Speaker names for announcements (empty = all).",
                 default=[],
                 choices_from="speakers",
@@ -209,7 +217,8 @@ class GreetingService(Service):
 
         logger.info(
             "Startup greeting: %d present, %d to greet",
-            len(here), len(to_greet),
+            len(here),
+            len(to_greet),
         )
 
         if not to_greet:
@@ -232,11 +241,13 @@ class GreetingService(Service):
                 await self._mark_greeted(p.user_id, greeting)
 
         if self._event_bus:
-            await self._event_bus.publish(Event(
-                event_type="greeting.announced",
-                data={"names": to_greet, "greeting": greeting, "startup": True},
-                source="greeting",
-            ))
+            await self._event_bus.publish(
+                Event(
+                    event_type="greeting.announced",
+                    data={"names": to_greet, "greeting": greeting, "startup": True},
+                    source="greeting",
+                )
+            )
 
     async def _on_arrival(self, event: Event) -> None:
         """Handle a presence.arrived event."""
@@ -262,11 +273,13 @@ class GreetingService(Service):
         await self._announce(greeting)
 
         if self._event_bus:
-            await self._event_bus.publish(Event(
-                event_type="greeting.announced",
-                data={"user_id": user_id, "greeting": greeting},
-                source="greeting",
-            ))
+            await self._event_bus.publish(
+                Event(
+                    event_type="greeting.announced",
+                    data={"user_id": user_id, "greeting": greeting},
+                    source="greeting",
+                )
+            )
 
     def _in_greeting_window(self) -> bool:
         """Check if current time is within the greeting window."""
@@ -307,17 +320,21 @@ class GreetingService(Service):
         count = (record.get("greeting_count", 0) if record else 0) + 1
 
         # Keep a rolling log of recent greetings so the AI can avoid repeats
-        recent: list[str] = (record.get("recent_greetings", []) if record else [])
+        recent: list[str] = record.get("recent_greetings", []) if record else []
         if greeting:
             recent.append(greeting)
             recent = recent[-10:]  # keep last 10
 
-        await self._storage_backend.put(_GREETING_COLLECTION, user_id, {
-            "user_id": user_id,
-            "last_greeting_date": today,
-            "greeting_count": count,
-            "recent_greetings": recent,
-        })
+        await self._storage_backend.put(
+            _GREETING_COLLECTION,
+            user_id,
+            {
+                "user_id": user_id,
+                "last_greeting_date": today,
+                "greeting_count": count,
+                "recent_greetings": recent,
+            },
+        )
 
     async def _get_recent_greetings(self, user_id: str) -> list[str]:
         """Get recent greeting texts for a user (for anti-repetition)."""
@@ -356,8 +373,7 @@ class GreetingService(Service):
             avoid_section = (
                 "\n\nHere are your recent greetings — do NOT repeat or closely "
                 "paraphrase any of these. Be completely different in tone, "
-                "structure, and word choice:\n"
-                + "\n".join(f"- {g}" for g in recent[-7:])
+                "structure, and word choice:\n" + "\n".join(f"- {g}" for g in recent[-7:])
             )
 
         prompt = (
@@ -384,7 +400,9 @@ class GreetingService(Service):
 
         return f"Good morning, {name}!"
 
-    async def _generate_group_greeting(self, names: list[str], recent: list[str] | None = None) -> str:
+    async def _generate_group_greeting(
+        self, names: list[str], recent: list[str] | None = None
+    ) -> str:
         """Generate a single greeting for multiple people."""
         if len(names) == 1:
             return await self._generate_greeting(names[0], recent)

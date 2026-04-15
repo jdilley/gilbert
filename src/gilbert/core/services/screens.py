@@ -163,6 +163,7 @@ class ScreenService(Service):
         # Register periodic cleanup with scheduler
         scheduler = resolver.get_capability("scheduler")
         from gilbert.interfaces.scheduler import Schedule, SchedulerProvider
+
         if isinstance(scheduler, SchedulerProvider):
             scheduler.add_job(
                 "screen-tmp-cleanup",
@@ -188,12 +189,14 @@ class ScreenService(Service):
     def config_params(self) -> list[ConfigParam]:
         return [
             ConfigParam(
-                key="tmp_ttl_seconds", type=ToolParameterType.INTEGER,
+                key="tmp_ttl_seconds",
+                type=ToolParameterType.INTEGER,
                 description="Time-to-live for temporary files (seconds).",
                 default=1800,
             ),
             ConfigParam(
-                key="cleanup_interval_seconds", type=ToolParameterType.INTEGER,
+                key="cleanup_interval_seconds",
+                type=ToolParameterType.INTEGER,
                 description="Interval between cleanup runs (seconds).",
                 default=300,
             ),
@@ -220,19 +223,19 @@ class ScreenService(Service):
             existing.queue.put_nowait(_SENTINEL)
             logger.info("Screen replaced: %s", name)
 
-        screen = ConnectedScreen(
-            name=name.strip(), key=key, default_url=default_url or None
-        )
+        screen = ConnectedScreen(name=name.strip(), key=key, default_url=default_url or None)
         self._screens[key] = screen
         logger.info("Screen connected: %s (key=%s)", screen.name, key)
 
         if self._event_bus_svc is not None:
             asyncio.ensure_future(
-                self._event_bus_svc.bus.publish(Event(
-                    event_type="screen.connected",
-                    data={"name": screen.name, "key": key},
-                    source="screens",
-                ))
+                self._event_bus_svc.bus.publish(
+                    Event(
+                        event_type="screen.connected",
+                        data={"name": screen.name, "key": key},
+                        source="screens",
+                    )
+                )
             )
         return screen
 
@@ -245,11 +248,13 @@ class ScreenService(Service):
 
             if self._event_bus_svc is not None:
                 asyncio.ensure_future(
-                    self._event_bus_svc.bus.publish(Event(
-                        event_type="screen.disconnected",
-                        data={"name": screen.name, "key": key},
-                        source="screens",
-                    ))
+                    self._event_bus_svc.bus.publish(
+                        Event(
+                            event_type="screen.disconnected",
+                            data={"name": screen.name, "key": key},
+                            source="screens",
+                        )
+                    )
                 )
 
     def list_screens(self) -> list[dict[str, Any]]:
@@ -277,9 +282,7 @@ class ScreenService(Service):
         try:
             while True:
                 try:
-                    msg = await asyncio.wait_for(
-                        screen.queue.get(), timeout=_KEEPALIVE_SECONDS
-                    )
+                    msg = await asyncio.wait_for(screen.queue.get(), timeout=_KEEPALIVE_SECONDS)
                     if msg == _SENTINEL:
                         return
                     yield msg
@@ -322,27 +325,35 @@ class ScreenService(Service):
         if not screen:
             return False
 
-        screen.queue.put_nowait(_sse_event("show_text", {
-            "type": "show_text",
-            "title": title,
-            "content": content,
-        }))
+        screen.queue.put_nowait(
+            _sse_event(
+                "show_text",
+                {
+                    "type": "show_text",
+                    "title": title,
+                    "content": content,
+                },
+            )
+        )
         logger.info("Screen push text: %s -> %s", title, screen.name)
         return True
 
-    def push_images(
-        self, screen_name: str, title: str, images: list[dict[str, Any]]
-    ) -> bool:
+    def push_images(self, screen_name: str, title: str, images: list[dict[str, Any]]) -> bool:
         """Push an image gallery event to a screen."""
         screen = self.get_screen(screen_name)
         if not screen:
             return False
 
-        screen.queue.put_nowait(_sse_event("show_images", {
-            "type": "show_images",
-            "title": title,
-            "images": images,
-        }))
+        screen.queue.put_nowait(
+            _sse_event(
+                "show_images",
+                {
+                    "type": "show_images",
+                    "title": title,
+                    "images": images,
+                },
+            )
+        )
         logger.info("Screen push images: %s -> %s (%d images)", title, screen.name, len(images))
         return True
 
@@ -388,9 +399,7 @@ class ScreenService(Service):
         total = len(reader.pages)
         out_of_range = [p for p in pages if p < 1 or p > total]
         if out_of_range:
-            raise ValueError(
-                f"Pages {out_of_range} out of range (document has {total} pages)"
-            )
+            raise ValueError(f"Pages {out_of_range} out of range (document has {total} pages)")
 
         writer = PdfWriter()
         for page_num in pages:
@@ -887,7 +896,9 @@ class ScreenService(Service):
                                 doc_content = await backend.get_document(doc_path)
                                 pages = self._find_pages_by_keyword(doc_content.data, query)
                             except Exception:
-                                logger.warning("Failed to keyword-search document for pages", exc_info=True)
+                                logger.warning(
+                                    "Failed to keyword-search document for pages", exc_info=True
+                                )
         elif document_path:
             # Direct path: source_id/path
             parts = document_path.split("/", 1)
@@ -915,7 +926,9 @@ class ScreenService(Service):
                 token = self.extract_pages(doc_content.data, pages)
                 page_desc = ", ".join(str(p) for p in sorted(pages))
                 tmp_url = f"/screens/tmp/{token}"
-                self.push_document(resolved, f"{doc_name} (p. {page_desc})", tmp_url, "pdf", tmp_token=token)
+                self.push_document(
+                    resolved, f"{doc_name} (p. {page_desc})", tmp_url, "pdf", tmp_token=token
+                )
                 return f'Displaying page{"s" if len(pages) != 1 else ""} {page_desc} of "{doc_name}" on {resolved}.'
             except ValueError as e:
                 self.push_error(resolved, str(e))
@@ -946,7 +959,7 @@ class ScreenService(Service):
 
         title = arguments.get("title", "Images")
         self.push_images(resolved, title, images)
-        return f'Showing {len(images)} image{"s" if len(images) != 1 else ""} on {resolved}.'
+        return f"Showing {len(images)} image{'s' if len(images) != 1 else ''} on {resolved}."
 
     # --- WebSocket RPC handlers ---
 

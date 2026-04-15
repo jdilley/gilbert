@@ -97,7 +97,8 @@ def test_extract_command_name(text: str, expected: str | None) -> None:
 
 def test_parse_namespaced_command(announce_def: ToolDefinition) -> None:
     args = parse_slash_command(
-        '/currev.announce "hi" speakers', announce_def,
+        '/currev.announce "hi" speakers',
+        announce_def,
     )
     assert args == {"text": "hi", "destination": "speakers"}
 
@@ -127,7 +128,9 @@ def test_parse_with_explicit_full_command_override() -> None:
         ],
     )
     args = parse_slash_command(
-        "/radio start chill", tool, full_command="radio start",
+        "/radio start chill",
+        tool,
+        full_command="radio start",
     )
     assert args == {"genre": "chill"}
 
@@ -145,7 +148,9 @@ def test_parse_grouped_error_uses_full_command() -> None:
     )
     with pytest.raises(SlashCommandError, match=r"Usage: /timer set"):
         parse_slash_command(
-            "/timer set", tool, full_command="timer set",
+            "/timer set",
+            tool,
+            full_command="timer set",
         )
 
 
@@ -153,7 +158,9 @@ def test_parse_rejects_wrong_prefix_when_full_command_given() -> None:
     tool = _def(params=[])
     with pytest.raises(SlashCommandError, match="Expected command prefix"):
         parse_slash_command(
-            "/radio stop", tool, full_command="radio start",
+            "/radio stop",
+            tool,
+            full_command="radio start",
         )
 
 
@@ -178,24 +185,18 @@ def test_positional_args(announce_def: ToolDefinition) -> None:
 
 
 def test_keyword_args(announce_def: ToolDefinition) -> None:
-    args = parse_slash_command(
-        '/announce text="hello there" destination=speakers', announce_def
-    )
+    args = parse_slash_command('/announce text="hello there" destination=speakers', announce_def)
     assert args == {"text": "hello there", "destination": "speakers"}
 
 
 def test_double_dash_keyword(announce_def: ToolDefinition) -> None:
-    args = parse_slash_command(
-        '/announce --text="hi" --destination=speakers', announce_def
-    )
+    args = parse_slash_command('/announce --text="hi" --destination=speakers', announce_def)
     assert args["text"] == "hi"
     assert args["destination"] == "speakers"
 
 
 def test_double_dash_space_separated(announce_def: ToolDefinition) -> None:
-    args = parse_slash_command(
-        '/announce --text hello --destination speakers', announce_def
-    )
+    args = parse_slash_command("/announce --text hello --destination speakers", announce_def)
     assert args["text"] == "hello"
     assert args["destination"] == "speakers"
 
@@ -318,9 +319,7 @@ def test_object_coercion() -> None:
             ),
         ]
     )
-    args = parse_slash_command(
-        '/announce \'{"a": 1, "b": "two"}\'', tool
-    )
+    args = parse_slash_command('/announce \'{"a": 1, "b": "two"}\'', tool)
     assert args["meta"] == {"a": 1, "b": "two"}
 
 
@@ -336,7 +335,7 @@ def test_object_requires_object_not_array() -> None:
         ]
     )
     with pytest.raises(SlashCommandError, match="must be an object"):
-        parse_slash_command('/announce \'[1,2]\'', tool)
+        parse_slash_command("/announce '[1,2]'", tool)
 
 
 # --- Errors --------------------------------------------------------------
@@ -354,9 +353,7 @@ def test_unknown_keyword(announce_def: ToolDefinition) -> None:
 
 def test_extra_positional(announce_def: ToolDefinition) -> None:
     with pytest.raises(SlashCommandError, match="Unexpected extra arguments"):
-        parse_slash_command(
-            '/announce "hi" chat 50 "entry" "extra" "more"', announce_def
-        )
+        parse_slash_command('/announce "hi" chat 50 "entry" "extra" "more"', announce_def)
 
 
 def test_enum_validation(announce_def: ToolDefinition) -> None:

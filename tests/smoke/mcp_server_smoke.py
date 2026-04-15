@@ -79,7 +79,8 @@ class _EchoToolProvider(Service):
         )
 
     def get_tools(
-        self, user_ctx: UserContext | None = None,
+        self,
+        user_ctx: UserContext | None = None,
     ) -> list[ToolDefinition]:
         return [
             ToolDefinition(
@@ -97,7 +98,9 @@ class _EchoToolProvider(Service):
         ]
 
     async def execute_tool(
-        self, name: str, arguments: dict[str, Any],
+        self,
+        name: str,
+        arguments: dict[str, Any],
     ) -> str:
         if name != "echo":
             raise KeyError(name)
@@ -126,12 +129,11 @@ class _FakeAIService(Service):
         out: dict[str, tuple[Any, ToolDefinition]] = {}
         for prov in self._providers:
             for tool_def in prov.get_tools(user_ctx):
-                if profile is None or profile.tool_mode == "all" or (
-                    profile.tool_mode == "include"
-                    and tool_def.name in profile.tools
-                ) or (
-                    profile.tool_mode == "exclude"
-                    and tool_def.name not in profile.tools
+                if (
+                    profile is None
+                    or profile.tool_mode == "all"
+                    or (profile.tool_mode == "include" and tool_def.name in profile.tools)
+                    or (profile.tool_mode == "exclude" and tool_def.name not in profile.tools)
                 ):
                     out[tool_def.name] = (prov, tool_def)
         return out
@@ -308,20 +310,19 @@ async def drive_client(url: str, token: str) -> dict[str, Any]:
             tools_result = await session.list_tools()
             tool_names = [t.name for t in tools_result.tools]
             call_result = await session.call_tool(
-                "echo", {"text": "hello from smoke"},
+                "echo",
+                {"text": "hello from smoke"},
             )
             return {
                 "tool_names": tool_names,
-                "call_text": (
-                    call_result.content[0].text
-                    if call_result.content else ""
-                ),
+                "call_text": (call_result.content[0].text if call_result.content else ""),
                 "call_is_error": call_result.isError,
             }
 
 
 async def try_unauthenticated(url: str) -> int:
     import httpx
+
     async with httpx.AsyncClient() as client:
         r = await client.post(
             url,
@@ -357,7 +358,10 @@ async def main() -> int:
     # Boot uvicorn in a background task so we can drive HTTP.
     port = pick_free_port()
     config = uvicorn.Config(
-        app, host="127.0.0.1", port=port, log_level="warning",
+        app,
+        host="127.0.0.1",
+        port=port,
+        log_level="warning",
     )
     server = uvicorn.Server(config)
     server_task = asyncio.create_task(server.serve())

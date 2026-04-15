@@ -59,7 +59,9 @@ def _record(
 
 
 def _params(
-    *, messages: list[dict[str, str]] | None = None, max_tokens: int = 256,
+    *,
+    messages: list[dict[str, str]] | None = None,
+    max_tokens: int = 256,
 ) -> mcp_types.CreateMessageRequestParams:
     sdk_messages = [
         mcp_types.SamplingMessage(
@@ -95,9 +97,7 @@ class _FakeAIService:
     ) -> AIResponse:
         self.calls.append(
             {
-                "messages": [
-                    {"role": m.role.value, "content": m.content} for m in messages
-                ],
+                "messages": [{"role": m.role.value, "content": m.content} for m in messages],
                 "system_prompt": system_prompt,
                 "profile_name": profile_name,
                 "max_tokens": max_tokens,
@@ -135,7 +135,10 @@ def _make_svc(ai_svc: _FakeAIService | None = None) -> MCPService:
 
 
 def _default_response(
-    *, text: str = "hi back", input_tokens: int = 10, output_tokens: int = 20,
+    *,
+    text: str = "hi back",
+    input_tokens: int = 10,
+    output_tokens: int = 20,
     stop: StopReason = StopReason.END_TURN,
 ) -> AIResponse:
     return AIResponse(
@@ -215,7 +218,8 @@ class TestSamplingGates:
         svc._sampling_budgets[record.id] = budget
 
         result = await svc._on_sampling_request(
-            record, _params(max_tokens=50),
+            record,
+            _params(max_tokens=50),
         )
         assert isinstance(result, mcp_types.ErrorData)
         assert "budget exhausted" in result.message

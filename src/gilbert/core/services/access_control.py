@@ -26,7 +26,12 @@ _RPC_ACL_COLLECTION = "acl_rpc_permissions"
 _BUILTIN_ROLES: list[dict[str, Any]] = [
     {"name": "admin", "level": 0, "builtin": True, "description": "Full system access"},
     {"name": "user", "level": 100, "builtin": True, "description": "Standard user access"},
-    {"name": "everyone", "level": 200, "builtin": True, "description": "Minimum access for any authenticated user"},
+    {
+        "name": "everyone",
+        "level": 200,
+        "builtin": True,
+        "description": "Minimum access for any authenticated user",
+    },
 ]
 
 # Default level for unknown roles (treated as "everyone")
@@ -130,7 +135,10 @@ class AccessControlService(Service):
         # Collection ACLs
         col_acls = await self._storage.query(Query(collection=_COLLECTION_ACL))
         self._collection_acl = {
-            c["collection"]: {"read_role": c.get("read_role", "user"), "write_role": c.get("write_role", "admin")}
+            c["collection"]: {
+                "read_role": c.get("read_role", "user"),
+                "write_role": c.get("write_role", "admin"),
+            }
             for c in col_acls
             if "collection" in c
         }
@@ -205,10 +213,12 @@ class AccessControlService(Service):
             return [dict(r) for r in _BUILTIN_ROLES]
         from gilbert.interfaces.storage import Query, SortField
 
-        return await self._storage.query(Query(
-            collection=_ROLES_COLLECTION,
-            sort=[SortField(field="level")],
-        ))
+        return await self._storage.query(
+            Query(
+                collection=_ROLES_COLLECTION,
+                sort=[SortField(field="level")],
+            )
+        )
 
     async def get_role(self, name: str) -> dict[str, Any] | None:
         """Get a role by name."""
@@ -283,10 +293,14 @@ class AccessControlService(Service):
             raise RuntimeError("Storage not available")
         if required_role not in self._role_levels:
             raise ValueError(f"Unknown role: {required_role}")
-        await self._storage.put(_OVERRIDES_COLLECTION, tool_name, {
-            "tool_name": tool_name,
-            "required_role": required_role,
-        })
+        await self._storage.put(
+            _OVERRIDES_COLLECTION,
+            tool_name,
+            {
+                "tool_name": tool_name,
+                "required_role": required_role,
+            },
+        )
         self._tool_overrides[tool_name] = required_role
         logger.info("Tool '%s' now requires role '%s'", tool_name, required_role)
 
@@ -325,11 +339,15 @@ class AccessControlService(Service):
         for role in (read_role, write_role):
             if role not in self._role_levels:
                 raise ValueError(f"Unknown role: {role}")
-        await self._storage.put(_COLLECTION_ACL, collection, {
-            "collection": collection,
-            "read_role": read_role,
-            "write_role": write_role,
-        })
+        await self._storage.put(
+            _COLLECTION_ACL,
+            collection,
+            {
+                "collection": collection,
+                "read_role": read_role,
+                "write_role": write_role,
+            },
+        )
         self._collection_acl[collection] = {"read_role": read_role, "write_role": write_role}
         logger.info("Collection '%s' ACL set: read=%s, write=%s", collection, read_role, write_role)
 
@@ -385,10 +403,14 @@ class AccessControlService(Service):
         """Set or update an event visibility override."""
         if self._storage is None:
             return
-        await self._storage.put(_EVENT_ACL_COLLECTION, event_prefix, {
-            "event_prefix": event_prefix,
-            "min_role": min_role,
-        })
+        await self._storage.put(
+            _EVENT_ACL_COLLECTION,
+            event_prefix,
+            {
+                "event_prefix": event_prefix,
+                "min_role": min_role,
+            },
+        )
         await self._refresh_caches()
 
     async def clear_event_visibility(self, event_prefix: str) -> None:
@@ -424,10 +446,14 @@ class AccessControlService(Service):
         """Set or update an RPC handler permission override."""
         if self._storage is None:
             return
-        await self._storage.put(_RPC_ACL_COLLECTION, frame_prefix, {
-            "frame_prefix": frame_prefix,
-            "min_role": min_role,
-        })
+        await self._storage.put(
+            _RPC_ACL_COLLECTION,
+            frame_prefix,
+            {
+                "frame_prefix": frame_prefix,
+                "min_role": min_role,
+            },
+        )
         await self._refresh_caches()
 
     async def clear_rpc_permission(self, frame_prefix: str) -> None:
@@ -478,9 +504,20 @@ class AccessControlService(Service):
                 slash_help="Create a role: /acl create_role <name> <level> [description]",
                 description="Create a custom role with a name and hierarchy level (lower number = more privileged).",
                 parameters=[
-                    ToolParameter(name="name", type=ToolParameterType.STRING, description="Role name."),
-                    ToolParameter(name="level", type=ToolParameterType.INTEGER, description="Hierarchy level (lower = more privileged). admin=0, user=100, everyone=200."),
-                    ToolParameter(name="description", type=ToolParameterType.STRING, description="Role description.", required=False),
+                    ToolParameter(
+                        name="name", type=ToolParameterType.STRING, description="Role name."
+                    ),
+                    ToolParameter(
+                        name="level",
+                        type=ToolParameterType.INTEGER,
+                        description="Hierarchy level (lower = more privileged). admin=0, user=100, everyone=200.",
+                    ),
+                    ToolParameter(
+                        name="description",
+                        type=ToolParameterType.STRING,
+                        description="Role description.",
+                        required=False,
+                    ),
                 ],
                 required_role="admin",
             ),
@@ -491,9 +528,23 @@ class AccessControlService(Service):
                 slash_help="Update a role: /acl update_role <name> level=... description=...",
                 description="Update a custom role's level or description. Built-in roles (admin, user, everyone) cannot have their level changed.",
                 parameters=[
-                    ToolParameter(name="name", type=ToolParameterType.STRING, description="Role name to update."),
-                    ToolParameter(name="level", type=ToolParameterType.INTEGER, description="New hierarchy level.", required=False),
-                    ToolParameter(name="description", type=ToolParameterType.STRING, description="New description.", required=False),
+                    ToolParameter(
+                        name="name",
+                        type=ToolParameterType.STRING,
+                        description="Role name to update.",
+                    ),
+                    ToolParameter(
+                        name="level",
+                        type=ToolParameterType.INTEGER,
+                        description="New hierarchy level.",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="description",
+                        type=ToolParameterType.STRING,
+                        description="New description.",
+                        required=False,
+                    ),
                 ],
                 required_role="admin",
             ),
@@ -504,7 +555,11 @@ class AccessControlService(Service):
                 slash_help="Delete a custom role: /acl delete_role <name>",
                 description="Delete a custom role. Built-in roles cannot be deleted.",
                 parameters=[
-                    ToolParameter(name="name", type=ToolParameterType.STRING, description="Role name to delete."),
+                    ToolParameter(
+                        name="name",
+                        type=ToolParameterType.STRING,
+                        description="Role name to delete.",
+                    ),
                 ],
                 required_role="admin",
             ),
@@ -523,8 +578,14 @@ class AccessControlService(Service):
                 slash_help="Override a tool's role: /acl set_tool <tool> <role>",
                 description="Override the required role for a specific tool.",
                 parameters=[
-                    ToolParameter(name="tool_name", type=ToolParameterType.STRING, description="Tool name."),
-                    ToolParameter(name="required_role", type=ToolParameterType.STRING, description="Role required to use this tool."),
+                    ToolParameter(
+                        name="tool_name", type=ToolParameterType.STRING, description="Tool name."
+                    ),
+                    ToolParameter(
+                        name="required_role",
+                        type=ToolParameterType.STRING,
+                        description="Role required to use this tool.",
+                    ),
                 ],
                 required_role="admin",
             ),
@@ -535,7 +596,9 @@ class AccessControlService(Service):
                 slash_help="Revert a tool's role override: /acl clear_tool <tool>",
                 description="Remove a tool permission override, reverting to the tool's default role.",
                 parameters=[
-                    ToolParameter(name="tool_name", type=ToolParameterType.STRING, description="Tool name."),
+                    ToolParameter(
+                        name="tool_name", type=ToolParameterType.STRING, description="Tool name."
+                    ),
                 ],
                 required_role="admin",
             ),
@@ -554,9 +617,21 @@ class AccessControlService(Service):
                 slash_help="Set collection ACL: /acl set_collection <collection> <read_role> <write_role>",
                 description="Set read/write role requirements for an entity collection.",
                 parameters=[
-                    ToolParameter(name="collection", type=ToolParameterType.STRING, description="Collection name."),
-                    ToolParameter(name="read_role", type=ToolParameterType.STRING, description="Role required to read (default: user)."),
-                    ToolParameter(name="write_role", type=ToolParameterType.STRING, description="Role required to write (default: admin)."),
+                    ToolParameter(
+                        name="collection",
+                        type=ToolParameterType.STRING,
+                        description="Collection name.",
+                    ),
+                    ToolParameter(
+                        name="read_role",
+                        type=ToolParameterType.STRING,
+                        description="Role required to read (default: user).",
+                    ),
+                    ToolParameter(
+                        name="write_role",
+                        type=ToolParameterType.STRING,
+                        description="Role required to write (default: admin).",
+                    ),
                 ],
                 required_role="admin",
             ),
@@ -575,8 +650,16 @@ class AccessControlService(Service):
                 slash_help="Set event visibility: /acl set_event <prefix> <role>",
                 description="Set the minimum role required to see events matching a prefix via WebSocket.",
                 parameters=[
-                    ToolParameter(name="event_prefix", type=ToolParameterType.STRING, description="Event type prefix (e.g., 'inbox.' or 'chat.message.')."),
-                    ToolParameter(name="min_role", type=ToolParameterType.STRING, description="Minimum role required (e.g., 'admin', 'user', 'everyone')."),
+                    ToolParameter(
+                        name="event_prefix",
+                        type=ToolParameterType.STRING,
+                        description="Event type prefix (e.g., 'inbox.' or 'chat.message.').",
+                    ),
+                    ToolParameter(
+                        name="min_role",
+                        type=ToolParameterType.STRING,
+                        description="Minimum role required (e.g., 'admin', 'user', 'everyone').",
+                    ),
                 ],
                 required_role="admin",
             ),
@@ -587,7 +670,11 @@ class AccessControlService(Service):
                 slash_help="Revert event visibility override: /acl clear_event <prefix>",
                 description="Remove an event visibility override, reverting to the built-in default.",
                 parameters=[
-                    ToolParameter(name="event_prefix", type=ToolParameterType.STRING, description="Event type prefix to clear."),
+                    ToolParameter(
+                        name="event_prefix",
+                        type=ToolParameterType.STRING,
+                        description="Event type prefix to clear.",
+                    ),
                 ],
                 required_role="admin",
             ),
@@ -606,8 +693,16 @@ class AccessControlService(Service):
                 slash_help="Set RPC min role: /acl set_rpc <frame_prefix> <role>",
                 description="Set the minimum role required to call a WebSocket RPC frame type.",
                 parameters=[
-                    ToolParameter(name="frame_prefix", type=ToolParameterType.STRING, description="Frame type prefix (e.g., 'inbox.' or 'chat.room.create')."),
-                    ToolParameter(name="min_role", type=ToolParameterType.STRING, description="Minimum role required (e.g., 'admin', 'user', 'everyone')."),
+                    ToolParameter(
+                        name="frame_prefix",
+                        type=ToolParameterType.STRING,
+                        description="Frame type prefix (e.g., 'inbox.' or 'chat.room.create').",
+                    ),
+                    ToolParameter(
+                        name="min_role",
+                        type=ToolParameterType.STRING,
+                        description="Minimum role required (e.g., 'admin', 'user', 'everyone').",
+                    ),
                 ],
                 required_role="admin",
             ),
@@ -618,7 +713,11 @@ class AccessControlService(Service):
                 slash_help="Revert RPC permission override: /acl clear_rpc <frame_prefix>",
                 description="Remove an RPC permission override, reverting to the built-in default.",
                 parameters=[
-                    ToolParameter(name="frame_prefix", type=ToolParameterType.STRING, description="Frame type prefix to clear."),
+                    ToolParameter(
+                        name="frame_prefix",
+                        type=ToolParameterType.STRING,
+                        description="Frame type prefix to clear.",
+                    ),
                 ],
                 required_role="admin",
             ),
@@ -649,7 +748,13 @@ class AccessControlService(Service):
                 return json.dumps(rules)
             case "set_event_visibility":
                 await self.set_event_visibility(arguments["event_prefix"], arguments["min_role"])
-                return json.dumps({"status": "ok", "event_prefix": arguments["event_prefix"], "min_role": arguments["min_role"]})
+                return json.dumps(
+                    {
+                        "status": "ok",
+                        "event_prefix": arguments["event_prefix"],
+                        "min_role": arguments["min_role"],
+                    }
+                )
             case "clear_event_visibility":
                 await self.clear_event_visibility(arguments["event_prefix"])
                 return json.dumps({"status": "ok", "event_prefix": arguments["event_prefix"]})
@@ -658,7 +763,13 @@ class AccessControlService(Service):
                 return json.dumps(rules)
             case "set_rpc_permission":
                 await self.set_rpc_permission(arguments["frame_prefix"], arguments["min_role"])
-                return json.dumps({"status": "ok", "frame_prefix": arguments["frame_prefix"], "min_role": arguments["min_role"]})
+                return json.dumps(
+                    {
+                        "status": "ok",
+                        "frame_prefix": arguments["frame_prefix"],
+                        "min_role": arguments["min_role"],
+                    }
+                )
             case "clear_rpc_permission":
                 await self.clear_rpc_permission(arguments["frame_prefix"])
                 return json.dumps({"status": "ok", "frame_prefix": arguments["frame_prefix"]})
@@ -702,13 +813,15 @@ class AccessControlService(Service):
 
     def _tool_get_permissions(self) -> str:
         # Return override info — tools themselves are discovered via the AI service
-        return json.dumps({
-            "overrides": [
-                {"tool_name": k, "required_role": v}
-                for k, v in sorted(self._tool_overrides.items())
-            ],
-            "note": "Tools without overrides use their default required_role.",
-        })
+        return json.dumps(
+            {
+                "overrides": [
+                    {"tool_name": k, "required_role": v}
+                    for k, v in sorted(self._tool_overrides.items())
+                ],
+                "note": "Tools without overrides use their default required_role.",
+            }
+        )
 
     async def _tool_set_permission(self, arguments: dict[str, Any]) -> str:
         try:
@@ -773,11 +886,15 @@ class AccessControlService(Service):
         return {"type": "roles.role.list.result", "ref": frame.get("id"), "roles": roles}
 
     async def _ws_role_create(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        await self.create_role(frame.get("name", ""), frame.get("level", 100), frame.get("description", ""))
+        await self.create_role(
+            frame.get("name", ""), frame.get("level", 100), frame.get("description", "")
+        )
         return {"type": "roles.role.create.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_role_update(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        await self.update_role(frame.get("name", ""), level=frame.get("level"), description=frame.get("description"))
+        await self.update_role(
+            frame.get("name", ""), level=frame.get("level"), description=frame.get("description")
+        )
         return {"type": "roles.role.update.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_role_delete(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
@@ -788,23 +905,36 @@ class AccessControlService(Service):
 
         gilbert = conn.manager.gilbert
         if gilbert is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Service not available",
+                "code": 503,
+            }
 
         from gilbert.interfaces.tools import ToolProvider
+
         tools = []
         for svc in gilbert.service_manager.get_all_by_capability("ai_tools"):
             if isinstance(svc, ToolProvider):
                 for t in svc.get_tools():
                     effective = self._tool_overrides.get(t.name, t.required_role)
-                    tools.append({
-                        "provider": svc.tool_provider_name,
-                        "tool_name": t.name,
-                        "default_role": t.required_role,
-                        "effective_role": effective,
-                        "has_override": t.name in self._tool_overrides,
-                    })
+                    tools.append(
+                        {
+                            "provider": svc.tool_provider_name,
+                            "tool_name": t.name,
+                            "default_role": t.required_role,
+                            "effective_role": effective,
+                            "has_override": t.name in self._tool_overrides,
+                        }
+                    )
         role_names = sorted(self._role_levels.keys())
-        return {"type": "roles.tool.list.result", "ref": frame.get("id"), "tools": tools, "role_names": role_names}
+        return {
+            "type": "roles.tool.list.result",
+            "ref": frame.get("id"),
+            "tools": tools,
+            "role_names": role_names,
+        }
 
     async def _ws_tool_set(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         await self.set_tool_override(frame.get("tool_name", ""), frame.get("role", ""))
@@ -818,11 +948,21 @@ class AccessControlService(Service):
 
         gilbert = conn.manager.gilbert
         if gilbert is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Service not available",
+                "code": 503,
+            }
 
         ai_svc = gilbert.service_manager.get_by_capability("ai_chat")
         if ai_svc is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "AI service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "AI service not available",
+                "code": 503,
+            }
 
         profiles_raw = ai_svc.list_profiles()
         assignments = ai_svc.list_assignments()
@@ -830,11 +970,16 @@ class AccessControlService(Service):
         profiles = []
         for p in profiles_raw:
             assigned = [call for call, prof in assignments.items() if prof == p.name]
-            profiles.append({
-                "name": p.name, "description": p.description, "tool_mode": p.tool_mode,
-                "tools": list(p.tools), "tool_roles": dict(p.tool_roles),
-                "assigned_calls": assigned,
-            })
+            profiles.append(
+                {
+                    "name": p.name,
+                    "description": p.description,
+                    "tool_mode": p.tool_mode,
+                    "tools": list(p.tools),
+                    "tool_roles": dict(p.tool_roles),
+                    "assigned_calls": assigned,
+                }
+            )
 
         declared_calls: set[str] = set()
         for svc in gilbert.service_manager.get_all_by_capability("ai_tools"):
@@ -842,6 +987,7 @@ class AccessControlService(Service):
             declared_calls.update(info.ai_calls)
 
         from gilbert.interfaces.tools import ToolProvider
+
         all_tools: set[str] = set()
         for svc in gilbert.service_manager.get_all_by_capability("ai_tools"):
             if isinstance(svc, ToolProvider):
@@ -849,8 +995,10 @@ class AccessControlService(Service):
                     all_tools.add(t.name)
 
         return {
-            "type": "roles.profile.list.result", "ref": frame.get("id"),
-            "profiles": profiles, "declared_calls": sorted(declared_calls),
+            "type": "roles.profile.list.result",
+            "ref": frame.get("id"),
+            "profiles": profiles,
+            "declared_calls": sorted(declared_calls),
             "profile_names": [p["name"] for p in profiles],
             "all_tool_names": sorted(all_tools),
         }
@@ -859,13 +1007,24 @@ class AccessControlService(Service):
 
         gilbert = conn.manager.gilbert
         if gilbert is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Service not available",
+                "code": 503,
+            }
 
         ai_svc = gilbert.service_manager.get_by_capability("ai_chat")
         if ai_svc is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "AI service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "AI service not available",
+                "code": 503,
+            }
 
         from gilbert.interfaces.ai import AIContextProfile
+
         profile = AIContextProfile(
             name=frame.get("name", ""),
             description=frame.get("description", ""),
@@ -880,11 +1039,21 @@ class AccessControlService(Service):
 
         gilbert = conn.manager.gilbert
         if gilbert is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Service not available",
+                "code": 503,
+            }
 
         ai_svc = gilbert.service_manager.get_by_capability("ai_chat")
         if ai_svc is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "AI service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "AI service not available",
+                "code": 503,
+            }
 
         await ai_svc.delete_profile(frame.get("name", ""))
         return {"type": "roles.profile.delete.result", "ref": frame.get("id"), "status": "ok"}
@@ -893,11 +1062,21 @@ class AccessControlService(Service):
 
         gilbert = conn.manager.gilbert
         if gilbert is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Service not available",
+                "code": 503,
+            }
 
         ai_svc = gilbert.service_manager.get_by_capability("ai_chat")
         if ai_svc is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "AI service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "AI service not available",
+                "code": 503,
+            }
 
         await ai_svc.set_assignment(frame.get("ai_call", ""), frame.get("profile_name", ""))
         return {"type": "roles.profile.assign.result", "ref": frame.get("id"), "status": "ok"}
@@ -906,27 +1085,43 @@ class AccessControlService(Service):
 
         gilbert = conn.manager.gilbert
         if gilbert is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Service not available",
+                "code": 503,
+            }
 
         user_svc = gilbert.service_manager.get_by_capability("users")
         if user_svc is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Service not available",
+                "code": 503,
+            }
 
         users = await user_svc.list_users()
         result = []
         for u in users:
-            result.append({
-                "user_id": u.get("user_id", u.get("_id", "")),
-                "username": u.get("username", ""),
-                "email": u.get("email", ""),
-                "display_name": u.get("display_name", ""),
-                "roles": u.get("roles", []),
-            })
+            result.append(
+                {
+                    "user_id": u.get("user_id", u.get("_id", "")),
+                    "username": u.get("username", ""),
+                    "email": u.get("email", ""),
+                    "display_name": u.get("display_name", ""),
+                    "roles": u.get("roles", []),
+                }
+            )
         role_names = sorted(self._role_levels.keys())
-        allow_creation = user_svc.allow_user_creation if isinstance(user_svc, UserManagementProvider) else False
+        allow_creation = (
+            user_svc.allow_user_creation if isinstance(user_svc, UserManagementProvider) else False
+        )
         return {
-            "type": "roles.user.list.result", "ref": frame.get("id"),
-            "users": result, "role_names": role_names,
+            "type": "roles.user.list.result",
+            "ref": frame.get("id"),
+            "users": result,
+            "role_names": role_names,
             "allow_user_creation": allow_creation,
         }
 
@@ -934,16 +1129,31 @@ class AccessControlService(Service):
 
         gilbert = conn.manager.gilbert
         if gilbert is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Service not available",
+                "code": 503,
+            }
 
         user_svc = gilbert.service_manager.get_by_capability("users")
         if user_svc is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "User service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "User service not available",
+                "code": 503,
+            }
 
         user_id = frame.get("user_id", "")
         roles = frame.get("roles", [])
         if not isinstance(user_svc, UserManagementProvider):
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "User service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "User service not available",
+                "code": 503,
+            }
 
         # Read existing roles so we can emit an add/remove diff in the event.
         existing = await user_svc.backend.get_user(user_id)
@@ -955,16 +1165,18 @@ class AccessControlService(Service):
         if self._event_bus is not None and old_roles != new_roles:
             from gilbert.interfaces.events import Event
 
-            await self._event_bus.publish(Event(
-                event_type="auth.user.roles.changed",
-                data={
-                    "user_id": user_id,
-                    "added": sorted(new_roles - old_roles),
-                    "removed": sorted(old_roles - new_roles),
-                    "roles": sorted(new_roles),
-                },
-                source="access_control",
-            ))
+            await self._event_bus.publish(
+                Event(
+                    event_type="auth.user.roles.changed",
+                    data={
+                        "user_id": user_id,
+                        "added": sorted(new_roles - old_roles),
+                        "removed": sorted(old_roles - new_roles),
+                        "roles": sorted(new_roles),
+                    },
+                    source="access_control",
+                )
+            )
 
         return {"type": "roles.user.set.result", "ref": frame.get("id"), "status": "ok"}
 
@@ -972,30 +1184,48 @@ class AccessControlService(Service):
 
         gilbert = conn.manager.gilbert
         if gilbert is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Service not available",
+                "code": 503,
+            }
 
         storage_svc = gilbert.service_manager.get_by_capability("entity_storage")
         if storage_svc is None:
-            return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Service not available", "code": 503}
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Service not available",
+                "code": 503,
+            }
 
         collections = await storage_svc.backend.list_collections()
         acl_entries = []
         for col in sorted(collections):
             entry = self._collection_acl.get(col)
-            acl_entries.append({
-                "collection": col,
-                "read_role": entry["read_role"] if entry else "user",
-                "write_role": entry["write_role"] if entry else "admin",
-                "has_custom": entry is not None,
-            })
+            acl_entries.append(
+                {
+                    "collection": col,
+                    "read_role": entry["read_role"] if entry else "user",
+                    "write_role": entry["write_role"] if entry else "admin",
+                    "has_custom": entry is not None,
+                }
+            )
         roles = await self.list_roles()
         return {
-            "type": "roles.collection.list.result", "ref": frame.get("id"),
-            "collections": acl_entries, "role_names": [r["name"] for r in roles],
+            "type": "roles.collection.list.result",
+            "ref": frame.get("id"),
+            "collections": acl_entries,
+            "role_names": [r["name"] for r in roles],
         }
 
     async def _ws_collection_set(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        await self.set_collection_acl(frame.get("collection", ""), read_role=frame.get("read_role", "user"), write_role=frame.get("write_role", "admin"))
+        await self.set_collection_acl(
+            frame.get("collection", ""),
+            read_role=frame.get("read_role", "user"),
+            write_role=frame.get("write_role", "admin"),
+        )
         return {"type": "roles.collection.set.result", "ref": frame.get("id"), "status": "ok"}
 
     async def _ws_collection_clear(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
@@ -1007,7 +1237,12 @@ class AccessControlService(Service):
     async def _ws_event_vis_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         rules = await self.list_event_visibility()
         role_names = sorted(self._role_levels.keys())
-        return {"type": "roles.event_visibility.list.result", "ref": frame.get("id"), "rules": rules, "role_names": role_names}
+        return {
+            "type": "roles.event_visibility.list.result",
+            "ref": frame.get("id"),
+            "rules": rules,
+            "role_names": role_names,
+        }
 
     async def _ws_event_vis_set(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         await self.set_event_visibility(frame.get("event_prefix", ""), frame.get("min_role", ""))
@@ -1015,14 +1250,23 @@ class AccessControlService(Service):
 
     async def _ws_event_vis_clear(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         await self.clear_event_visibility(frame.get("event_prefix", ""))
-        return {"type": "roles.event_visibility.clear.result", "ref": frame.get("id"), "status": "ok"}
+        return {
+            "type": "roles.event_visibility.clear.result",
+            "ref": frame.get("id"),
+            "status": "ok",
+        }
 
     # --- RPC permissions WS handlers ---
 
     async def _ws_rpc_perm_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         rules = await self.list_rpc_permissions()
         role_names = sorted(self._role_levels.keys())
-        return {"type": "roles.rpc_permissions.list.result", "ref": frame.get("id"), "rules": rules, "role_names": role_names}
+        return {
+            "type": "roles.rpc_permissions.list.result",
+            "ref": frame.get("id"),
+            "rules": rules,
+            "role_names": role_names,
+        }
 
     async def _ws_rpc_perm_set(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         await self.set_rpc_permission(frame.get("frame_prefix", ""), frame.get("min_role", ""))
@@ -1030,4 +1274,8 @@ class AccessControlService(Service):
 
     async def _ws_rpc_perm_clear(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         await self.clear_rpc_permission(frame.get("frame_prefix", ""))
-        return {"type": "roles.rpc_permissions.clear.result", "ref": frame.get("id"), "status": "ok"}
+        return {
+            "type": "roles.rpc_permissions.clear.result",
+            "ref": frame.get("id"),
+            "status": "ok",
+        }

@@ -50,7 +50,9 @@ class UserService(Service):
     ) -> None:
         self._root_password_hash = root_password_hash
         self._default_roles = default_roles or ["user"]
-        self._sync_ttl = sync_ttl_seconds if sync_ttl_seconds is not None else self._DEFAULT_SYNC_TTL_SECONDS
+        self._sync_ttl = (
+            sync_ttl_seconds if sync_ttl_seconds is not None else self._DEFAULT_SYNC_TTL_SECONDS
+        )
         self._allow_user_creation = allow_user_creation
         self._backend: UserBackend | None = None
         self._resolver: ServiceResolver | None = None
@@ -144,10 +146,7 @@ class UserService(Service):
             return
 
         # Keep the root password in sync with what's in config.
-        if (
-            self._root_password_hash
-            and existing.get("password_hash") != self._root_password_hash
-        ):
+        if self._root_password_hash and existing.get("password_hash") != self._root_password_hash:
             logger.info("Updating root user password hash")
             await self._backend.update_user(
                 _ROOT_USER_ID,
@@ -167,9 +166,7 @@ class UserService(Service):
         backend = self.backend
 
         # 1. Try provider link lookup.
-        user = await backend.get_user_by_provider_link(
-            ext.provider_type, ext.provider_user_id
-        )
+        user = await backend.get_user_by_provider_link(ext.provider_type, ext.provider_user_id)
         if user is not None:
             # Update display name and metadata if changed.
             updates: dict[str, Any] = {}
@@ -258,9 +255,7 @@ class UserService(Service):
                     provider.provider_type,
                 )
             except Exception:
-                logger.exception(
-                    "Failed to sync from %s provider", provider.provider_type
-                )
+                logger.exception("Failed to sync from %s provider", provider.provider_type)
         self._last_sync = time.monotonic()
         return count
 
@@ -307,9 +302,7 @@ class UserService(Service):
                 )
         return None
 
-    async def list_users(
-        self, limit: int | None = None, offset: int = 0
-    ) -> list[dict[str, Any]]:
+    async def list_users(self, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
         """List users, lazily syncing from providers if stale."""
         await self.sync_if_stale()
         return await self.backend.list_users(limit=limit, offset=offset)
@@ -339,7 +332,8 @@ class UserService(Service):
     def config_params(self) -> list[ConfigParam]:
         params: list[ConfigParam] = [
             ConfigParam(
-                key="sync_ttl_seconds", type=ToolParameterType.INTEGER,
+                key="sync_ttl_seconds",
+                type=ToolParameterType.INTEGER,
                 description="How often to refresh users from external providers (seconds).",
                 default=3600,
             ),
@@ -348,19 +342,30 @@ class UserService(Service):
         # a new user-provider plugin (google_directory, ldap, okta, …)
         # needs zero changes in core.
         for name, cls in UserProviderBackend.registered_backends().items():
-            params.append(ConfigParam(
-                key=f"{name}.enabled", type=ToolParameterType.BOOLEAN,
-                description=f"Enable the {name} user provider.",
-                default=False, restart_required=True, backend_param=True,
-            ))
+            params.append(
+                ConfigParam(
+                    key=f"{name}.enabled",
+                    type=ToolParameterType.BOOLEAN,
+                    description=f"Enable the {name} user provider.",
+                    default=False,
+                    restart_required=True,
+                    backend_param=True,
+                )
+            )
             for bp in cls.backend_config_params():
-                params.append(ConfigParam(
-                    key=f"{name}.{bp.key}", type=bp.type,
-                    description=bp.description, default=bp.default,
-                    restart_required=bp.restart_required,
-                    sensitive=bp.sensitive, choices=bp.choices,
-                    multiline=bp.multiline, backend_param=True,
-                ))
+                params.append(
+                    ConfigParam(
+                        key=f"{name}.{bp.key}",
+                        type=bp.type,
+                        description=bp.description,
+                        default=bp.default,
+                        restart_required=bp.restart_required,
+                        sensitive=bp.sensitive,
+                        choices=bp.choices,
+                        multiline=bp.multiline,
+                        backend_param=True,
+                    )
+                )
         return params
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
@@ -397,16 +402,20 @@ class UserService(Service):
             except Exception:
                 continue
             for a in raw:
-                actions.append(replace(
-                    a,
-                    key=f"{name}.{a.key}",
-                    backend_action=True,
-                    backend=name,
-                ))
+                actions.append(
+                    replace(
+                        a,
+                        key=f"{name}.{a.key}",
+                        backend_action=True,
+                        backend=name,
+                    )
+                )
         return actions
 
     async def invoke_config_action(
-        self, key: str, payload: dict[str, Any],
+        self,
+        key: str,
+        payload: dict[str, Any],
     ) -> ConfigActionResult:
         backend_name, _, action_key = key.partition(".")
         if not backend_name or not action_key:
@@ -439,30 +448,38 @@ class UserService(Service):
     async def _ws_user_create(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         if not self._allow_user_creation:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "User creation is disabled", "code": 403,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "User creation is disabled",
+                "code": 403,
             }
 
         username = (frame.get("username") or "").strip().lower()
         if not username:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "Username is required", "code": 400,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Username is required",
+                "code": 400,
             }
 
         password = frame.get("password") or ""
         if not password:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "Password is required", "code": 400,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Password is required",
+                "code": 400,
             }
 
         # Check uniqueness
         existing = await self.backend.get_user_by_username(username)
         if existing is not None:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": f"Username '{username}' already exists", "code": 409,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": f"Username '{username}' already exists",
+                "code": 409,
             }
 
         email = (frame.get("email") or "").strip()
@@ -470,8 +487,10 @@ class UserService(Service):
             existing = await self.backend.get_user_by_email(email)
             if existing is not None:
                 return {
-                    "type": "gilbert.error", "ref": frame.get("id"),
-                    "error": f"Email '{email}' already in use", "code": 409,
+                    "type": "gilbert.error",
+                    "ref": frame.get("id"),
+                    "error": f"Email '{email}' already in use",
+                    "code": 409,
                 }
 
         password_hash = self._hash_password(password)
@@ -486,36 +505,51 @@ class UserService(Service):
             },
         )
         user.pop("password_hash", None)
-        return {"type": "users.user.create.result", "ref": frame.get("id"), "status": "ok", "user": user}
+        return {
+            "type": "users.user.create.result",
+            "ref": frame.get("id"),
+            "status": "ok",
+            "user": user,
+        }
 
     async def _ws_user_delete(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         user_id = frame.get("user_id", "")
         if not user_id:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "user_id is required", "code": 400,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "user_id is required",
+                "code": 400,
             }
         try:
             await self.delete_user(user_id)
         except ValueError as e:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": str(e), "code": 403,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": str(e),
+                "code": 403,
             }
         return {"type": "users.user.delete.result", "ref": frame.get("id"), "status": "ok"}
 
-    async def _ws_user_reset_password(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_user_reset_password(
+        self, conn: Any, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
         user_id = frame.get("user_id", "")
         if not user_id:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "user_id is required", "code": 400,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "user_id is required",
+                "code": 400,
             }
         password = frame.get("password", "")
         if not password:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "password is required", "code": 400,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "password is required",
+                "code": 400,
             }
         password_hash = self._hash_password(password)
         assert self._backend is not None

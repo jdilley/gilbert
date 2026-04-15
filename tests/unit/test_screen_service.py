@@ -232,6 +232,7 @@ class TestTempFiles:
         writer.add_blank_page(width=612, height=792)
         writer.add_blank_page(width=612, height=792)
         import io
+
         buf = io.BytesIO()
         writer.write(buf)
         pdf_bytes = buf.getvalue()
@@ -364,31 +365,40 @@ class TestToolDefinitions:
     @pytest.mark.asyncio
     async def test_tool_clear(self, service: ScreenService) -> None:
         screen = service.connect("shop screen")
-        result = await service.execute_tool("display", {
-            "action": "clear",
-            "screen_name": "shop screen",
-        })
+        result = await service.execute_tool(
+            "display",
+            {
+                "action": "clear",
+                "screen_name": "shop screen",
+            },
+        )
         assert "cleared" in result.lower()
         assert not screen.queue.empty()
 
     @pytest.mark.asyncio
     async def test_tool_clear_missing_screen(self, service: ScreenService) -> None:
         service.connect("shop screen")
-        result = await service.execute_tool("display", {
-            "action": "clear",
-            "screen_name": "nonexistent screen",
-        })
+        result = await service.execute_tool(
+            "display",
+            {
+                "action": "clear",
+                "screen_name": "nonexistent screen",
+            },
+        )
         assert "not found" in result.lower() or "shop screen" in result.lower()
 
     @pytest.mark.asyncio
     async def test_tool_show_text(self, service: ScreenService) -> None:
         screen = service.connect("test screen")
-        result = await service.execute_tool("display", {
-            "action": "show_text",
-            "screen_name": "test screen",
-            "title": "Hello",
-            "content": "# Heading\nSome text",
-        })
+        result = await service.execute_tool(
+            "display",
+            {
+                "action": "show_text",
+                "screen_name": "test screen",
+                "title": "Hello",
+                "content": "# Heading\nSome text",
+            },
+        )
         assert "displaying" in result.lower()
         msg = screen.queue.get_nowait()
         data = json.loads(msg.split("data: ")[1].split("\n")[0])
@@ -398,22 +408,28 @@ class TestToolDefinitions:
     @pytest.mark.asyncio
     async def test_tool_show_text_missing_content(self, service: ScreenService) -> None:
         service.connect("test screen")
-        result = await service.execute_tool("display", {
-            "action": "show_text",
-            "screen_name": "test screen",
-            "title": "Hello",
-        })
+        result = await service.execute_tool(
+            "display",
+            {
+                "action": "show_text",
+                "screen_name": "test screen",
+                "title": "Hello",
+            },
+        )
         assert "need content" in result.lower()
 
     @pytest.mark.asyncio
     async def test_tool_show_images(self, service: ScreenService) -> None:
         # Establish a screen with the test name so the tool resolves it.
         service.connect("test screen")
-        result = await service.execute_tool("display", {
-            "action": "show_images",
-            "screen_name": "test screen",
-            "images": [{"url": "/img/1.png", "caption": "Photo"}],
-        })
+        result = await service.execute_tool(
+            "display",
+            {
+                "action": "show_images",
+                "screen_name": "test screen",
+                "images": [{"url": "/img/1.png", "caption": "Photo"}],
+            },
+        )
         assert "1 image" in result
 
     @pytest.mark.asyncio
@@ -456,12 +472,14 @@ class TestFindPagesByKeyword:
 
     def test_prefers_distinctive_terms(self) -> None:
         """'pinout' only on page 3, but 'VCU' on all pages (like a header). Should pick page 3."""
-        pdf = self._make_pdf([
-            "VCU Quick Start Guide - Table of Contents",   # page 1: VCU in title
-            "VCU Introduction and Overview",                # page 2: VCU in header
-            "VCU Pinout Table: Pin 1 GND Pin 2 VCC",       # page 3: pinout content
-            "VCU Wiring and Installation",                  # page 4: VCU in header
-        ])
+        pdf = self._make_pdf(
+            [
+                "VCU Quick Start Guide - Table of Contents",  # page 1: VCU in title
+                "VCU Introduction and Overview",  # page 2: VCU in header
+                "VCU Pinout Table: Pin 1 GND Pin 2 VCC",  # page 3: pinout content
+                "VCU Wiring and Installation",  # page 4: VCU in header
+            ]
+        )
         pages = ScreenService._find_pages_by_keyword(pdf, "VCU pinout table")
         assert pages is not None
         assert 3 in pages
@@ -469,22 +487,26 @@ class TestFindPagesByKeyword:
         assert 1 not in pages or 3 in pages  # at minimum, page 3 must be present
 
     def test_finds_page_with_query_terms(self) -> None:
-        pdf = self._make_pdf([
-            "Table of Contents",
-            "Introduction to the system",
-            "Pinout Table: Pin 1 GND Pin 2 VCC Pin 3 CAN_H",
-        ])
+        pdf = self._make_pdf(
+            [
+                "Table of Contents",
+                "Introduction to the system",
+                "Pinout Table: Pin 1 GND Pin 2 VCC Pin 3 CAN_H",
+            ]
+        )
         pages = ScreenService._find_pages_by_keyword(pdf, "pinout table")
         assert pages is not None
         assert 3 in pages
 
     def test_includes_neighbors(self) -> None:
-        pdf = self._make_pdf([
-            "Unrelated content here",
-            "Unrelated content here",
-            "Pinout Table with all the pin details",
-            "Unrelated content here",
-        ])
+        pdf = self._make_pdf(
+            [
+                "Unrelated content here",
+                "Unrelated content here",
+                "Pinout Table with all the pin details",
+                "Unrelated content here",
+            ]
+        )
         pages = ScreenService._find_pages_by_keyword(pdf, "pinout table")
         assert pages is not None
         assert 2 in pages  # neighbor before

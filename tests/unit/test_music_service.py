@@ -112,7 +112,9 @@ class StubMusicBackend(MusicBackend):
         # Container items (stations) have no URI but carry DIDL meta
         if item.uri or item.didl_meta:
             return Playable(
-                uri=item.uri, didl_meta=item.didl_meta, title=item.title,
+                uri=item.uri,
+                didl_meta=item.didl_meta,
+                title=item.title,
             )
         # Opaque search-result items need id → uri resolution
         return Playable(
@@ -193,7 +195,8 @@ async def test_start_disabled_without_config(resolver: ServiceResolver) -> None:
 
 
 async def test_stop_closes_backend(
-    service: MusicService, stub_backend: StubMusicBackend,
+    service: MusicService,
+    stub_backend: StubMusicBackend,
 ) -> None:
     await service.stop()
     assert stub_backend.closed
@@ -271,12 +274,14 @@ async def test_tool_list_playlists(service: MusicService) -> None:
 
 
 async def test_tool_search(
-    service: MusicService, stub_backend: StubMusicBackend,
+    service: MusicService,
+    stub_backend: StubMusicBackend,
 ) -> None:
     from gilbert.interfaces.ui import ToolOutput
 
     result = await service.execute_tool(
-        "search_music", {"query": "led zeppelin", "kind": "tracks", "limit": 5},
+        "search_music",
+        {"query": "led zeppelin", "kind": "tracks", "limit": 5},
     )
     # Returns ToolOutput so the AI still sees the JSON via .text AND the
     # chat frontend gets interactive UI blocks via .ui_blocks.
@@ -291,7 +296,8 @@ async def test_tool_search(
 
 
 async def test_tool_search_unavailable(
-    service: MusicService, stub_backend: StubMusicBackend,
+    service: MusicService,
+    stub_backend: StubMusicBackend,
 ) -> None:
     stub_backend.search_should_fail = True
     # Error path still returns a plain JSON string — no UI on failure.
@@ -302,7 +308,8 @@ async def test_tool_search_unavailable(
 
 
 async def test_tool_search_returns_ui_block_per_result(
-    service: MusicService, stub_backend: StubMusicBackend,
+    service: MusicService,
+    stub_backend: StubMusicBackend,
 ) -> None:
     """Regression guard for the search-and-play flow.
 
@@ -328,7 +335,10 @@ async def test_tool_search_returns_ui_block_per_result(
     ]
 
     async def fake_search(
-        query: str, *, kind: MusicItemKind = MusicItemKind.TRACK, limit: int = 10,
+        query: str,
+        *,
+        kind: MusicItemKind = MusicItemKind.TRACK,
+        limit: int = 10,
     ) -> list[MusicItem]:
         return many
 
@@ -361,7 +371,8 @@ async def test_tool_search_returns_ui_block_per_result(
 
 
 async def test_tool_search_empty_results_still_returns_tool_output(
-    service: MusicService, stub_backend: StubMusicBackend,
+    service: MusicService,
+    stub_backend: StubMusicBackend,
 ) -> None:
     """No results → no UI blocks, but still a ToolOutput so the chat
     frontend can tell "found nothing" apart from "search failed"."""
@@ -380,7 +391,8 @@ async def test_tool_search_empty_results_still_returns_tool_output(
 
 
 async def test_tool_search_default_kind_is_tracks(
-    service: MusicService, stub_backend: StubMusicBackend,
+    service: MusicService,
+    stub_backend: StubMusicBackend,
 ) -> None:
     await service.execute_tool("search_music", {"query": "foo"})
     assert stub_backend.search_calls[0][1] == MusicItemKind.TRACK
@@ -407,10 +419,13 @@ async def test_tool_play_favorite_by_title(
     service._enabled = True
     await service.start(resolver)
 
-    result = await service.execute_tool("play_music", {
-        "title": "Horizon",
-        "speakers": ["Kitchen"],
-    })
+    result = await service.execute_tool(
+        "play_music",
+        {
+            "title": "Horizon",
+            "speakers": ["Kitchen"],
+        },
+    )
     parsed = json.loads(result)
 
     assert parsed["status"] == "playing"
@@ -488,14 +503,16 @@ async def test_tool_play_no_match_returns_error(
         assert "error" in parsed
         assert parsed["sources_tried"] == ["favorites", "playlists", "search"]
     finally:
-        _SEARCH_RESULTS.append(MusicItem(
-            id="opaque-track-1",
-            title="Black Dog",
-            kind=MusicItemKind.TRACK,
-            subtitle="Led Zeppelin",
-            uri="",
-            service="Spotify",
-        ))
+        _SEARCH_RESULTS.append(
+            MusicItem(
+                id="opaque-track-1",
+                title="Black Dog",
+                kind=MusicItemKind.TRACK,
+                subtitle="Led Zeppelin",
+                uri="",
+                service="Spotify",
+            )
+        )
 
 
 async def test_tool_play_restricted_source(
@@ -510,10 +527,13 @@ async def test_tool_play_restricted_source(
     service._enabled = True
     await service.start(resolver)
 
-    result = await service.execute_tool("play_music", {
-        "title": "Workout",  # Only in playlists
-        "source": "favorites",
-    })
+    result = await service.execute_tool(
+        "play_music",
+        {
+            "title": "Workout",  # Only in playlists
+            "source": "favorites",
+        },
+    )
     parsed = json.loads(result)
     assert "error" in parsed
     assert parsed["sources_tried"] == ["favorites"]
@@ -662,16 +682,18 @@ async def test_now_playing_delegates_to_speaker(
     from gilbert.interfaces.speaker import NowPlaying, PlaybackState
 
     speaker_svc = _mock_speaker_svc()
-    speaker_svc.get_now_playing = AsyncMock(return_value=NowPlaying(
-        state=PlaybackState.PLAYING,
-        title="Black Dog",
-        artist="Led Zeppelin",
-        album="Led Zeppelin IV",
-        album_art_url="https://example.com/art.jpg",
-        uri="spotify:track:abc",
-        duration_seconds=296.0,
-        position_seconds=42.5,
-    ))
+    speaker_svc.get_now_playing = AsyncMock(
+        return_value=NowPlaying(
+            state=PlaybackState.PLAYING,
+            title="Black Dog",
+            artist="Led Zeppelin",
+            album="Led Zeppelin IV",
+            album_art_url="https://example.com/art.jpg",
+            uri="spotify:track:abc",
+            duration_seconds=296.0,
+            position_seconds=42.5,
+        )
+    )
     resolver = _resolver_with_speaker(speaker_svc)
 
     service = MusicService()
@@ -735,10 +757,13 @@ class _ActionableBackend(MusicBackend):
     async def close(self) -> None: ...
     async def list_favorites(self) -> list[MusicItem]:
         return []
+
     async def list_playlists(self) -> list[MusicItem]:
         return []
+
     async def search(self, query: str, *, kind: Any = None, limit: int = 10) -> list[MusicItem]:
         return []
+
     async def resolve_playable(self, item: MusicItem) -> Playable:
         return Playable(uri="")
 

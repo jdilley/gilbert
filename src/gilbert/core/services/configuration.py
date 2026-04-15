@@ -122,14 +122,20 @@ class ConfigurationService(Service):
             except (TypeError, ValueError):
                 logger.warning("Skipping non-serializable config section: %s", key)
                 continue
-            await storage.put(_CONFIG_COLLECTION, key, safe if isinstance(safe, dict) else {"_value": safe})
+            await storage.put(
+                _CONFIG_COLLECTION, key, safe if isinstance(safe, dict) else {"_value": safe}
+            )
 
         # Write sentinel
-        await storage.put(_META_COLLECTION, _SCHEMA_ENTITY_ID, {
-            "version": _SCHEMA_VERSION,
-            "migrated_at": datetime.now(UTC).isoformat(),
-            "source": "yaml",
-        })
+        await storage.put(
+            _META_COLLECTION,
+            _SCHEMA_ENTITY_ID,
+            {
+                "version": _SCHEMA_VERSION,
+                "migrated_at": datetime.now(UTC).isoformat(),
+                "source": "yaml",
+            },
+        )
         logger.info("Config seeded to entity storage")
 
     async def load_from_storage(self, storage: StorageBackend) -> None:
@@ -160,7 +166,9 @@ class ConfigurationService(Service):
             self._config = GilbertConfig.model_validate(self._raw)
             self._raw = self._config.model_dump()
         except Exception:
-            logger.exception("Config validation failed after loading from storage — using YAML defaults")
+            logger.exception(
+                "Config validation failed after loading from storage — using YAML defaults"
+            )
 
     # --- Read API ---
 
@@ -318,16 +326,18 @@ class ConfigurationService(Service):
                 section = self.get_section_safe(ns)
                 enabled = section.get("enabled", False)
                 toggle_values[ns] = enabled
-                toggle_params.append(self._serialize_param(
-                    ConfigParam(
-                        key=ns,
-                        type=ToolParameterType.BOOLEAN,
-                        description=info.toggle_description or f"Enable {info.name} service",
-                        default=False,
-                        restart_required=True,
-                    ),
-                    toggle_values,
-                ))
+                toggle_params.append(
+                    self._serialize_param(
+                        ConfigParam(
+                            key=ns,
+                            type=ToolParameterType.BOOLEAN,
+                            description=info.toggle_description or f"Enable {info.name} service",
+                            default=False,
+                            restart_required=True,
+                        ),
+                        toggle_values,
+                    )
+                )
 
             # Skip disabled toggleable services — their config section
             # only appears once the service is enabled via the Services tab.
@@ -355,35 +365,44 @@ class ConfigurationService(Service):
                 except Exception:
                     logger.exception("Error collecting config actions for %s", ns)
 
-            categories.setdefault(cat, []).append({
-                "namespace": ns,
-                "service_name": name,
-                "enabled": section.get("enabled", True),
-                "started": started,
-                "failed": failed,
-                "params": [self._serialize_param(p, section) for p in params],
-                "values": section,
-                "actions": [self._serialize_action(a) for a in actions],
-            })
+            categories.setdefault(cat, []).append(
+                {
+                    "namespace": ns,
+                    "service_name": name,
+                    "enabled": section.get("enabled", True),
+                    "started": started,
+                    "failed": failed,
+                    "params": [self._serialize_param(p, section) for p in params],
+                    "values": section,
+                    "actions": [self._serialize_action(a) for a in actions],
+                }
+            )
 
         # Add the "Services" category if there are toggleable services
         if toggle_params:
             # Sort toggle params alphabetically by key
             toggle_params.sort(key=lambda p: p["key"])
-            categories["Services"] = [{
-                "namespace": "_services",
-                "service_name": "_services",
-                "enabled": True,
-                "started": True,
-                "failed": False,
-                "params": toggle_params,
-                "values": toggle_values,
-            }]
+            categories["Services"] = [
+                {
+                    "namespace": "_services",
+                    "service_name": "_services",
+                    "enabled": True,
+                    "started": True,
+                    "failed": False,
+                    "params": toggle_params,
+                    "values": toggle_values,
+                }
+            ]
 
         # Sort categories in a stable display order
         order = [
-            "Services", "Intelligence", "Media", "Communication",
-            "Security", "Monitoring", "Infrastructure",
+            "Services",
+            "Intelligence",
+            "Media",
+            "Communication",
+            "Security",
+            "Monitoring",
+            "Infrastructure",
         ]
         rank = {name: i for i, name in enumerate(order)}
 
@@ -395,7 +414,9 @@ class ConfigurationService(Service):
 
     # --- Param serialization ---
 
-    def _serialize_param(self, p: ConfigParam, values: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _serialize_param(
+        self, p: ConfigParam, values: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Serialize a ConfigParam for the WS response, resolving dynamic choices.
 
         ``choices`` may be a list of plain strings (label = value) or a
@@ -455,7 +476,8 @@ class ConfigurationService(Service):
         }
 
     def _resolve_dynamic_choices(
-        self, source: str,
+        self,
+        source: str,
     ) -> list[str] | list[dict[str, str]] | None:
         """Resolve a dynamic choices source to a list of values or labeled options.
 
@@ -509,8 +531,7 @@ class ConfigurationService(Service):
                         {
                             "value": m.id,
                             "label": (
-                                f"{m.name} ({m.email_address})"
-                                if m.email_address else m.name
+                                f"{m.name} ({m.email_address})" if m.email_address else m.name
                             ),
                         }
                         for m in svc.cached_mailboxes
@@ -526,7 +547,9 @@ class ConfigurationService(Service):
 
     @classmethod
     def _mask_sensitive(
-        cls, section: dict[str, Any], params: list[ConfigParam],
+        cls,
+        section: dict[str, Any],
+        params: list[ConfigParam],
     ) -> dict[str, Any]:
         """Return a copy of *section* with sensitive fields masked."""
         sensitive_keys = {p.key for p in params if p.sensitive}
@@ -674,11 +697,13 @@ class ConfigurationService(Service):
             return
         if isinstance(bus_svc, EventBusProvider):
             try:
-                await bus_svc.bus.publish(Event(
-                    event_type="config.changed",
-                    data={"path": path, "value": value},
-                    source="configuration",
-                ))
+                await bus_svc.bus.publish(
+                    Event(
+                        event_type="config.changed",
+                        data={"path": path, "value": value},
+                        source="configuration",
+                    )
+                )
             except Exception:
                 logger.debug("Failed to publish config.changed event")
 
@@ -786,22 +811,24 @@ class ConfigurationService(Service):
 
         if namespace:
             params = all_params.get(namespace, [])
-            return json.dumps({
-                "namespace": namespace,
-                "parameters": [
-                    {
-                        "key": p.key,
-                        "type": p.type.value,
-                        "description": p.description,
-                        "default": p.default,
-                        "restart_required": p.restart_required,
-                        "sensitive": p.sensitive,
-                        "choices": list(p.choices) if p.choices else None,
-                        "multiline": p.multiline,
-                    }
-                    for p in params
-                ],
-            })
+            return json.dumps(
+                {
+                    "namespace": namespace,
+                    "parameters": [
+                        {
+                            "key": p.key,
+                            "type": p.type.value,
+                            "description": p.description,
+                            "default": p.default,
+                            "restart_required": p.restart_required,
+                            "sensitive": p.sensitive,
+                            "choices": list(p.choices) if p.choices else None,
+                            "multiline": p.multiline,
+                        }
+                        for p in params
+                    ],
+                }
+            )
 
         result: dict[str, Any] = {}
         for ns, params in all_params.items():
@@ -831,7 +858,9 @@ class ConfigurationService(Service):
         }
 
     async def _ws_describe_list(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         """Return all config organized by category."""
         categories = self.describe_categories()
@@ -842,14 +871,18 @@ class ConfigurationService(Service):
         }
 
     async def _ws_section_get(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         """Return a single namespace's params + values."""
         namespace = frame.get("namespace", "")
         if not namespace:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "namespace required", "code": 400,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "namespace required",
+                "code": 400,
             }
 
         configurable = self._find_configurable(namespace)
@@ -885,15 +918,19 @@ class ConfigurationService(Service):
         }
 
     async def _ws_section_set(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         """Set one or more values in a namespace."""
         namespace = frame.get("namespace", "")
         values = frame.get("values", {})
         if not namespace or not isinstance(values, dict):
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "namespace and values required", "code": 400,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "namespace and values required",
+                "code": 400,
             }
 
         # Skip masked values (user didn't change the sensitive field)
@@ -913,7 +950,9 @@ class ConfigurationService(Service):
         }
 
     async def _ws_action_invoke(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         """Invoke a ConfigAction on a service, RBAC-checked by role."""
         namespace = frame.get("namespace", "")
@@ -921,20 +960,26 @@ class ConfigurationService(Service):
         payload = frame.get("payload", {}) or {}
         if not namespace or not key:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "namespace and key required", "code": 400,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "namespace and key required",
+                "code": 400,
             }
         if not isinstance(payload, dict):
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "payload must be an object", "code": 400,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "payload must be an object",
+                "code": 400,
             }
 
         configurable = self._find_configurable(namespace)
         if configurable is None or not isinstance(configurable, ConfigActionProvider):
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": f"No actions available for '{namespace}'", "code": 404,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": f"No actions available for '{namespace}'",
+                "code": 404,
             }
 
         # Find the action descriptor so we can RBAC-check before invoking
@@ -943,14 +988,18 @@ class ConfigurationService(Service):
         except Exception:
             logger.exception("Error collecting config actions for %s", namespace)
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "Failed to list actions", "code": 500,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Failed to list actions",
+                "code": 500,
             }
         action = next((a for a in actions if a.key == key), None)
         if action is None:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": f"Unknown action '{key}'", "code": 404,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": f"Unknown action '{key}'",
+                "code": 404,
             }
 
         # RBAC check
@@ -963,7 +1012,8 @@ class ConfigurationService(Service):
                 user_level = getattr(conn, "user_level", 999)
                 if user_level > required_level:
                     return {
-                        "type": "gilbert.error", "ref": frame.get("id"),
+                        "type": "gilbert.error",
+                        "ref": frame.get("id"),
                         "error": "Insufficient permissions for this action",
                         "code": 403,
                     }
@@ -973,7 +1023,8 @@ class ConfigurationService(Service):
         except Exception as exc:
             logger.exception("Config action %s.%s failed", namespace, key)
             result = ConfigActionResult(
-                status="error", message=f"Action failed: {exc}",
+                status="error",
+                message=f"Action failed: {exc}",
             )
 
         return {
@@ -985,21 +1036,27 @@ class ConfigurationService(Service):
         }
 
     async def _ws_section_reset(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         """Reset a namespace to its default values."""
         namespace = frame.get("namespace", "")
         if not namespace:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": "namespace required", "code": 400,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "namespace required",
+                "code": 400,
             }
 
         configurable = self._find_configurable(namespace)
         if configurable is None:
             return {
-                "type": "gilbert.error", "ref": frame.get("id"),
-                "error": f"No configurable service for '{namespace}'", "code": 404,
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": f"No configurable service for '{namespace}'",
+                "code": 404,
             }
 
         # Build default values from config_params

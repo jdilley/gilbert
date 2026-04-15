@@ -49,9 +49,7 @@ class StubUserBackend(UserBackend):
     async def delete_user(self, user_id: str) -> None:
         self._users.pop(user_id, None)
 
-    async def list_users(
-        self, limit: int | None = None, offset: int = 0
-    ) -> list[dict[str, Any]]:
+    async def list_users(self, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
         return list(self._users.values())
 
     async def add_provider_link(
@@ -131,13 +129,16 @@ async def local_auth() -> LocalAuthBackend:
 
     # Create a test user with a hashed password.
     pw_hash = svc.hash_password("secret123")
-    await backend.create_user("u1", {
-        "username": "testuser",
-        "email": "test@example.com",
-        "display_name": "Test",
-        "password_hash": pw_hash,
-        "roles": ["user"],
-    })
+    await backend.create_user(
+        "u1",
+        {
+            "username": "testuser",
+            "email": "test@example.com",
+            "display_name": "Test",
+            "password_hash": pw_hash,
+            "roles": ["user"],
+        },
+    )
 
     return svc
 

@@ -6,10 +6,10 @@ from pathlib import Path
 
 # ANSI color codes
 COLORS = {
-    "DEBUG": "\033[36m",     # cyan
-    "INFO": "\033[32m",      # green
-    "WARNING": "\033[33m",   # yellow
-    "ERROR": "\033[31m",     # red
+    "DEBUG": "\033[36m",  # cyan
+    "INFO": "\033[32m",  # green
+    "WARNING": "\033[33m",  # yellow
+    "ERROR": "\033[31m",  # red
     "CRITICAL": "\033[1;31m",  # bold red
 }
 RESET = "\033[0m"
@@ -49,10 +49,12 @@ def setup_logging(
 
     # Console handler — colored output to stderr
     console = logging.StreamHandler(sys.stderr)
-    console.setFormatter(ColorFormatter(
-        fmt="%(asctime)s %(levelname)s %(name)s — %(message)s",
-        datefmt="%H:%M:%S",
-    ))
+    console.setFormatter(
+        ColorFormatter(
+            fmt="%(asctime)s %(levelname)s %(name)s — %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    )
     root.addHandler(console)
 
     # General file handler
@@ -60,10 +62,12 @@ def setup_logging(
         path = Path(log_file).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(str(path))
-        file_handler.setFormatter(logging.Formatter(
-            fmt="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        ))
+        file_handler.setFormatter(
+            logging.Formatter(
+                fmt="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
         root.addHandler(file_handler)
 
     # AI API call log — separate file for AI-specific logging
@@ -71,10 +75,12 @@ def setup_logging(
         path = Path(ai_log_file).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
         ai_handler = logging.FileHandler(str(path))
-        ai_handler.setFormatter(logging.Formatter(
-            fmt="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        ))
+        ai_handler.setFormatter(
+            logging.Formatter(
+                fmt="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
         ai_logger = logging.getLogger("gilbert.ai")
         ai_logger.addHandler(ai_handler)
         ai_logger.setLevel(logging.DEBUG)  # always capture AI calls in detail

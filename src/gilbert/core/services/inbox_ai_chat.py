@@ -111,7 +111,8 @@ class InboxAIChatService(Service):
         if isinstance(event_bus_svc, EventBusProvider):
             self._event_bus = event_bus_svc.bus
             self._unsubscribe = self._event_bus.subscribe(
-                "inbox.message.received", self._on_message_received,
+                "inbox.message.received",
+                self._on_message_received,
             )
 
         logger.info(
@@ -138,17 +139,20 @@ class InboxAIChatService(Service):
     def config_params(self) -> list[ConfigParam]:
         return [
             ConfigParam(
-                key="allowed_emails", type=ToolParameterType.ARRAY,
+                key="allowed_emails",
+                type=ToolParameterType.ARRAY,
                 description="Email addresses allowed to chat with AI.",
                 default=[],
             ),
             ConfigParam(
-                key="allowed_domains", type=ToolParameterType.ARRAY,
+                key="allowed_domains",
+                type=ToolParameterType.ARRAY,
                 description="Email domains allowed to chat with AI.",
                 default=[],
             ),
             ConfigParam(
-                key="required_subject", type=ToolParameterType.STRING,
+                key="required_subject",
+                type=ToolParameterType.STRING,
                 description="Required subject line prefix (empty = no filter).",
                 default="",
             ),
@@ -209,11 +213,17 @@ class InboxAIChatService(Service):
         except Exception:
             logger.exception(
                 "Failed to process email AI chat: message=%s sender=%s mailbox=%s",
-                message_id, sender_email, mailbox_id,
+                message_id,
+                sender_email,
+                mailbox_id,
             )
 
     async def _process_message(
-        self, mailbox_id: str, message_id: str, thread_id: str, sender_email: str,
+        self,
+        mailbox_id: str,
+        message_id: str,
+        thread_id: str,
+        sender_email: str,
     ) -> None:
         """Process a single inbound message: AI chat + reply.
 
@@ -222,11 +232,18 @@ class InboxAIChatService(Service):
         """
         async with self._process_lock:
             await self._process_message_locked(
-                mailbox_id, message_id, thread_id, sender_email,
+                mailbox_id,
+                message_id,
+                thread_id,
+                sender_email,
             )
 
     async def _process_message_locked(
-        self, mailbox_id: str, message_id: str, thread_id: str, sender_email: str,
+        self,
+        mailbox_id: str,
+        message_id: str,
+        thread_id: str,
+        sender_email: str,
     ) -> None:
         """Inner processing — must be called under ``_process_lock``."""
         # Propagate SYSTEM identity so InboxProvider's read methods
@@ -304,7 +321,10 @@ class InboxAIChatService(Service):
         att_msg = f" with {len(attachments)} attachment(s)" if attachments else ""
         logger.info(
             "Email AI chat: replied to %s%s (thread=%s, conv=%s)",
-            sender_email, att_msg, thread_id, conv_id,
+            sender_email,
+            att_msg,
+            thread_id,
+            conv_id,
         )
 
     # ── Reply dedup ────────────────────────────────────────────
@@ -321,11 +341,15 @@ class InboxAIChatService(Service):
         """Record that we replied to a message."""
         if self._storage is None:
             return
-        await self._storage.put(self._REPLIED_COLLECTION, message_id, {
-            "message_id": message_id,
-            "sender_email": sender_email,
-            "replied_at": datetime.now(UTC).isoformat(),
-        })
+        await self._storage.put(
+            self._REPLIED_COLLECTION,
+            message_id,
+            {
+                "message_id": message_id,
+                "sender_email": sender_email,
+                "replied_at": datetime.now(UTC).isoformat(),
+            },
+        )
 
     # ── Allowlist ──────────────────────────────────────────────
 
@@ -449,15 +473,22 @@ class InboxAIChatService(Service):
         return None
 
     async def _set_conversation_id(
-        self, thread_id: str, conversation_id: str, sender_email: str,
+        self,
+        thread_id: str,
+        conversation_id: str,
+        sender_email: str,
     ) -> None:
         """Store the thread → conversation mapping."""
-        await self._storage.put(_THREAD_COLLECTION, thread_id, {
-            "thread_id": thread_id,
-            "conversation_id": conversation_id,
-            "sender_email": sender_email,
-            "updated_at": datetime.now(UTC).isoformat(),
-        })
+        await self._storage.put(
+            _THREAD_COLLECTION,
+            thread_id,
+            {
+                "thread_id": thread_id,
+                "conversation_id": conversation_id,
+                "sender_email": sender_email,
+                "updated_at": datetime.now(UTC).isoformat(),
+            },
+        )
 
 
 # ── Utilities ──────────────────────────────────────────────────

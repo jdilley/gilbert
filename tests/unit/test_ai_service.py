@@ -97,7 +97,8 @@ class UIBlockToolProviderService(Service):
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
-            name="ui_tool", capabilities=frozenset({"ai_tools"}),
+            name="ui_tool",
+            capabilities=frozenset({"ai_tools"}),
         )
 
     @property
@@ -109,6 +110,7 @@ class UIBlockToolProviderService(Service):
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         from gilbert.interfaces.ui import ToolOutput, UIBlock, UIElement
+
         return ToolOutput(
             text="tool picked something",
             ui_blocks=[
@@ -244,10 +246,12 @@ async def test_chat_simple_response(
     stub_backend: StubAIBackend,
     resolver: ServiceResolver,
 ) -> None:
-    stub_backend.queue_response(AIResponse(
-        message=Message(role=MessageRole.ASSISTANT, content="Hello there!"),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="Hello there!"),
+            model="stub",
+        )
+    )
     await ai_service.start(resolver)
 
     text, conv_id, _ui, _tu = await ai_service.chat("Hi")
@@ -269,14 +273,18 @@ async def test_chat_continues_conversation(
     resolver: ServiceResolver,
     storage_backend: StorageBackend,
 ) -> None:
-    stub_backend.queue_response(AIResponse(
-        message=Message(role=MessageRole.ASSISTANT, content="First reply"),
-        model="stub",
-    ))
-    stub_backend.queue_response(AIResponse(
-        message=Message(role=MessageRole.ASSISTANT, content="Second reply"),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="First reply"),
+            model="stub",
+        )
+    )
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="Second reply"),
+            model="stub",
+        )
+    )
     await ai_service.start(resolver)
 
     # First message
@@ -314,9 +322,7 @@ async def test_chat_with_tool_calls(
         name="get_weather",
         description="Get weather",
         parameters=[
-            ToolParameter(
-                name="city", type=ToolParameterType.STRING, description="City name"
-            ),
+            ToolParameter(name="city", type=ToolParameterType.STRING, description="City name"),
         ],
     )
     tool_provider = StubToolProviderService(
@@ -336,27 +342,33 @@ async def test_chat_with_tool_calls(
     resolver.get_all = lambda cap: [tool_provider] if cap == "ai_tools" else []
 
     # Round 1: AI requests a tool call
-    stub_backend.queue_response(AIResponse(
-        message=Message(
-            role=MessageRole.ASSISTANT,
-            content="Let me check the weather.",
-            tool_calls=[ToolCall(
-                tool_call_id="tc_1",
-                tool_name="get_weather",
-                arguments={"city": "Portland"},
-            )],
-        ),
-        model="stub",
-        stop_reason=StopReason.TOOL_USE,
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(
+                role=MessageRole.ASSISTANT,
+                content="Let me check the weather.",
+                tool_calls=[
+                    ToolCall(
+                        tool_call_id="tc_1",
+                        tool_name="get_weather",
+                        arguments={"city": "Portland"},
+                    )
+                ],
+            ),
+            model="stub",
+            stop_reason=StopReason.TOOL_USE,
+        )
+    )
     # Round 2: AI gives final response
-    stub_backend.queue_response(AIResponse(
-        message=Message(
-            role=MessageRole.ASSISTANT,
-            content="It's 72F and sunny in Portland!",
-        ),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(
+                role=MessageRole.ASSISTANT,
+                content="It's 72F and sunny in Portland!",
+            ),
+            model="stub",
+        )
+    )
 
     await ai_service.start(resolver)
     text, _, _ui, _tu = await ai_service.chat("What's the weather in Portland?")
@@ -406,27 +418,33 @@ async def test_chat_ui_block_response_index_skips_empty_assistant_rows(
     resolver.get_all = lambda cap: [tool_provider] if cap == "ai_tools" else []
 
     # Round 1: AI requests the tool (empty content, tool_calls set).
-    stub_backend.queue_response(AIResponse(
-        message=Message(
-            role=MessageRole.ASSISTANT,
-            content="",
-            tool_calls=[ToolCall(
-                tool_call_id="tc_pick",
-                tool_name="picker",
-                arguments={},
-            )],
-        ),
-        model="stub",
-        stop_reason=StopReason.TOOL_USE,
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(
+                role=MessageRole.ASSISTANT,
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        tool_call_id="tc_pick",
+                        tool_name="picker",
+                        arguments={},
+                    )
+                ],
+            ),
+            model="stub",
+            stop_reason=StopReason.TOOL_USE,
+        )
+    )
     # Round 2: AI gives final answer (non-empty content).
-    stub_backend.queue_response(AIResponse(
-        message=Message(
-            role=MessageRole.ASSISTANT,
-            content="Here's what I found.",
-        ),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(
+                role=MessageRole.ASSISTANT,
+                content="Here's what I found.",
+            ),
+            model="stub",
+        )
+    )
 
     await ai_service.start(resolver)
     _text, _cid, ui_blocks, _tu = await ai_service.chat("pick something")
@@ -474,42 +492,65 @@ async def test_chat_ui_block_response_index_across_multiple_turns(
     resolver.get_all = lambda cap: [tool_provider] if cap == "ai_tools" else []
 
     # Turn 1: tool call → final answer (2 assistant rows, 1 visible)
-    stub_backend.queue_response(AIResponse(
-        message=Message(
-            role=MessageRole.ASSISTANT, content="",
-            tool_calls=[ToolCall(
-                tool_call_id="tc1", tool_name="picker", arguments={},
-            )],
-        ),
-        model="stub", stop_reason=StopReason.TOOL_USE,
-    ))
-    stub_backend.queue_response(AIResponse(
-        message=Message(
-            role=MessageRole.ASSISTANT, content="first answer",
-        ),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(
+                role=MessageRole.ASSISTANT,
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        tool_call_id="tc1",
+                        tool_name="picker",
+                        arguments={},
+                    )
+                ],
+            ),
+            model="stub",
+            stop_reason=StopReason.TOOL_USE,
+        )
+    )
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(
+                role=MessageRole.ASSISTANT,
+                content="first answer",
+            ),
+            model="stub",
+        )
+    )
     # Turn 2: same shape again — another 2 assistant rows, 1 visible
-    stub_backend.queue_response(AIResponse(
-        message=Message(
-            role=MessageRole.ASSISTANT, content="",
-            tool_calls=[ToolCall(
-                tool_call_id="tc2", tool_name="picker", arguments={},
-            )],
-        ),
-        model="stub", stop_reason=StopReason.TOOL_USE,
-    ))
-    stub_backend.queue_response(AIResponse(
-        message=Message(
-            role=MessageRole.ASSISTANT, content="second answer",
-        ),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(
+                role=MessageRole.ASSISTANT,
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        tool_call_id="tc2",
+                        tool_name="picker",
+                        arguments={},
+                    )
+                ],
+            ),
+            model="stub",
+            stop_reason=StopReason.TOOL_USE,
+        )
+    )
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(
+                role=MessageRole.ASSISTANT,
+                content="second answer",
+            ),
+            model="stub",
+        )
+    )
 
     await ai_service.start(resolver)
     _, conv_id, ui_blocks_1, _ = await ai_service.chat("first")
     _, _, ui_blocks_2, _ = await ai_service.chat(
-        "second", conversation_id=conv_id,
+        "second",
+        conversation_id=conv_id,
     )
 
     # First turn's block → first visible assistant (index 0)
@@ -529,18 +570,22 @@ async def test_chat_max_tool_rounds(
     """The agentic loop stops after max_tool_rounds even if AI keeps calling tools."""
     # Queue responses that always request tool calls
     for i in range(10):
-        stub_backend.queue_response(AIResponse(
-            message=Message(
-                role=MessageRole.ASSISTANT,
-                tool_calls=[ToolCall(
-                    tool_call_id=f"tc_{i}",
-                    tool_name="unknown_tool",
-                    arguments={},
-                )],
-            ),
-            model="stub",
-            stop_reason=StopReason.TOOL_USE,
-        ))
+        stub_backend.queue_response(
+            AIResponse(
+                message=Message(
+                    role=MessageRole.ASSISTANT,
+                    tool_calls=[
+                        ToolCall(
+                            tool_call_id=f"tc_{i}",
+                            tool_name="unknown_tool",
+                            arguments={},
+                        )
+                    ],
+                ),
+                model="stub",
+                stop_reason=StopReason.TOOL_USE,
+            )
+        )
 
     await ai_service.start(resolver)
     text, _, _ui, _tu = await ai_service.chat("loop forever")
@@ -557,22 +602,28 @@ async def test_unknown_tool_returns_error_result(
     stub_backend: StubAIBackend,
     resolver: ServiceResolver,
 ) -> None:
-    stub_backend.queue_response(AIResponse(
-        message=Message(
-            role=MessageRole.ASSISTANT,
-            tool_calls=[ToolCall(
-                tool_call_id="tc_bad",
-                tool_name="nonexistent",
-                arguments={},
-            )],
-        ),
-        model="stub",
-        stop_reason=StopReason.TOOL_USE,
-    ))
-    stub_backend.queue_response(AIResponse(
-        message=Message(role=MessageRole.ASSISTANT, content="Sorry, couldn't do that."),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(
+                role=MessageRole.ASSISTANT,
+                tool_calls=[
+                    ToolCall(
+                        tool_call_id="tc_bad",
+                        tool_name="nonexistent",
+                        arguments={},
+                    )
+                ],
+            ),
+            model="stub",
+            stop_reason=StopReason.TOOL_USE,
+        )
+    )
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="Sorry, couldn't do that."),
+            model="stub",
+        )
+    )
 
     await ai_service.start(resolver)
     text, _, _ui, _tu = await ai_service.chat("Do something impossible")
@@ -601,22 +652,28 @@ async def test_tool_execution_error_returns_error_result(
     resolver.get_capability = lambda cap: None
     resolver.get_all = lambda cap: [error_provider] if cap == "ai_tools" else []
 
-    stub_backend.queue_response(AIResponse(
-        message=Message(
-            role=MessageRole.ASSISTANT,
-            tool_calls=[ToolCall(
-                tool_call_id="tc_err",
-                tool_name="fail_tool",
-                arguments={},
-            )],
-        ),
-        model="stub",
-        stop_reason=StopReason.TOOL_USE,
-    ))
-    stub_backend.queue_response(AIResponse(
-        message=Message(role=MessageRole.ASSISTANT, content="That failed."),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(
+                role=MessageRole.ASSISTANT,
+                tool_calls=[
+                    ToolCall(
+                        tool_call_id="tc_err",
+                        tool_name="fail_tool",
+                        arguments={},
+                    )
+                ],
+            ),
+            model="stub",
+            stop_reason=StopReason.TOOL_USE,
+        )
+    )
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="That failed."),
+            model="stub",
+        )
+    )
 
     await ai_service.start(resolver)
     text, _, _ui, _tu = await ai_service.chat("Run the bad tool")
@@ -636,16 +693,19 @@ async def test_conversation_saved_to_storage(
     resolver: ServiceResolver,
     storage_backend: StorageBackend,
 ) -> None:
-    stub_backend.queue_response(AIResponse(
-        message=Message(role=MessageRole.ASSISTANT, content="Saved!"),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="Saved!"),
+            model="stub",
+        )
+    )
     await ai_service.start(resolver)
     _, conv_id, _ui, _tu = await ai_service.chat("Save this")
 
     # Find the conversation save call among all put calls (profiles are also seeded)
     conv_calls = [
-        c for c in storage_backend.put.call_args_list  # type: ignore[union-attr]
+        c
+        for c in storage_backend.put.call_args_list  # type: ignore[union-attr]
         if c[0][0] == "gilbert.ai_conversations"
     ]
     assert len(conv_calls) == 1
@@ -697,11 +757,13 @@ def test_message_serialize_deserialize() -> None:
     original = Message(
         role=MessageRole.ASSISTANT,
         content="Using a tool",
-        tool_calls=[ToolCall(
-            tool_call_id="tc_1",
-            tool_name="search",
-            arguments={"q": "test"},
-        )],
+        tool_calls=[
+            ToolCall(
+                tool_call_id="tc_1",
+                tool_name="search",
+                arguments={"q": "test"},
+            )
+        ],
     )
     serialized = AIService._serialize_message(original)
     deserialized = AIService._deserialize_message(serialized)
@@ -724,32 +786,44 @@ def test_message_with_attachments_serialize_roundtrip() -> None:
         content="summarize please",
         attachments=[
             FileAttachment(
-                kind="image", name="shot.png",
-                media_type="image/png", data=image_payload,
+                kind="image",
+                name="shot.png",
+                media_type="image/png",
+                data=image_payload,
             ),
             FileAttachment(
-                kind="document", name="report.pdf",
-                media_type="application/pdf", data=doc_payload,
+                kind="document",
+                name="report.pdf",
+                media_type="application/pdf",
+                data=doc_payload,
             ),
             FileAttachment(
-                kind="text", name="notes.md",
-                media_type="text/markdown", text="# hello",
+                kind="text",
+                name="notes.md",
+                media_type="text/markdown",
+                text="# hello",
             ),
         ],
     )
     serialized = AIService._serialize_message(original)
     assert serialized["attachments"] == [
         {
-            "kind": "image", "name": "shot.png",
-            "media_type": "image/png", "data": image_payload,
+            "kind": "image",
+            "name": "shot.png",
+            "media_type": "image/png",
+            "data": image_payload,
         },
         {
-            "kind": "document", "name": "report.pdf",
-            "media_type": "application/pdf", "data": doc_payload,
+            "kind": "document",
+            "name": "report.pdf",
+            "media_type": "application/pdf",
+            "data": doc_payload,
         },
         {
-            "kind": "text", "name": "notes.md",
-            "media_type": "text/markdown", "text": "# hello",
+            "kind": "text",
+            "name": "notes.md",
+            "media_type": "text/markdown",
+            "text": "# hello",
         },
     ]
     deserialized = AIService._deserialize_message(serialized)
@@ -789,20 +863,28 @@ def test_parse_frame_attachments_accepts_image_document_text() -> None:
 
     image_payload = base64.b64encode(b"hello image").decode()
     doc_payload = base64.b64encode(b"%PDF-1.4 fake").decode()
-    result = _parse_frame_attachments([
-        {
-            "kind": "image", "name": "a.png",
-            "media_type": "IMAGE/PNG", "data": image_payload,
-        },
-        {
-            "kind": "document", "name": "r.pdf",
-            "media_type": "application/pdf", "data": doc_payload,
-        },
-        {
-            "kind": "text", "name": "notes.md",
-            "media_type": "text/markdown", "text": "# hi",
-        },
-    ])
+    result = _parse_frame_attachments(
+        [
+            {
+                "kind": "image",
+                "name": "a.png",
+                "media_type": "IMAGE/PNG",
+                "data": image_payload,
+            },
+            {
+                "kind": "document",
+                "name": "r.pdf",
+                "media_type": "application/pdf",
+                "data": doc_payload,
+            },
+            {
+                "kind": "text",
+                "name": "notes.md",
+                "media_type": "text/markdown",
+                "text": "# hi",
+            },
+        ]
+    )
     assert [a.kind for a in result] == ["image", "document", "text"]
     assert result[0].media_type == "image/png"
     assert result[1].name == "r.pdf"
@@ -819,9 +901,11 @@ def test_parse_frame_attachments_rejects_bad_image_media_type() -> None:
 
     payload = base64.b64encode(b"x").decode()
     with pytest.raises(ValueError, match="unsupported image media_type"):
-        _parse_frame_attachments([
-            {"kind": "image", "media_type": "image/tiff", "data": payload},
-        ])
+        _parse_frame_attachments(
+            [
+                {"kind": "image", "media_type": "image/tiff", "data": payload},
+            ]
+        )
 
 
 def test_parse_frame_attachments_rejects_bad_document_media_type() -> None:
@@ -829,12 +913,16 @@ def test_parse_frame_attachments_rejects_bad_document_media_type() -> None:
 
     payload = base64.b64encode(b"x").decode()
     with pytest.raises(ValueError, match="unsupported document media_type"):
-        _parse_frame_attachments([
-            {
-                "kind": "document", "name": "x.doc",
-                "media_type": "application/msword", "data": payload,
-            },
-        ])
+        _parse_frame_attachments(
+            [
+                {
+                    "kind": "document",
+                    "name": "x.doc",
+                    "media_type": "application/msword",
+                    "data": payload,
+                },
+            ]
+        )
 
 
 def test_parse_frame_attachments_rejects_document_without_name() -> None:
@@ -842,9 +930,11 @@ def test_parse_frame_attachments_rejects_document_without_name() -> None:
 
     payload = base64.b64encode(b"x").decode()
     with pytest.raises(ValueError, match="document requires a name"):
-        _parse_frame_attachments([
-            {"kind": "document", "media_type": "application/pdf", "data": payload},
-        ])
+        _parse_frame_attachments(
+            [
+                {"kind": "document", "media_type": "application/pdf", "data": payload},
+            ]
+        )
 
 
 def test_parse_frame_attachments_rejects_text_without_name() -> None:
@@ -859,18 +949,18 @@ def test_parse_frame_attachments_rejects_empty_text() -> None:
 
 def test_parse_frame_attachments_rejects_bad_base64() -> None:
     with pytest.raises(ValueError, match="invalid base64"):
-        _parse_frame_attachments([
-            {"kind": "image", "media_type": "image/png", "data": "not base64!!!"},
-        ])
+        _parse_frame_attachments(
+            [
+                {"kind": "image", "media_type": "image/png", "data": "not base64!!!"},
+            ]
+        )
 
 
 def test_parse_frame_attachments_rejects_too_many() -> None:
     import base64
 
     payload = base64.b64encode(b"x").decode()
-    items = [
-        {"kind": "image", "media_type": "image/png", "data": payload}
-    ] * 9
+    items = [{"kind": "image", "media_type": "image/png", "data": payload}] * 9
     with pytest.raises(ValueError, match="too many attachments"):
         _parse_frame_attachments(items)
 
@@ -880,17 +970,21 @@ def test_parse_frame_attachments_rejects_oversize_image() -> None:
 
     oversize = base64.b64encode(b"x" * (5 * 1024 * 1024 + 1)).decode()
     with pytest.raises(ValueError, match="image is too large"):
-        _parse_frame_attachments([
-            {"kind": "image", "media_type": "image/png", "data": oversize},
-        ])
+        _parse_frame_attachments(
+            [
+                {"kind": "image", "media_type": "image/png", "data": oversize},
+            ]
+        )
 
 
 def test_parse_frame_attachments_rejects_oversize_text() -> None:
     big = "x" * (512 * 1024 + 1)
     with pytest.raises(ValueError, match="text is too large"):
-        _parse_frame_attachments([
-            {"kind": "text", "name": "big.txt", "text": big},
-        ])
+        _parse_frame_attachments(
+            [
+                {"kind": "text", "name": "big.txt", "text": big},
+            ]
+        )
 
 
 def test_parse_frame_attachments_converts_xlsx_to_text() -> None:
@@ -916,14 +1010,16 @@ def test_parse_frame_attachments_converts_xlsx_to_text() -> None:
     wb.save(buf)
     payload = base64.b64encode(buf.getvalue()).decode()
 
-    result = _parse_frame_attachments([
-        {
-            "kind": "document",
-            "name": "roster.xlsx",
-            "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "data": payload,
-        },
-    ])
+    result = _parse_frame_attachments(
+        [
+            {
+                "kind": "document",
+                "name": "roster.xlsx",
+                "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "data": payload,
+            },
+        ]
+    )
     assert len(result) == 1
     att = result[0]
     assert att.kind == "text"
@@ -940,14 +1036,16 @@ def test_parse_frame_attachments_rejects_corrupt_xlsx() -> None:
 
     bogus = base64.b64encode(b"not a real xlsx").decode()
     with pytest.raises(ValueError, match="could not read xlsx"):
-        _parse_frame_attachments([
-            {
-                "kind": "document",
-                "name": "bad.xlsx",
-                "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "data": bogus,
-            },
-        ])
+        _parse_frame_attachments(
+            [
+                {
+                    "kind": "document",
+                    "name": "bad.xlsx",
+                    "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "data": bogus,
+                },
+            ]
+        )
 
 
 def test_tool_result_serialize_deserialize() -> None:
@@ -978,10 +1076,12 @@ async def test_set_and_get_conversation_state(
     storage_backend: StorageBackend,
 ) -> None:
     """State can be set and retrieved by key."""
-    stub_backend.queue_response(AIResponse(
-        message=Message(role=MessageRole.ASSISTANT, content="ok"),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="ok"),
+            model="stub",
+        )
+    )
     await ai_service.start(resolver)
 
     _, conv_id, _, _ = await ai_service.chat("Hi")
@@ -1011,10 +1111,12 @@ async def test_get_missing_state_returns_none(
     storage_backend: StorageBackend,
 ) -> None:
     """Getting a non-existent key returns None."""
-    stub_backend.queue_response(AIResponse(
-        message=Message(role=MessageRole.ASSISTANT, content="ok"),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="ok"),
+            model="stub",
+        )
+    )
     await ai_service.start(resolver)
     _, conv_id, _, _ = await ai_service.chat("Hi")
 
@@ -1032,10 +1134,12 @@ async def test_clear_conversation_state(
     storage_backend: StorageBackend,
 ) -> None:
     """Clearing a key removes it from state."""
-    stub_backend.queue_response(AIResponse(
-        message=Message(role=MessageRole.ASSISTANT, content="ok"),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="ok"),
+            model="stub",
+        )
+    )
     await ai_service.start(resolver)
     _, conv_id, _, _ = await ai_service.chat("Hi")
 
@@ -1067,10 +1171,12 @@ async def test_multiple_state_keys_coexist(
     storage_backend: StorageBackend,
 ) -> None:
     """Multiple keys can be stored independently."""
-    stub_backend.queue_response(AIResponse(
-        message=Message(role=MessageRole.ASSISTANT, content="ok"),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="ok"),
+            model="stub",
+        )
+    )
     await ai_service.start(resolver)
     _, conv_id, _, _ = await ai_service.chat("Hi")
 
@@ -1096,10 +1202,12 @@ async def test_state_uses_current_conversation_id(
     storage_backend: StorageBackend,
 ) -> None:
     """When no conversation_id is passed, uses the active one."""
-    stub_backend.queue_response(AIResponse(
-        message=Message(role=MessageRole.ASSISTANT, content="ok"),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="ok"),
+            model="stub",
+        )
+    )
     await ai_service.start(resolver)
     _, conv_id, _, _ = await ai_service.chat("Hi")
 
@@ -1120,10 +1228,12 @@ async def test_state_injected_into_system_prompt(
 ) -> None:
     """Conversation state appears in the system prompt sent to the AI."""
     # First call to create conversation
-    stub_backend.queue_response(AIResponse(
-        message=Message(role=MessageRole.ASSISTANT, content="first"),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="first"),
+            model="stub",
+        )
+    )
     await ai_service.start(resolver)
     _, conv_id, _, _ = await ai_service.chat("Hi")
 
@@ -1133,10 +1243,12 @@ async def test_state_injected_into_system_prompt(
     storage_backend.get = AsyncMock(return_value=saved_data)  # type: ignore[union-attr]
 
     # Second call should see state in prompt
-    stub_backend.queue_response(AIResponse(
-        message=Message(role=MessageRole.ASSISTANT, content="second"),
-        model="stub",
-    ))
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="second"),
+            model="stub",
+        )
+    )
     await ai_service.chat("What's the score?", conversation_id=conv_id)
 
     req = stub_backend.requests[-1]
@@ -1196,12 +1308,14 @@ async def _run_history_load(
     ai_service._storage = storage_backend
     conn = _FakeConn()
     return await ai_service._ws_history_load(
-        conn, {"conversation_id": "conv-1", "id": "req-1"},
+        conn,
+        {"conversation_id": "conv-1", "id": "req-1"},
     )
 
 
 async def test_history_load_attaches_tool_usage_to_final_assistant(
-    ai_service: AIService, storage_backend: Any,
+    ai_service: AIService,
+    storage_backend: Any,
 ) -> None:
     """Intermediate tool-use rounds fold into the final assistant bubble."""
     stored = [
@@ -1210,21 +1324,25 @@ async def test_history_load_attaches_tool_usage_to_final_assistant(
         {
             "role": "assistant",
             "content": "",
-            "tool_calls": [{
-                "tool_call_id": "call-1",
-                "tool_name": "get_weather",
-                "arguments": {"city": "Portland", "_user_id": "u1"},
-            }],
+            "tool_calls": [
+                {
+                    "tool_call_id": "call-1",
+                    "tool_name": "get_weather",
+                    "arguments": {"city": "Portland", "_user_id": "u1"},
+                }
+            ],
         },
         # Tool result row.
         {
             "role": "tool_result",
             "content": "",
-            "tool_results": [{
-                "tool_call_id": "call-1",
-                "content": "72F and sunny",
-                "is_error": False,
-            }],
+            "tool_results": [
+                {
+                    "tool_call_id": "call-1",
+                    "content": "72F and sunny",
+                    "is_error": False,
+                }
+            ],
         },
         # Final assistant message with the answer.
         {"role": "assistant", "content": "It's 72F and sunny in Portland."},
@@ -1246,7 +1364,8 @@ async def test_history_load_attaches_tool_usage_to_final_assistant(
 
 
 async def test_history_load_multiple_tool_rounds_collected(
-    ai_service: AIService, storage_backend: Any,
+    ai_service: AIService,
+    storage_backend: Any,
 ) -> None:
     """Two tool-use rounds in one turn both fold under the final bubble."""
     stored = [
@@ -1254,34 +1373,44 @@ async def test_history_load_multiple_tool_rounds_collected(
         {
             "role": "assistant",
             "content": "",
-            "tool_calls": [{
-                "tool_call_id": "c1",
-                "tool_name": "get_weather",
-                "arguments": {"city": "SF"},
-            }],
+            "tool_calls": [
+                {
+                    "tool_call_id": "c1",
+                    "tool_name": "get_weather",
+                    "arguments": {"city": "SF"},
+                }
+            ],
         },
         {
             "role": "tool_result",
-            "tool_results": [{
-                "tool_call_id": "c1", "content": "Rainy", "is_error": False,
-            }],
+            "tool_results": [
+                {
+                    "tool_call_id": "c1",
+                    "content": "Rainy",
+                    "is_error": False,
+                }
+            ],
         },
         {
             "role": "assistant",
             "content": "",
-            "tool_calls": [{
-                "tool_call_id": "c2",
-                "tool_name": "find_restaurants",
-                "arguments": {"cuisine": "thai"},
-            }],
+            "tool_calls": [
+                {
+                    "tool_call_id": "c2",
+                    "tool_name": "find_restaurants",
+                    "arguments": {"cuisine": "thai"},
+                }
+            ],
         },
         {
             "role": "tool_result",
-            "tool_results": [{
-                "tool_call_id": "c2",
-                "content": "Kin Khao, Lers Ros",
-                "is_error": False,
-            }],
+            "tool_results": [
+                {
+                    "tool_call_id": "c2",
+                    "content": "Kin Khao, Lers Ros",
+                    "is_error": False,
+                }
+            ],
         },
         {"role": "assistant", "content": "Try Kin Khao — bring an umbrella."},
     ]
@@ -1296,7 +1425,8 @@ async def test_history_load_multiple_tool_rounds_collected(
 
 
 async def test_history_load_turn_boundary_resets_usage(
-    ai_service: AIService, storage_backend: Any,
+    ai_service: AIService,
+    storage_backend: Any,
 ) -> None:
     """Tool usage from turn N must not leak onto the assistant reply in turn N+1."""
     stored = [
@@ -1304,11 +1434,13 @@ async def test_history_load_turn_boundary_resets_usage(
         {
             "role": "assistant",
             "content": "",
-            "tool_calls": [{
-                "tool_call_id": "c1",
-                "tool_name": "get_weather",
-                "arguments": {"city": "LA"},
-            }],
+            "tool_calls": [
+                {
+                    "tool_call_id": "c1",
+                    "tool_name": "get_weather",
+                    "arguments": {"city": "LA"},
+                }
+            ],
         },
         {
             "role": "tool_result",
@@ -1329,7 +1461,8 @@ async def test_history_load_turn_boundary_resets_usage(
 
 
 async def test_history_load_plain_reply_has_no_tool_usage(
-    ai_service: AIService, storage_backend: Any,
+    ai_service: AIService,
+    storage_backend: Any,
 ) -> None:
     """Assistant replies that called no tools carry no tool_usage field."""
     stored = [

@@ -39,16 +39,23 @@ class StubConfigurableService(Service):
     def config_params(self) -> list[ConfigParam]:
         return [
             ConfigParam(
-                key="system_prompt", type=ToolParameterType.STRING,
-                description="System prompt.", default="default prompt",
+                key="system_prompt",
+                type=ToolParameterType.STRING,
+                description="System prompt.",
+                default="default prompt",
             ),
             ConfigParam(
-                key="settings.temperature", type=ToolParameterType.NUMBER,
-                description="Temperature.", default=0.7,
+                key="settings.temperature",
+                type=ToolParameterType.NUMBER,
+                description="Temperature.",
+                default=0.7,
             ),
             ConfigParam(
-                key="backend", type=ToolParameterType.STRING,
-                description="Backend.", default="anthropic", restart_required=True,
+                key="backend",
+                type=ToolParameterType.STRING,
+                description="Backend.",
+                default="anthropic",
+                restart_required=True,
             ),
         ]
 
@@ -61,14 +68,16 @@ class StubConfigurableService(Service):
 
 @pytest.fixture
 def config() -> GilbertConfig:
-    return GilbertConfig.model_validate({
-        "ai": {
-            "enabled": True,
-            "backend": "anthropic",
-            "system_prompt": "You are Gilbert.",
-            "settings": {"temperature": 0.7, "max_tokens": 4096},
+    return GilbertConfig.model_validate(
+        {
+            "ai": {
+                "enabled": True,
+                "backend": "anthropic",
+                "system_prompt": "You are Gilbert.",
+                "settings": {"temperature": 0.7, "max_tokens": 4096},
+            }
         }
-    })
+    )
 
 
 @pytest.fixture
@@ -208,9 +217,7 @@ async def test_tool_get_configuration_full(config_svc: ConfigurationService) -> 
 
 
 async def test_tool_get_configuration_by_path(config_svc: ConfigurationService) -> None:
-    result = await config_svc.execute_tool(
-        "get_configuration", {"path": "ai.system_prompt"}
-    )
+    result = await config_svc.execute_tool("get_configuration", {"path": "ai.system_prompt"})
     parsed = json.loads(result)
     assert parsed["value"] == "You are Gilbert."
 
@@ -222,9 +229,7 @@ async def test_tool_describe_configuration(config_svc: ConfigurationService) -> 
     manager._started.append("stub_configurable")
     config_svc._resolver = manager
 
-    result = await config_svc.execute_tool(
-        "describe_configuration", {"namespace": "ai"}
-    )
+    result = await config_svc.execute_tool("describe_configuration", {"namespace": "ai"})
     parsed = json.loads(result)
     assert parsed["namespace"] == "ai"
     assert len(parsed["parameters"]) == 3

@@ -25,6 +25,7 @@ class FakeInboxService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="inbox", capabilities=frozenset({"email"}))
 
     async def get_message(self, message_id: str) -> dict[str, Any] | None:
@@ -39,14 +40,16 @@ class FakeInboxService:
         body_text: str = "",
         attachments: list[EmailAttachment] | None = None,
     ) -> str:
-        self.replies.append({
-            "mailbox_id": mailbox_id,
-            "message_id": message_id,
-            "body_html": body_html,
-            "body_text": body_text,
-            "attachments": attachments,
-            "user_ctx": user_ctx,
-        })
+        self.replies.append(
+            {
+                "mailbox_id": mailbox_id,
+                "message_id": message_id,
+                "body_html": body_html,
+                "body_text": body_text,
+                "attachments": attachments,
+                "user_ctx": user_ctx,
+            }
+        )
         return f"reply_{message_id}"
 
 
@@ -60,6 +63,7 @@ class FakeAIService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="ai", capabilities=frozenset({"ai"}))
 
     async def chat(
@@ -71,11 +75,13 @@ class FakeAIService:
     ) -> tuple[str, str, list[Any], list[Any]]:
         conv_id = conversation_id or f"conv_{self._conv_counter}"
         self._conv_counter += 1
-        self.chats.append({
-            "message": user_message,
-            "conversation_id": conv_id,
-            "user_ctx": user_ctx,
-        })
+        self.chats.append(
+            {
+                "message": user_message,
+                "conversation_id": conv_id,
+                "user_ctx": user_ctx,
+            }
+        )
         return self.response_text, conv_id, [], []
 
 
@@ -106,6 +112,7 @@ class FakeStorageService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="storage", capabilities=frozenset({"entity_storage"}))
 
 
@@ -115,6 +122,7 @@ class FakeUserService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="users", capabilities=frozenset({"users"}))
 
     async def get_user_by_email(self, email: str) -> dict[str, Any] | None:
@@ -140,6 +148,7 @@ class FakeEventBusService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="event_bus", capabilities=frozenset({"event_bus"}))
 
 
@@ -147,10 +156,14 @@ class FakeDocumentContent:
     """Fake DocumentContent for testing."""
 
     def __init__(self, name: str, data: bytes, mime_type: str = "application/pdf") -> None:
-        self.meta = type("Meta", (), {
-            "name": name,
-            "mime_type": mime_type,
-        })()
+        self.meta = type(
+            "Meta",
+            (),
+            {
+                "name": name,
+                "mime_type": mime_type,
+            },
+        )()
         self.data = data
 
 
@@ -184,6 +197,7 @@ class FakeKnowledgeService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="knowledge", capabilities=frozenset({"knowledge"}))
 
     @property
@@ -194,7 +208,7 @@ class FakeKnowledgeService:
         for sid, backend in self._backends.items():
             prefix = sid + ":"
             if document_id.startswith(prefix):
-                return backend, document_id[len(prefix):]
+                return backend, document_id[len(prefix) :]
         raise KeyError(f"No backend found for document: {document_id}")
 
 
@@ -348,14 +362,16 @@ class TestAllowlist:
 
     def test_allowed_by_email(self) -> None:
         svc = _make_service(
-            allowed_emails=["special@other.com"], allowed_domains=[],
+            allowed_emails=["special@other.com"],
+            allowed_domains=[],
         )
         assert svc._is_allowed("special@other.com")
         assert not svc._is_allowed("alice@other.com")
 
     def test_case_insensitive(self) -> None:
         svc = _make_service(
-            allowed_emails=["Alice@Example.com"], allowed_domains=["CORP.COM"],
+            allowed_emails=["Alice@Example.com"],
+            allowed_domains=["CORP.COM"],
         )
         assert svc._is_allowed("alice@example.com")
         assert svc._is_allowed("bob@corp.com")
@@ -368,8 +384,11 @@ class TestAllowlist:
 class TestEventHandling:
     @pytest.mark.asyncio
     async def test_processes_allowed_inbound(
-        self, service: InboxAIChatService, inbox_svc: FakeInboxService,
-        ai_svc: FakeAIService, event_bus_svc: FakeEventBusService,
+        self,
+        service: InboxAIChatService,
+        inbox_svc: FakeInboxService,
+        ai_svc: FakeAIService,
+        event_bus_svc: FakeEventBusService,
     ) -> None:
         await event_bus_svc.bus.publish(_make_event())
 
@@ -382,7 +401,9 @@ class TestEventHandling:
 
     @pytest.mark.asyncio
     async def test_skips_outbound(
-        self, service: InboxAIChatService, ai_svc: FakeAIService,
+        self,
+        service: InboxAIChatService,
+        ai_svc: FakeAIService,
         event_bus_svc: FakeEventBusService,
     ) -> None:
         await event_bus_svc.bus.publish(_make_event(is_inbound=False))
@@ -390,8 +411,11 @@ class TestEventHandling:
 
     @pytest.mark.asyncio
     async def test_skips_disallowed_sender(
-        self, service: InboxAIChatService, ai_svc: FakeAIService,
-        inbox_svc: FakeInboxService, event_bus_svc: FakeEventBusService,
+        self,
+        service: InboxAIChatService,
+        ai_svc: FakeAIService,
+        inbox_svc: FakeInboxService,
+        event_bus_svc: FakeEventBusService,
     ) -> None:
         inbox_svc.messages["msg_bad"] = {
             "_id": "msg_bad",
@@ -400,15 +424,21 @@ class TestEventHandling:
             "sender_name": "Hacker",
             "thread_id": "thread_bad",
         }
-        await event_bus_svc.bus.publish(_make_event(
-            message_id="msg_bad", sender_email="hacker@evil.com",
-        ))
+        await event_bus_svc.bus.publish(
+            _make_event(
+                message_id="msg_bad",
+                sender_email="hacker@evil.com",
+            )
+        )
         assert len(ai_svc.chats) == 0
 
     @pytest.mark.asyncio
     async def test_skips_empty_body_after_stripping(
-        self, service: InboxAIChatService, ai_svc: FakeAIService,
-        inbox_svc: FakeInboxService, event_bus_svc: FakeEventBusService,
+        self,
+        service: InboxAIChatService,
+        ai_svc: FakeAIService,
+        inbox_svc: FakeInboxService,
+        event_bus_svc: FakeEventBusService,
     ) -> None:
         inbox_svc.messages["msg_empty"] = {
             "_id": "msg_empty",
@@ -424,8 +454,11 @@ class TestEventHandling:
 class TestConversationContinuity:
     @pytest.mark.asyncio
     async def test_same_thread_continues_conversation(
-        self, service: InboxAIChatService, inbox_svc: FakeInboxService,
-        ai_svc: FakeAIService, event_bus_svc: FakeEventBusService,
+        self,
+        service: InboxAIChatService,
+        inbox_svc: FakeInboxService,
+        ai_svc: FakeAIService,
+        event_bus_svc: FakeEventBusService,
     ) -> None:
         # First message in thread
         await event_bus_svc.bus.publish(_make_event())
@@ -446,8 +479,11 @@ class TestConversationContinuity:
 
     @pytest.mark.asyncio
     async def test_different_threads_get_different_conversations(
-        self, service: InboxAIChatService, inbox_svc: FakeInboxService,
-        ai_svc: FakeAIService, event_bus_svc: FakeEventBusService,
+        self,
+        service: InboxAIChatService,
+        inbox_svc: FakeInboxService,
+        ai_svc: FakeAIService,
+        event_bus_svc: FakeEventBusService,
     ) -> None:
         await event_bus_svc.bus.publish(_make_event())
 
@@ -458,9 +494,12 @@ class TestConversationContinuity:
             "sender_name": "Alice",
             "thread_id": "thread_other",
         }
-        await event_bus_svc.bus.publish(_make_event(
-            message_id="msg_other", thread_id="thread_other",
-        ))
+        await event_bus_svc.bus.publish(
+            _make_event(
+                message_id="msg_other",
+                thread_id="thread_other",
+            )
+        )
 
         assert len(ai_svc.chats) == 2
         assert ai_svc.chats[0]["conversation_id"] != ai_svc.chats[1]["conversation_id"]
@@ -469,8 +508,11 @@ class TestConversationContinuity:
 class TestUserResolution:
     @pytest.mark.asyncio
     async def test_resolves_known_user(
-        self, service: InboxAIChatService, ai_svc: FakeAIService,
-        user_svc: FakeUserService, event_bus_svc: FakeEventBusService,
+        self,
+        service: InboxAIChatService,
+        ai_svc: FakeAIService,
+        user_svc: FakeUserService,
+        event_bus_svc: FakeEventBusService,
     ) -> None:
         user_svc.users["alice@example.com"] = {
             "_id": "user_alice",
@@ -487,7 +529,9 @@ class TestUserResolution:
 
     @pytest.mark.asyncio
     async def test_unknown_user_gets_default_context(
-        self, service: InboxAIChatService, ai_svc: FakeAIService,
+        self,
+        service: InboxAIChatService,
+        ai_svc: FakeAIService,
         event_bus_svc: FakeEventBusService,
     ) -> None:
         await event_bus_svc.bus.publish(_make_event())
@@ -552,11 +596,15 @@ class TestToolProvider:
 class TestEmailAttachTool:
     @pytest.mark.asyncio
     async def test_attach_resolves_document(
-        self, service: InboxAIChatService,
+        self,
+        service: InboxAIChatService,
     ) -> None:
-        result = await service.execute_tool("email_attach", {
-            "document_id": "local:docs/report.pdf",
-        })
+        result = await service.execute_tool(
+            "email_attach",
+            {
+                "document_id": "local:docs/report.pdf",
+            },
+        )
         assert "report.pdf" in result
         assert "Queued" in result
         assert len(service._pending_attachments) == 1
@@ -567,40 +615,56 @@ class TestEmailAttachTool:
 
     @pytest.mark.asyncio
     async def test_attach_multiple_documents(
-        self, service: InboxAIChatService,
+        self,
+        service: InboxAIChatService,
     ) -> None:
-        await service.execute_tool("email_attach", {
-            "document_id": "local:docs/report.pdf",
-        })
-        await service.execute_tool("email_attach", {
-            "document_id": "local:docs/spreadsheet.xlsx",
-        })
+        await service.execute_tool(
+            "email_attach",
+            {
+                "document_id": "local:docs/report.pdf",
+            },
+        )
+        await service.execute_tool(
+            "email_attach",
+            {
+                "document_id": "local:docs/spreadsheet.xlsx",
+            },
+        )
         assert len(service._pending_attachments) == 2
         names = {a.filename for a in service._pending_attachments}
         assert names == {"report.pdf", "spreadsheet.xlsx"}
 
     @pytest.mark.asyncio
     async def test_attach_missing_document(
-        self, service: InboxAIChatService,
+        self,
+        service: InboxAIChatService,
     ) -> None:
-        result = await service.execute_tool("email_attach", {
-            "document_id": "local:docs/nonexistent.pdf",
-        })
+        result = await service.execute_tool(
+            "email_attach",
+            {
+                "document_id": "local:docs/nonexistent.pdf",
+            },
+        )
         assert "not found" in result.lower()
         assert len(service._pending_attachments) == 0
 
     @pytest.mark.asyncio
     async def test_attach_unknown_backend(
-        self, service: InboxAIChatService,
+        self,
+        service: InboxAIChatService,
     ) -> None:
-        result = await service.execute_tool("email_attach", {
-            "document_id": "unknown_source:docs/file.pdf",
-        })
+        result = await service.execute_tool(
+            "email_attach",
+            {
+                "document_id": "unknown_source:docs/file.pdf",
+            },
+        )
         assert "no backend" in result.lower()
 
     @pytest.mark.asyncio
     async def test_attach_empty_document_id(
-        self, service: InboxAIChatService,
+        self,
+        service: InboxAIChatService,
     ) -> None:
         result = await service.execute_tool("email_attach", {"document_id": ""})
         assert "required" in result.lower()
@@ -615,16 +679,21 @@ class TestEmailAttachTool:
         svc = _make_service()
         await svc.start(r)
 
-        result = await svc.execute_tool("email_attach", {
-            "document_id": "local:docs/report.pdf",
-        })
+        result = await svc.execute_tool(
+            "email_attach",
+            {
+                "document_id": "local:docs/report.pdf",
+            },
+        )
         assert "not available" in result.lower()
 
 
 class TestAttachmentInReply:
     @pytest.mark.asyncio
     async def test_reply_includes_no_attachments_by_default(
-        self, service: InboxAIChatService, inbox_svc: FakeInboxService,
+        self,
+        service: InboxAIChatService,
+        inbox_svc: FakeInboxService,
         event_bus_svc: FakeEventBusService,
     ) -> None:
         await event_bus_svc.bus.publish(_make_event())
@@ -633,8 +702,11 @@ class TestAttachmentInReply:
 
     @pytest.mark.asyncio
     async def test_reply_includes_queued_attachments(
-        self, service: InboxAIChatService, inbox_svc: FakeInboxService,
-        ai_svc: FakeAIService, event_bus_svc: FakeEventBusService,
+        self,
+        service: InboxAIChatService,
+        inbox_svc: FakeInboxService,
+        ai_svc: FakeAIService,
+        event_bus_svc: FakeEventBusService,
     ) -> None:
         # Simulate the AI queueing an attachment during chat by
         # manually calling the tool before the reply is assembled.
@@ -648,9 +720,12 @@ class TestAttachmentInReply:
             **kwargs: Any,
         ) -> tuple[str, str, list[Any], list[Any]]:
             # Simulate AI calling email_attach tool during chat
-            await service.execute_tool("email_attach", {
-                "document_id": "local:docs/report.pdf",
-            })
+            await service.execute_tool(
+                "email_attach",
+                {
+                    "document_id": "local:docs/report.pdf",
+                },
+            )
             return await original_chat(user_message, conversation_id, user_ctx)
 
         ai_svc.chat = chat_with_attach
@@ -665,8 +740,11 @@ class TestAttachmentInReply:
 
     @pytest.mark.asyncio
     async def test_attachments_cleared_between_messages(
-        self, service: InboxAIChatService, inbox_svc: FakeInboxService,
-        ai_svc: FakeAIService, event_bus_svc: FakeEventBusService,
+        self,
+        service: InboxAIChatService,
+        inbox_svc: FakeInboxService,
+        ai_svc: FakeAIService,
+        event_bus_svc: FakeEventBusService,
     ) -> None:
         # First message: AI attaches a file
         original_chat = ai_svc.chat
@@ -681,9 +759,12 @@ class TestAttachmentInReply:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                await service.execute_tool("email_attach", {
-                    "document_id": "local:docs/report.pdf",
-                })
+                await service.execute_tool(
+                    "email_attach",
+                    {
+                        "document_id": "local:docs/report.pdf",
+                    },
+                )
             return await original_chat(user_message, conversation_id, user_ctx)
 
         ai_svc.chat = chat_sometimes_attach

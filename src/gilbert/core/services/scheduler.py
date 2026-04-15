@@ -223,12 +223,8 @@ class SchedulerService(Service):
         ]
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
-        max_calls = int(
-            config.get("alarm_ai_max_calls", self._DEFAULT_AI_MAX_CALLS)
-        )
-        window = float(
-            config.get("alarm_ai_window_seconds", self._DEFAULT_AI_WINDOW_SECONDS)
-        )
+        max_calls = int(config.get("alarm_ai_max_calls", self._DEFAULT_AI_MAX_CALLS))
+        window = float(config.get("alarm_ai_window_seconds", self._DEFAULT_AI_WINDOW_SECONDS))
         self._ai_rate_limiter.update_config(max_calls, window)
         logger.info(
             "Scheduler AI rate limit set to %d per %.0fs window",
@@ -338,10 +334,7 @@ class SchedulerService(Service):
 
     def list_jobs(self, include_system: bool = True) -> list[JobInfo]:
         """List all registered jobs."""
-        return [
-            j.info for j in self._jobs.values()
-            if include_system or not j.info.system
-        ]
+        return [j.info for j in self._jobs.values() if include_system or not j.info.system]
 
     def get_job(self, name: str) -> JobInfo | None:
         """Get info about a specific job."""
@@ -405,7 +398,10 @@ class SchedulerService(Service):
         now = datetime.now()
         if schedule.type == ScheduleType.DAILY:
             target = now.replace(
-                hour=schedule.hour, minute=schedule.minute, second=0, microsecond=0,
+                hour=schedule.hour,
+                minute=schedule.minute,
+                second=0,
+                microsecond=0,
             )
             if target <= now:
                 target = target.replace(day=target.day + 1)
@@ -415,6 +411,7 @@ class SchedulerService(Service):
             target = now.replace(minute=schedule.minute, second=0, microsecond=0)
             if target <= now:
                 from datetime import timedelta
+
                 target += timedelta(hours=1)
             return (target - now).total_seconds()
 
@@ -461,9 +458,7 @@ class SchedulerService(Service):
         except Exception:
             # Never let a dispatch failure crash the scheduler loop —
             # the next scheduled fire must still happen.
-            logger.exception(
-                "Scheduler action dispatch failed for job '%s'", job_name
-            )
+            logger.exception("Scheduler action dispatch failed for job '%s'", job_name)
 
     async def _dispatch_event_action(
         self,
@@ -502,13 +497,9 @@ class SchedulerService(Service):
         for v1; a future enhancement could re-validate on each fire.
         """
         if not action.tool:
-            logger.warning(
-                "Scheduler: job '%s' has tool action but no tool name", job_name
-            )
+            logger.warning("Scheduler: job '%s' has tool action but no tool name", job_name)
             return
-        await self._invoke_tool_by_name(
-            job_name, action.tool, action.tool_arguments
-        )
+        await self._invoke_tool_by_name(job_name, action.tool, action.tool_arguments)
 
     async def _dispatch_sequence_action(
         self,
@@ -570,9 +561,7 @@ class SchedulerService(Service):
             )
             # Per-step exceptions are logged inside the helper and do
             # NOT propagate — the next step still runs.
-            await self._invoke_tool_by_name(
-                job_name, step.tool, step.tool_arguments
-            )
+            await self._invoke_tool_by_name(job_name, step.tool, step.tool_arguments)
 
     async def _invoke_tool_by_name(
         self,
@@ -587,9 +576,7 @@ class SchedulerService(Service):
         the same discovery, error handling, and result logging.
         """
         if self._resolver is None:
-            logger.warning(
-                "Scheduler: job '%s' cannot fire — no resolver", job_name
-            )
+            logger.warning("Scheduler: job '%s' cannot fire — no resolver", job_name)
             return
 
         from gilbert.interfaces.tools import ToolProvider
@@ -601,21 +588,15 @@ class SchedulerService(Service):
                 if tdef.name != tool_name:
                     continue
                 try:
-                    result = await svc.execute_tool(
-                        tool_name, dict(tool_arguments)
-                    )
+                    result = await svc.execute_tool(tool_name, dict(tool_arguments))
                     logger.info(
                         "Scheduler '%s' → %s: %s",
                         job_name,
                         tool_name,
-                        (result or "")[:200]
-                        if isinstance(result, str)
-                        else "(non-string result)",
+                        (result or "")[:200] if isinstance(result, str) else "(non-string result)",
                     )
                 except Exception:
-                    logger.exception(
-                        "Scheduler '%s' → %s raised", job_name, tool_name
-                    )
+                    logger.exception("Scheduler '%s' → %s raised", job_name, tool_name)
                 return
 
         logger.warning(
@@ -641,8 +622,7 @@ class SchedulerService(Service):
         if not self._ai_rate_limiter.try_acquire():
             status = self._ai_rate_limiter.status()
             logger.info(
-                "Scheduler '%s' AI fire skipped — rate limit "
-                "(%d/%d in last %ds window)",
+                "Scheduler '%s' AI fire skipped — rate limit (%d/%d in last %ds window)",
                 job_name,
                 status["recent_calls"],
                 status["max_calls"],
@@ -679,9 +659,7 @@ class SchedulerService(Service):
                 (response_text or "")[:200],
             )
         except Exception:
-            logger.exception(
-                "Scheduler '%s' AI fire raised", job_name
-            )
+            logger.exception("Scheduler '%s' AI fire raised", job_name)
 
     # --- Action validation (at setup time) ---
 
@@ -703,9 +681,7 @@ class SchedulerService(Service):
         has_steps = raw_steps is not None
 
         # Mutual exclusion: at most one of {tool, ai_prompt, steps}
-        mode_count = sum(
-            1 for x in (bool(tool_name), bool(ai_prompt), has_steps) if x
-        )
+        mode_count = sum(1 for x in (bool(tool_name), bool(ai_prompt), has_steps) if x)
         if mode_count > 1:
             return (
                 ScheduledAction(),
@@ -810,9 +786,7 @@ class SchedulerService(Service):
             None,
         )
 
-    def _validate_tool_exists_and_allowed(
-        self, tool_name: str
-    ) -> str | None:
+    def _validate_tool_exists_and_allowed(self, tool_name: str) -> str | None:
         """Check that the tool exists and the current user may call it.
 
         Returns an error string if the tool is missing or the caller lacks
@@ -883,17 +857,13 @@ class SchedulerService(Service):
         # One-shot timers need a fire_at so we can drop them on startup
         # if they were scheduled to fire while Gilbert was down.
         if schedule.type == ScheduleType.ONCE:
-            fire_at = datetime.now(UTC) + timedelta(
-                seconds=schedule.interval_seconds
-            )
+            fire_at = datetime.now(UTC) + timedelta(seconds=schedule.interval_seconds)
             record["fire_at"] = fire_at.isoformat()
 
         try:
             await self._storage.put(_JOBS_COLLECTION, name, record)
         except Exception:
-            logger.exception(
-                "Scheduler: failed to persist job '%s'", name
-            )
+            logger.exception("Scheduler: failed to persist job '%s'", name)
 
     async def _unpersist_job(self, name: str) -> None:
         """Best-effort delete of a persisted job record."""
@@ -902,9 +872,7 @@ class SchedulerService(Service):
         try:
             await self._storage.delete(_JOBS_COLLECTION, name)
         except Exception:
-            logger.debug(
-                "Scheduler: unpersist of '%s' failed (may not exist)", name
-            )
+            logger.debug("Scheduler: unpersist of '%s' failed (may not exist)", name)
 
     async def _load_persisted_jobs(self) -> None:
         """Rebuild user jobs from storage on startup."""
@@ -937,9 +905,7 @@ class SchedulerService(Service):
                     fire_at_str = row.get("fire_at") or ""
                     if fire_at_str:
                         try:
-                            fire_at = datetime.fromisoformat(
-                                fire_at_str.replace("Z", "+00:00")
-                            )
+                            fire_at = datetime.fromisoformat(fire_at_str.replace("Z", "+00:00"))
                             if fire_at <= now:
                                 logger.info(
                                     "Scheduler: dropping expired one-shot timer '%s'",
@@ -953,14 +919,8 @@ class SchedulerService(Service):
 
                 action = ScheduledAction.from_dict(row.get("action"))
                 owner = str(row.get("owner") or "")
-                event_type = (
-                    "timer.fired"
-                    if sched_type == ScheduleType.ONCE
-                    else "alarm.fired"
-                )
-                callback = self._make_fire_callback(
-                    name, action, owner, event_type
-                )
+                event_type = "timer.fired" if sched_type == ScheduleType.ONCE else "alarm.fired"
+                callback = self._make_fire_callback(name, action, owner, event_type)
                 self.add_job(
                     name=name,
                     schedule=schedule,
@@ -1284,24 +1244,26 @@ class SchedulerService(Service):
 
     def _tool_list_timers(self) -> str:
         jobs = self.list_jobs()
-        return json.dumps([
-            {
-                "name": j.name,
-                "type": "system" if j.system else "user",
-                "schedule": j.schedule.type.value,
-                "interval_seconds": j.schedule.interval_seconds,
-                "hour": j.schedule.hour,
-                "minute": j.schedule.minute,
-                "state": j.state.value,
-                "enabled": j.enabled,
-                "owner": j.owner,
-                "run_count": j.run_count,
-                "last_run": j.last_run,
-                "last_error": j.last_error,
-                "action": j.action.to_dict(),
-            }
-            for j in jobs
-        ])
+        return json.dumps(
+            [
+                {
+                    "name": j.name,
+                    "type": "system" if j.system else "user",
+                    "schedule": j.schedule.type.value,
+                    "interval_seconds": j.schedule.interval_seconds,
+                    "hour": j.schedule.hour,
+                    "minute": j.schedule.minute,
+                    "state": j.state.value,
+                    "enabled": j.enabled,
+                    "owner": j.owner,
+                    "run_count": j.run_count,
+                    "last_run": j.last_run,
+                    "last_error": j.last_error,
+                    "action": j.action.to_dict(),
+                }
+                for j in jobs
+            ]
+        )
 
     async def _tool_set_timer(self, arguments: dict[str, Any]) -> str:
         timer_name = arguments["name"]
@@ -1314,9 +1276,7 @@ class SchedulerService(Service):
         schedule = Schedule.once_after(seconds)
         user = get_current_user()
         owner = user.user_id if user else ""
-        callback = self._make_fire_callback(
-            timer_name, action, owner, "timer.fired"
-        )
+        callback = self._make_fire_callback(timer_name, action, owner, "timer.fired")
 
         try:
             self.add_job(
@@ -1334,30 +1294,28 @@ class SchedulerService(Service):
         # storage record pointing at a job that doesn't exist.
         await self._persist_job(timer_name, schedule, action, owner)
 
-        return json.dumps({
-            "status": "set",
-            "name": timer_name,
-            "seconds": seconds,
-            "action_type": action.type.value,
-        })
+        return json.dumps(
+            {
+                "status": "set",
+                "name": timer_name,
+                "seconds": seconds,
+                "action_type": action.type.value,
+            }
+        )
 
     async def _tool_set_alarm(self, arguments: dict[str, Any]) -> str:
         alarm_name = arguments["name"]
         alarm_type = arguments["type"]
 
         if alarm_type == "interval":
-            schedule = Schedule.every(
-                float(arguments.get("interval_seconds", 60))
-            )
+            schedule = Schedule.every(float(arguments.get("interval_seconds", 60)))
         elif alarm_type == "daily":
             schedule = Schedule.daily_at(
                 hour=int(arguments.get("hour", 0)),
                 minute=int(arguments.get("minute", 0)),
             )
         elif alarm_type == "hourly":
-            schedule = Schedule.hourly_at(
-                minute=int(arguments.get("minute", 0))
-            )
+            schedule = Schedule.hourly_at(minute=int(arguments.get("minute", 0)))
         else:
             return json.dumps({"error": f"Unknown schedule type: {alarm_type}"})
 
@@ -1367,9 +1325,7 @@ class SchedulerService(Service):
 
         user = get_current_user()
         owner = user.user_id if user else ""
-        callback = self._make_fire_callback(
-            alarm_name, action, owner, "alarm.fired"
-        )
+        callback = self._make_fire_callback(alarm_name, action, owner, "alarm.fired")
 
         try:
             self.add_job(
@@ -1385,12 +1341,14 @@ class SchedulerService(Service):
 
         await self._persist_job(alarm_name, schedule, action, owner)
 
-        return json.dumps({
-            "status": "set",
-            "name": alarm_name,
-            "type": alarm_type,
-            "action_type": action.type.value,
-        })
+        return json.dumps(
+            {
+                "status": "set",
+                "name": alarm_name,
+                "type": alarm_type,
+                "action_type": action.type.value,
+            }
+        )
 
     def _tool_cancel_timer(self, arguments: dict[str, Any]) -> str:
         timer_name = arguments["name"]
@@ -1485,9 +1443,7 @@ class SchedulerService(Service):
             "code": code,
         }
 
-    async def _ws_job_list(
-        self, conn: Any, frame: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    async def _ws_job_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         """List all jobs (system + user) with their current state and action."""
         include_system = bool(frame.get("include_system", True))
         jobs = self.list_jobs(include_system=include_system)
@@ -1497,9 +1453,7 @@ class SchedulerService(Service):
             "jobs": [self._serialize_job(j) for j in jobs],
         }
 
-    async def _ws_job_get(
-        self, conn: Any, frame: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    async def _ws_job_get(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         """Get detailed info about a single job by name."""
         name = str(frame.get("name") or "").strip()
         if not name:
@@ -1513,9 +1467,7 @@ class SchedulerService(Service):
             "job": self._serialize_job(info),
         }
 
-    async def _ws_job_enable(
-        self, conn: Any, frame: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    async def _ws_job_enable(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         """Enable a disabled job. Admin-level via RPC permissions."""
         name = str(frame.get("name") or "").strip()
         if not name:
@@ -1531,9 +1483,7 @@ class SchedulerService(Service):
             "status": "enabled",
         }
 
-    async def _ws_job_disable(
-        self, conn: Any, frame: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    async def _ws_job_disable(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         """Disable (pause) a running job. Admin-level via RPC permissions."""
         name = str(frame.get("name") or "").strip()
         if not name:
@@ -1549,9 +1499,7 @@ class SchedulerService(Service):
             "status": "disabled",
         }
 
-    async def _ws_job_remove(
-        self, conn: Any, frame: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    async def _ws_job_remove(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         """Cancel and delete a job.
 
         Non-admins can only remove jobs they own. System jobs cannot be
@@ -1592,9 +1540,7 @@ class SchedulerService(Service):
             "status": "removed",
         }
 
-    async def _ws_job_run_now(
-        self, conn: Any, frame: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    async def _ws_job_run_now(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         """Fire a job immediately, outside its schedule. Admin-level."""
         name = str(frame.get("name") or "").strip()
         if not name:

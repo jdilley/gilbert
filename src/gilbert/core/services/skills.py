@@ -104,7 +104,9 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                 self._cache_dir = section.get("cache_dir", ".gilbert/skill-cache")
                 self._user_dir = section.get("user_dir", ".gilbert/skills")
                 user_dir = Path(self._user_dir)
-                self._user_skills_dir = user_dir if user_dir.is_absolute() else Path.cwd() / user_dir
+                self._user_skills_dir = (
+                    user_dir if user_dir.is_absolute() else Path.cwd() / user_dir
+                )
 
         self._enabled = True
         self._acl_svc = resolver.get_capability("access_control")
@@ -138,19 +140,25 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
     def config_params(self) -> list[ConfigParam]:
         return [
             ConfigParam(
-                key="directories", type=ToolParameterType.ARRAY,
+                key="directories",
+                type=ToolParameterType.ARRAY,
                 description="Directories to scan for skill definitions.",
-                default=["./skills"], restart_required=True,
+                default=["./skills"],
+                restart_required=True,
             ),
             ConfigParam(
-                key="cache_dir", type=ToolParameterType.STRING,
+                key="cache_dir",
+                type=ToolParameterType.STRING,
                 description="Directory for cached remote skills.",
-                default=".gilbert/skill-cache", restart_required=True,
+                default=".gilbert/skill-cache",
+                restart_required=True,
             ),
             ConfigParam(
-                key="user_dir", type=ToolParameterType.STRING,
+                key="user_dir",
+                type=ToolParameterType.STRING,
                 description="Directory for user-installed skills.",
-                default=".gilbert/skills", restart_required=True,
+                default=".gilbert/skills",
+                restart_required=True,
             ),
         ]
 
@@ -224,8 +232,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                 slash_group="skill",
                 slash_command="read",
                 slash_help=(
-                    "Read a file from an active skill's directory: "
-                    "/skill read <skill_name> <path>"
+                    "Read a file from an active skill's directory: /skill read <skill_name> <path>"
                 ),
                 description=(
                     "Read a file from an active skill's directory "
@@ -250,8 +257,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                 slash_group="skill",
                 slash_command="run",
                 slash_help=(
-                    "Run a script bundled with a skill: "
-                    "/skill run <skill_name> <script> [args]"
+                    "Run a script bundled with a skill: /skill run <skill_name> <script> [args]"
                 ),
                 description=(
                     "Execute a script bundled with an active skill. "
@@ -282,10 +288,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                 name="browse_skill_workspace",
                 slash_group="skill",
                 slash_command="ws",
-                slash_help=(
-                    "List files in your skill workspace: "
-                    "/skill ws <skill_name>"
-                ),
+                slash_help=("List files in your skill workspace: /skill ws <skill_name>"),
                 description="List files in your workspace for a skill (created by script runs).",
                 parameters=[
                     ToolParameter(
@@ -301,8 +304,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                 slash_group="skill",
                 slash_command="wsread",
                 slash_help=(
-                    "Read a file from your skill workspace: "
-                    "/skill wsread <skill_name> <path>"
+                    "Read a file from your skill workspace: /skill wsread <skill_name> <path>"
                 ),
                 description="Read a text file from your skill workspace.",
                 parameters=[
@@ -380,7 +382,8 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
     # ── Public API for AIService integration ─────────────────────────
 
     def get_catalog(
-        self, user_ctx: Any = None,
+        self,
+        user_ctx: Any = None,
     ) -> list[tuple[str, SkillCatalogEntry]]:
         """Return (catalog_key, entry) pairs, filtered by user visibility and role."""
         user_id = getattr(user_ctx, "user_id", None) if user_ctx else None
@@ -395,7 +398,8 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
             if isinstance(self._acl_svc, AccessControlProvider):
                 user_level = self._acl_svc.get_effective_level(user_ctx)
                 result = [
-                    (k, e) for k, e in result
+                    (k, e)
+                    for k, e in result
                     if user_level <= self._acl_svc.get_role_level(e.required_role)
                 ]
         return result
@@ -406,21 +410,26 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
             return []
         try:
             value = await self._ai_svc.get_conversation_state(
-                _ACTIVE_SKILLS_KEY, conversation_id,
+                _ACTIVE_SKILLS_KEY,
+                conversation_id,
             )
             return value if isinstance(value, list) else []
         except RuntimeError:
             return []
 
     async def set_active_skills(
-        self, conversation_id: str, skills: list[str],
+        self,
+        conversation_id: str,
+        skills: list[str],
     ) -> None:
         """Update active skills for a conversation."""
         if self._ai_svc is None:
             return
         valid = [s for s in skills if s in self._catalog]
         await self._ai_svc.set_conversation_state(
-            _ACTIVE_SKILLS_KEY, valid, conversation_id,
+            _ACTIVE_SKILLS_KEY,
+            valid,
+            conversation_id,
         )
 
     def get_skill_content(self, name: str) -> SkillContent | None:
@@ -615,7 +624,9 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
 
         if name != skill_md.parent.name:
             logger.debug(
-                "Skill name %r doesn't match directory %r", name, skill_md.parent.name,
+                "Skill name %r doesn't match directory %r",
+                name,
+                skill_md.parent.name,
             )
 
         metadata = frontmatter.get("metadata", {}) or {}
@@ -637,7 +648,9 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         if catalog_key in self._catalog:
             logger.warning(
                 "Duplicate skill %r at %s (already loaded from %s)",
-                catalog_key, skill_md, self._catalog[catalog_key].location,
+                catalog_key,
+                skill_md,
+                self._catalog[catalog_key].location,
             )
             return
 
@@ -869,7 +882,9 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         return True
 
     def _resolve_install_dest(
-        self, scope: str, user_id: str,
+        self,
+        scope: str,
+        user_id: str,
     ) -> Path:
         """Resolve the installation directory for a given scope."""
         if scope == "user":
@@ -888,18 +903,29 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
     # ── Blocking helpers (run in thread pool) ──────────────────────
 
     def _do_install(
-        self, url: str, subpath: str | None, scope: str, user_id: str,
+        self,
+        url: str,
+        subpath: str | None,
+        scope: str,
+        user_id: str,
     ) -> list[str]:
         """Blocking install: fetch + extract + copy. Must run in executor."""
         source_dir = self._fetch_skill_source(url)
         dest = self._resolve_install_dest(scope, user_id)
         owner_id = user_id if scope == "user" else ""
         return self._install_from_repo(
-            source_dir, dest, subpath, scope=scope, owner_id=owner_id,
+            source_dir,
+            dest,
+            subpath,
+            scope=scope,
+            owner_id=owner_id,
         )
 
     def _do_run_script(
-        self, skill_dir: Path, script_path: str, script_args: list[Any],
+        self,
+        skill_dir: Path,
+        script_path: str,
+        script_args: list[Any],
         workspace: Path,
     ) -> str:
         """Blocking script execution. Must run in executor."""
@@ -951,13 +977,16 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         for f in sorted(workspace.rglob("*")):
             if f.is_file():
                 stat = f.stat()
-                files.append({
-                    "path": str(f.relative_to(workspace)),
-                    "size": stat.st_size,
-                    "modified": datetime.fromtimestamp(
-                        stat.st_mtime, tz=UTC,
-                    ).isoformat(),
-                })
+                files.append(
+                    {
+                        "path": str(f.relative_to(workspace)),
+                        "size": stat.st_size,
+                        "modified": datetime.fromtimestamp(
+                            stat.st_mtime,
+                            tz=UTC,
+                        ).isoformat(),
+                    }
+                )
         return files
 
     # ── Tool Implementations ─────────────────────────────────────────
@@ -990,14 +1019,16 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
 
             if not scope:
                 if is_admin:
-                    return json.dumps({
-                        "needs_scope": True,
-                        "message": (
-                            "Please ask the user whether to install this skill globally "
-                            "(available to all users) or just for themselves. "
-                            "Then call this tool again with scope='global' or scope='user'."
-                        ),
-                    })
+                    return json.dumps(
+                        {
+                            "needs_scope": True,
+                            "message": (
+                                "Please ask the user whether to install this skill globally "
+                                "(available to all users) or just for themselves. "
+                                "Then call this tool again with scope='global' or scope='user'."
+                            ),
+                        }
+                    )
                 scope = "user"
 
             if scope == "global" and not is_admin:
@@ -1005,7 +1036,11 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
 
             try:
                 installed = await _to_thread(
-                    self._do_install, url, arguments.get("path"), scope, user_id,
+                    self._do_install,
+                    url,
+                    arguments.get("path"),
+                    scope,
+                    user_id,
                 )
                 if not installed:
                     return json.dumps({"error": "No valid skills found at that URL"})
@@ -1013,11 +1048,13 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                 for name in installed:
                     catalog_key = f"{user_id}:{name}" if scope == "user" else name
                     entry = self._catalog.get(catalog_key)
-                    results.append({
-                        "name": name,
-                        "description": entry.description if entry else "",
-                        "scope": scope,
-                    })
+                    results.append(
+                        {
+                            "name": name,
+                            "description": entry.description if entry else "",
+                            "scope": scope,
+                        }
+                    )
                 return json.dumps({"installed": results})
             except (subprocess.CalledProcessError, httpx.HTTPError, OSError) as exc:
                 return json.dumps({"error": f"Install failed: {exc}"})
@@ -1043,7 +1080,11 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                     scope = "user"
                 try:
                     installed = await _to_thread(
-                        self._do_install, url, arguments.get("path"), scope, user_id,
+                        self._do_install,
+                        url,
+                        arguments.get("path"),
+                        scope,
+                        user_id,
                     )
                     return json.dumps({"updated": installed})
                 except (subprocess.CalledProcessError, httpx.HTTPError, OSError) as exc:
@@ -1075,9 +1116,11 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                 return json.dumps({"error": f"Skill '{name}' not found"})
             # Only entity-stored skills can be deleted this way
             if entry.location is not None:
-                return json.dumps({
-                    "error": f"Skill '{name}' is file-based. Use 'uninstall' instead.",
-                })
+                return json.dumps(
+                    {
+                        "error": f"Skill '{name}' is file-based. Use 'uninstall' instead.",
+                    }
+                )
             # Ownership check
             if entry.scope == "user" and entry.owner_id != user_id:
                 return json.dumps({"error": "Cannot delete another user's skill"})
@@ -1111,16 +1154,20 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         # Parse and validate
         frontmatter, body = self._parse_skill_md_text(skill_md)
         if frontmatter is None:
-            return json.dumps({
-                "error": "Invalid SKILL.md format. Must start with --- YAML frontmatter ---",
-            })
+            return json.dumps(
+                {
+                    "error": "Invalid SKILL.md format. Must start with --- YAML frontmatter ---",
+                }
+            )
 
         name = frontmatter.get("name", "")
         description = frontmatter.get("description", "")
         if not name or not description:
-            return json.dumps({
-                "error": "YAML frontmatter must include 'name' and 'description' fields",
-            })
+            return json.dumps(
+                {
+                    "error": "YAML frontmatter must include 'name' and 'description' fields",
+                }
+            )
 
         # Enforce scope
         if scope == "global" and not self._is_admin_user(user_roles):
@@ -1132,9 +1179,11 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         # Check for conflict with file-based skills
         existing = self._catalog.get(catalog_key)
         if existing is not None and existing.location is not None:
-            return json.dumps({
-                "error": f"A file-based skill named '{name}' already exists",
-            })
+            return json.dumps(
+                {
+                    "error": f"A file-based skill named '{name}' already exists",
+                }
+            )
 
         # Store in entity storage
         if self._storage is None:
@@ -1185,16 +1234,19 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         )
         self._catalog[catalog_key] = entry
         self._content_cache[catalog_key] = SkillContent(
-            catalog=entry, instructions=body or "",
+            catalog=entry,
+            instructions=body or "",
         )
 
         action_word = "Updated" if existing else "Created"
-        return json.dumps({
-            "status": action_word.lower(),
-            "name": name,
-            "description": description,
-            "scope": scope,
-        })
+        return json.dumps(
+            {
+                "status": action_word.lower(),
+                "name": name,
+                "description": description,
+                "scope": scope,
+            }
+        )
 
     def _is_admin_user(self, user_roles: list[str] | None) -> bool:
         """Check if user roles include admin-level access."""
@@ -1249,9 +1301,15 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         skill_dir = entry.location.parent
         workspace = self._get_workspace(user_id, skill_name)
 
-        return str(await _to_thread(
-            self._do_run_script, skill_dir, script_path, script_args, workspace,
-        ))
+        return str(
+            await _to_thread(
+                self._do_run_script,
+                skill_dir,
+                script_path,
+                script_args,
+                workspace,
+            )
+        )
 
     async def _tool_browse_workspace(self, arguments: dict[str, Any]) -> str:
         skill_name = arguments.get("skill_name", "")
@@ -1286,7 +1344,9 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
             return json.dumps({"error": f"Cannot read file: {exc}"})
 
     def _resolve_skill_entry(
-        self, skill_name: str, user_id: str,
+        self,
+        skill_name: str,
+        user_id: str,
     ) -> SkillCatalogEntry | None:
         """Resolve a skill by name, checking user-scoped first then global."""
         user_key = f"{user_id}:{skill_name}"
@@ -1298,7 +1358,9 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
     # ── WebSocket Handlers ───────────────────────────────────────────
 
     async def _ws_skills_list(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any]:
         user_ctx = getattr(conn, "user_ctx", None)
         catalog = self.get_catalog(user_ctx)
@@ -1319,7 +1381,9 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         }
 
     async def _ws_skills_active(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any]:
         conversation_id = frame.get("conversation_id", "")
         if not conversation_id:
@@ -1346,7 +1410,9 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         return None
 
     async def _ws_skills_toggle(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any]:
         conversation_id = frame.get("conversation_id", "")
         skill_name = frame.get("skill", "")
@@ -1387,7 +1453,9 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         }
 
     async def _ws_workspace_browse(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any]:
         user_id = getattr(conn, "user_id", "system")
         skill_name = frame.get("skill_name", "")
@@ -1408,7 +1476,9 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         }
 
     async def _ws_workspace_download(
-        self, conn: Any, frame: dict[str, Any],
+        self,
+        conn: Any,
+        frame: dict[str, Any],
     ) -> dict[str, Any]:
         user_id = getattr(conn, "user_id", "system")
         skill_name = frame.get("skill_name", "")

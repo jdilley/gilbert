@@ -265,12 +265,17 @@ class NamespacedStorageBackend(StorageBackend):
     # --- Entity operations ---
 
     async def put(
-        self, collection: str, entity_id: str, data: dict[str, Any],
+        self,
+        collection: str,
+        entity_id: str,
+        data: dict[str, Any],
     ) -> None:
         await self._inner.put(self._ns(collection), entity_id, data)
 
     async def get(
-        self, collection: str, entity_id: str,
+        self,
+        collection: str,
+        entity_id: str,
     ) -> dict[str, Any] | None:
         return await self._inner.get(self._ns(collection), entity_id)
 
@@ -292,7 +297,7 @@ class NamespacedStorageBackend(StorageBackend):
 
     async def list_collections(self) -> list[str]:
         all_cols = await self._inner.list_collections()
-        return [c[len(self._prefix):] for c in all_cols if c.startswith(self._prefix)]
+        return [c[len(self._prefix) :] for c in all_cols if c.startswith(self._prefix)]
 
     async def drop_collection(self, collection: str) -> None:
         await self._inner.drop_collection(self._ns(collection))

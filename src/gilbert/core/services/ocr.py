@@ -96,9 +96,11 @@ class OCRService(Service):
     def config_params(self) -> list[ConfigParam]:
         params = [
             ConfigParam(
-                key="backend", type=ToolParameterType.STRING,
+                key="backend",
+                type=ToolParameterType.STRING,
                 description="OCR backend provider.",
-                default="tesseract", restart_required=True,
+                default="tesseract",
+                restart_required=True,
                 choices=tuple(OCRBackend.registered_backends().keys()),
             ),
         ]
@@ -106,13 +108,20 @@ class OCRService(Service):
         backend_cls = backends.get(self._backend_name)
         if backend_cls is not None:
             for bp in backend_cls.backend_config_params():
-                params.append(ConfigParam(
-                    key=f"settings.{bp.key}", type=bp.type,
-                    description=bp.description, default=bp.default,
-                    restart_required=bp.restart_required, sensitive=bp.sensitive,
-                    choices=bp.choices, choices_from=bp.choices_from,
-                    multiline=bp.multiline, backend_param=True,
-                ))
+                params.append(
+                    ConfigParam(
+                        key=f"settings.{bp.key}",
+                        type=bp.type,
+                        description=bp.description,
+                        default=bp.default,
+                        restart_required=bp.restart_required,
+                        sensitive=bp.sensitive,
+                        choices=bp.choices,
+                        choices_from=bp.choices_from,
+                        multiline=bp.multiline,
+                        backend_param=True,
+                    )
+                )
         return params
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
@@ -127,7 +136,9 @@ class OCRService(Service):
         )
 
     async def invoke_config_action(
-        self, key: str, payload: dict[str, Any],
+        self,
+        key: str,
+        payload: dict[str, Any],
     ) -> ConfigActionResult:
         return await invoke_backend_action(self._backend, key, payload)
 

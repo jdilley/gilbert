@@ -88,7 +88,8 @@ def mock_resolver() -> MagicMock:
 
 @pytest.fixture
 async def started_service(
-    service: SkillService, mock_resolver: MagicMock,
+    service: SkillService,
+    mock_resolver: MagicMock,
 ) -> SkillService:
     await service.start(mock_resolver)
     return service
@@ -183,13 +184,13 @@ class TestDiscovery:
 
     @pytest.mark.asyncio
     async def test_missing_description_skipped(
-        self, tmp_path: Path, mock_resolver: MagicMock,
+        self,
+        tmp_path: Path,
+        mock_resolver: MagicMock,
     ) -> None:
         skill_dir = tmp_path / "skills" / "no-desc"
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: no-desc\n---\nBody.\n"
-        )
+        (skill_dir / "SKILL.md").write_text("---\nname: no-desc\n---\nBody.\n")
         svc = _make_skill_service(
             directories=[str(tmp_path / "skills")],
             user_dir=str(tmp_path / "user-skills"),
@@ -199,7 +200,9 @@ class TestDiscovery:
 
     @pytest.mark.asyncio
     async def test_name_defaults_to_directory(
-        self, tmp_path: Path, mock_resolver: MagicMock,
+        self,
+        tmp_path: Path,
+        mock_resolver: MagicMock,
     ) -> None:
         skill_dir = tmp_path / "skills" / "dir-name"
         skill_dir.mkdir(parents=True)
@@ -215,7 +218,9 @@ class TestDiscovery:
 
     @pytest.mark.asyncio
     async def test_duplicate_name_warns(
-        self, tmp_path: Path, mock_resolver: MagicMock,
+        self,
+        tmp_path: Path,
+        mock_resolver: MagicMock,
     ) -> None:
         for d in ("a", "b"):
             skill_dir = tmp_path / "skills" / d
@@ -232,7 +237,9 @@ class TestDiscovery:
 
     @pytest.mark.asyncio
     async def test_nonexistent_directory_ignored(
-        self, tmp_path: Path, mock_resolver: MagicMock,
+        self,
+        tmp_path: Path,
+        mock_resolver: MagicMock,
     ) -> None:
         svc = _make_skill_service(
             directories=["/nonexistent/path"],
@@ -248,7 +255,9 @@ class TestDiscovery:
 class TestPerUserDiscovery:
     @pytest.mark.asyncio
     async def test_discovers_user_skills(
-        self, tmp_path: Path, mock_resolver: MagicMock,
+        self,
+        tmp_path: Path,
+        mock_resolver: MagicMock,
     ) -> None:
         user_dir = tmp_path / "user-skills" / "users" / "alice"
         skill_dir = user_dir / "alice-skill"
@@ -268,7 +277,9 @@ class TestPerUserDiscovery:
 
     @pytest.mark.asyncio
     async def test_catalog_hides_other_users_skills(
-        self, tmp_path: Path, mock_resolver: MagicMock,
+        self,
+        tmp_path: Path,
+        mock_resolver: MagicMock,
     ) -> None:
         # Create skills for alice and bob
         for user in ("alice", "bob"):
@@ -293,7 +304,9 @@ class TestPerUserDiscovery:
 
     @pytest.mark.asyncio
     async def test_user_and_global_no_collision(
-        self, tmp_path: Path, mock_resolver: MagicMock,
+        self,
+        tmp_path: Path,
+        mock_resolver: MagicMock,
     ) -> None:
         # Global skill
         global_dir = tmp_path / "user-skills" / "shared"
@@ -351,45 +364,50 @@ class TestSkillContent:
 class TestActiveSkills:
     @pytest.mark.asyncio
     async def test_get_active_no_ai_service(
-        self, started_service: SkillService,
+        self,
+        started_service: SkillService,
     ) -> None:
         result = await started_service.get_active_skills("conv-1")
         assert result == []
 
     @pytest.mark.asyncio
     async def test_get_set_active_skills(
-        self, service: SkillService, mock_resolver: MagicMock,
+        self,
+        service: SkillService,
+        mock_resolver: MagicMock,
     ) -> None:
         ai_svc = AsyncMock()
         ai_svc.get_conversation_state = AsyncMock(return_value=["test-skill"])
         ai_svc.set_conversation_state = AsyncMock()
         await service.start(mock_resolver)
-        mock_resolver.get_capability.side_effect = (
-            lambda cap: ai_svc if cap == "ai_chat" else None
-        )
+        mock_resolver.get_capability.side_effect = lambda cap: ai_svc if cap == "ai_chat" else None
 
         active = await service.get_active_skills("conv-1")
         assert active == ["test-skill"]
 
         await service.set_active_skills("conv-1", ["test-skill"])
         ai_svc.set_conversation_state.assert_called_once_with(
-            "active_skills", ["test-skill"], "conv-1",
+            "active_skills",
+            ["test-skill"],
+            "conv-1",
         )
 
     @pytest.mark.asyncio
     async def test_set_filters_invalid_names(
-        self, service: SkillService, mock_resolver: MagicMock,
+        self,
+        service: SkillService,
+        mock_resolver: MagicMock,
     ) -> None:
         ai_svc = AsyncMock()
         ai_svc.set_conversation_state = AsyncMock()
         await service.start(mock_resolver)
-        mock_resolver.get_capability.side_effect = (
-            lambda cap: ai_svc if cap == "ai_chat" else None
-        )
+        mock_resolver.get_capability.side_effect = lambda cap: ai_svc if cap == "ai_chat" else None
 
         await service.set_active_skills("conv-1", ["test-skill", "nonexistent"])
         ai_svc.set_conversation_state.assert_called_once_with(
-            "active_skills", ["test-skill"], "conv-1",
+            "active_skills",
+            ["test-skill"],
+            "conv-1",
         )
 
 
@@ -399,28 +417,28 @@ class TestActiveSkills:
 class TestBuildSkillsContext:
     @pytest.mark.asyncio
     async def test_no_active_skills(
-        self, service: SkillService, mock_resolver: MagicMock,
+        self,
+        service: SkillService,
+        mock_resolver: MagicMock,
     ) -> None:
         ai_svc = AsyncMock()
         ai_svc.get_conversation_state = AsyncMock(return_value=[])
         await service.start(mock_resolver)
-        mock_resolver.get_capability.side_effect = (
-            lambda cap: ai_svc if cap == "ai_chat" else None
-        )
+        mock_resolver.get_capability.side_effect = lambda cap: ai_svc if cap == "ai_chat" else None
 
         ctx = await service.build_skills_context("conv-1")
         assert ctx == ""
 
     @pytest.mark.asyncio
     async def test_active_skills_context(
-        self, service: SkillService, mock_resolver: MagicMock,
+        self,
+        service: SkillService,
+        mock_resolver: MagicMock,
     ) -> None:
         ai_svc = AsyncMock()
         ai_svc.get_conversation_state = AsyncMock(return_value=["test-skill"])
         await service.start(mock_resolver)
-        mock_resolver.get_capability.side_effect = (
-            lambda cap: ai_svc if cap == "ai_chat" else None
-        )
+        mock_resolver.get_capability.side_effect = lambda cap: ai_svc if cap == "ai_chat" else None
 
         ctx = await service.build_skills_context("conv-1")
         assert "## Active Skills" in ctx
@@ -463,7 +481,9 @@ class TestWorkspace:
 
     @pytest.mark.asyncio
     async def test_run_script_uses_workspace(
-        self, started_service: SkillService, tmp_path: Path,
+        self,
+        started_service: SkillService,
+        tmp_path: Path,
     ) -> None:
         """Script runs in workspace, not skill dir."""
         result = await started_service.execute_tool(
@@ -480,7 +500,8 @@ class TestWorkspace:
 
     @pytest.mark.asyncio
     async def test_browse_empty_workspace(
-        self, started_service: SkillService,
+        self,
+        started_service: SkillService,
     ) -> None:
         result = await started_service.execute_tool(
             "browse_skill_workspace",
@@ -490,7 +511,8 @@ class TestWorkspace:
 
     @pytest.mark.asyncio
     async def test_browse_workspace_with_files(
-        self, started_service: SkillService,
+        self,
+        started_service: SkillService,
     ) -> None:
         workspace = started_service._get_workspace("alice", "test-skill")
         (workspace / "output.txt").write_text("result data")
@@ -502,7 +524,8 @@ class TestWorkspace:
 
     @pytest.mark.asyncio
     async def test_read_workspace_file(
-        self, started_service: SkillService,
+        self,
+        started_service: SkillService,
     ) -> None:
         workspace = started_service._get_workspace("alice", "test-skill")
         (workspace / "data.csv").write_text("a,b,c\n1,2,3")
@@ -514,7 +537,8 @@ class TestWorkspace:
 
     @pytest.mark.asyncio
     async def test_read_workspace_path_traversal(
-        self, started_service: SkillService,
+        self,
+        started_service: SkillService,
     ) -> None:
         result = await started_service.execute_tool(
             "read_skill_workspace_file",
@@ -596,14 +620,16 @@ class TestManageSkills:
     @pytest.mark.asyncio
     async def test_list_skills(self, started_service: SkillService) -> None:
         result = await started_service.execute_tool(
-            "manage_skills", {"action": "list", "_user_id": "alice"},
+            "manage_skills",
+            {"action": "list", "_user_id": "alice"},
         )
         assert "test-skill" in result
 
     @pytest.mark.asyncio
     async def test_install_no_url(self, started_service: SkillService) -> None:
         result = await started_service.execute_tool(
-            "manage_skills", {"action": "install", "_user_id": "alice"},
+            "manage_skills",
+            {"action": "install", "_user_id": "alice"},
         )
         assert "error" in result
 
@@ -617,7 +643,8 @@ class TestManageSkills:
 
     @pytest.mark.asyncio
     async def test_uninstall_builtin_rejected(
-        self, started_service: SkillService,
+        self,
+        started_service: SkillService,
     ) -> None:
         result = await started_service.execute_tool(
             "manage_skills",
@@ -628,7 +655,8 @@ class TestManageSkills:
     @pytest.mark.asyncio
     async def test_unknown_action(self, started_service: SkillService) -> None:
         result = await started_service.execute_tool(
-            "manage_skills", {"action": "bogus", "_user_id": "alice"},
+            "manage_skills",
+            {"action": "bogus", "_user_id": "alice"},
         )
         assert "error" in result
 
@@ -642,7 +670,8 @@ class TestWsHandlers:
         conn = MagicMock()
         conn.user_ctx = None
         result = await started_service._ws_skills_list(
-            conn, {"id": "f1"},
+            conn,
+            {"id": "f1"},
         )
         assert result["type"] == "skills.list.result"
         assert len(result["skills"]) == 1
@@ -651,44 +680,52 @@ class TestWsHandlers:
 
     @pytest.mark.asyncio
     async def test_ws_skills_toggle(
-        self, service: SkillService, mock_resolver: MagicMock,
+        self,
+        service: SkillService,
+        mock_resolver: MagicMock,
     ) -> None:
         ai_svc = AsyncMock()
         ai_svc.get_conversation_state = AsyncMock(return_value=[])
         ai_svc.set_conversation_state = AsyncMock()
         await service.start(mock_resolver)
-        mock_resolver.get_capability.side_effect = (
-            lambda cap: ai_svc if cap == "ai_chat" else None
-        )
+        mock_resolver.get_capability.side_effect = lambda cap: ai_svc if cap == "ai_chat" else None
 
         conn = MagicMock()
-        result = await service._ws_skills_toggle(conn, {
-            "id": "f2",
-            "conversation_id": "conv-1",
-            "skill": "test-skill",
-            "enabled": True,
-        })
+        result = await service._ws_skills_toggle(
+            conn,
+            {
+                "id": "f2",
+                "conversation_id": "conv-1",
+                "skill": "test-skill",
+                "enabled": True,
+            },
+        )
         assert result["type"] == "skills.conversation.toggle.result"
         assert result["skill"] == "test-skill"
         assert result["enabled"] is True
 
     @pytest.mark.asyncio
     async def test_ws_toggle_unknown_skill(
-        self, started_service: SkillService,
+        self,
+        started_service: SkillService,
     ) -> None:
         conn = MagicMock()
-        result = await started_service._ws_skills_toggle(conn, {
-            "id": "f3",
-            "conversation_id": "conv-1",
-            "skill": "nonexistent",
-            "enabled": True,
-        })
+        result = await started_service._ws_skills_toggle(
+            conn,
+            {
+                "id": "f3",
+                "conversation_id": "conv-1",
+                "skill": "nonexistent",
+                "enabled": True,
+            },
+        )
         assert result["type"] == "gilbert.error"
         assert result["code"] == 404
 
     @pytest.mark.asyncio
     async def test_ws_toggle_missing_fields(
-        self, started_service: SkillService,
+        self,
+        started_service: SkillService,
     ) -> None:
         conn = MagicMock()
         result = await started_service._ws_skills_toggle(conn, {"id": "f4"})
@@ -697,7 +734,8 @@ class TestWsHandlers:
 
     @pytest.mark.asyncio
     async def test_ws_active_no_conversation(
-        self, started_service: SkillService,
+        self,
+        started_service: SkillService,
     ) -> None:
         conn = MagicMock()
         result = await started_service._ws_skills_active(conn, {"id": "f5"})
@@ -705,33 +743,41 @@ class TestWsHandlers:
 
     @pytest.mark.asyncio
     async def test_ws_workspace_browse(
-        self, started_service: SkillService,
+        self,
+        started_service: SkillService,
     ) -> None:
         workspace = started_service._get_workspace("alice", "test-skill")
         (workspace / "file.txt").write_text("content")
         conn = MagicMock()
         conn.user_id = "alice"
-        result = await started_service._ws_workspace_browse(conn, {
-            "id": "f6",
-            "skill_name": "test-skill",
-        })
+        result = await started_service._ws_workspace_browse(
+            conn,
+            {
+                "id": "f6",
+                "skill_name": "test-skill",
+            },
+        )
         assert result["type"] == "skills.workspace.browse.result"
         assert len(result["files"]) == 1
         assert result["files"][0]["path"] == "file.txt"
 
     @pytest.mark.asyncio
     async def test_ws_workspace_download(
-        self, started_service: SkillService,
+        self,
+        started_service: SkillService,
     ) -> None:
         workspace = started_service._get_workspace("alice", "test-skill")
         (workspace / "data.csv").write_text("a,b\n1,2")
         conn = MagicMock()
         conn.user_id = "alice"
-        result = await started_service._ws_workspace_download(conn, {
-            "id": "f7",
-            "skill_name": "test-skill",
-            "path": "data.csv",
-        })
+        result = await started_service._ws_workspace_download(
+            conn,
+            {
+                "id": "f7",
+                "skill_name": "test-skill",
+                "path": "data.csv",
+            },
+        )
         assert result["type"] == "skills.workspace.download.result"
         assert result["filename"] == "data.csv"
         assert "content_base64" in result
@@ -752,7 +798,10 @@ class TestGitHubInstall:
 
     @pytest.mark.asyncio
     async def test_install_user_scope(
-        self, install_service: SkillService, mock_resolver: MagicMock, tmp_path: Path,
+        self,
+        install_service: SkillService,
+        mock_resolver: MagicMock,
+        tmp_path: Path,
     ) -> None:
         await install_service.start(mock_resolver)
 
@@ -779,7 +828,10 @@ class TestGitHubInstall:
 
     @pytest.mark.asyncio
     async def test_install_global_scope(
-        self, install_service: SkillService, mock_resolver: MagicMock, tmp_path: Path,
+        self,
+        install_service: SkillService,
+        mock_resolver: MagicMock,
+        tmp_path: Path,
     ) -> None:
         await install_service.start(mock_resolver)
 
@@ -805,7 +857,10 @@ class TestGitHubInstall:
 
     @pytest.mark.asyncio
     async def test_install_no_skills_in_repo(
-        self, install_service: SkillService, mock_resolver: MagicMock, tmp_path: Path,
+        self,
+        install_service: SkillService,
+        mock_resolver: MagicMock,
+        tmp_path: Path,
     ) -> None:
         await install_service.start(mock_resolver)
 
@@ -861,7 +916,10 @@ class TestArchiveInstall:
 
     @pytest.mark.asyncio
     async def test_install_from_zip(
-        self, install_service: SkillService, mock_resolver: MagicMock, tmp_path: Path,
+        self,
+        install_service: SkillService,
+        mock_resolver: MagicMock,
+        tmp_path: Path,
     ) -> None:
         await install_service.start(mock_resolver)
         zip_data = self._make_zip(tmp_path)
@@ -885,7 +943,10 @@ class TestArchiveInstall:
 
     @pytest.mark.asyncio
     async def test_install_from_targz(
-        self, install_service: SkillService, mock_resolver: MagicMock, tmp_path: Path,
+        self,
+        install_service: SkillService,
+        mock_resolver: MagicMock,
+        tmp_path: Path,
     ) -> None:
         await install_service.start(mock_resolver)
         tgz_data = self._make_targz(tmp_path)
@@ -909,7 +970,10 @@ class TestArchiveInstall:
 
     @pytest.mark.asyncio
     async def test_git_url_still_works(
-        self, install_service: SkillService, mock_resolver: MagicMock, tmp_path: Path,
+        self,
+        install_service: SkillService,
+        mock_resolver: MagicMock,
+        tmp_path: Path,
     ) -> None:
         """Non-archive URLs still go through git clone."""
         await install_service.start(mock_resolver)
@@ -952,8 +1016,11 @@ class TestServiceInfo:
         tools = service.get_tools()
         names = {t.name for t in tools}
         assert names == {
-            "manage_skills", "create_skill", "read_skill_file",
-            "run_skill_script", "browse_skill_workspace",
+            "manage_skills",
+            "create_skill",
+            "read_skill_file",
+            "run_skill_script",
+            "browse_skill_workspace",
             "read_skill_workspace_file",
         }
 
@@ -991,8 +1058,8 @@ class TestCreateSkill:
     async def test_create_skill(self, storage_service: tuple[SkillService, AsyncMock]) -> None:
         svc, storage = storage_service
         resolver = MagicMock()
-        resolver.get_capability.side_effect = (
-            lambda cap: storage if cap == "entity_storage" else None
+        resolver.get_capability.side_effect = lambda cap: (
+            storage if cap == "entity_storage" else None
         )
         # Simulate StorageProvider protocol for isinstance check
         storage.backend = storage
@@ -1000,11 +1067,14 @@ class TestCreateSkill:
         storage.create_namespaced = lambda ns: storage
         await svc.start(resolver)
 
-        result = await svc.execute_tool("create_skill", {
-            "skill_md": _VALID_SKILL_MD,
-            "scope": "user",
-            "_user_id": "alice",
-        })
+        result = await svc.execute_tool(
+            "create_skill",
+            {
+                "skill_md": _VALID_SKILL_MD,
+                "scope": "user",
+                "_user_id": "alice",
+            },
+        )
         assert "created" in result
         assert "test-entity-skill" in result
         assert "alice:test-entity-skill" in svc._catalog
@@ -1012,23 +1082,27 @@ class TestCreateSkill:
 
     @pytest.mark.asyncio
     async def test_create_skill_content_cached(
-        self, storage_service: tuple[SkillService, AsyncMock],
+        self,
+        storage_service: tuple[SkillService, AsyncMock],
     ) -> None:
         svc, storage = storage_service
         resolver = MagicMock()
-        resolver.get_capability.side_effect = (
-            lambda cap: storage if cap == "entity_storage" else None
+        resolver.get_capability.side_effect = lambda cap: (
+            storage if cap == "entity_storage" else None
         )
         storage.backend = storage
         storage.raw_backend = storage
         storage.create_namespaced = lambda ns: storage
         await svc.start(resolver)
 
-        await svc.execute_tool("create_skill", {
-            "skill_md": _VALID_SKILL_MD,
-            "scope": "user",
-            "_user_id": "alice",
-        })
+        await svc.execute_tool(
+            "create_skill",
+            {
+                "skill_md": _VALID_SKILL_MD,
+                "scope": "user",
+                "_user_id": "alice",
+            },
+        )
         content = svc.get_skill_content("alice:test-entity-skill")
         assert content is not None
         assert "# Test Entity Skill" in content.instructions
@@ -1036,42 +1110,50 @@ class TestCreateSkill:
 
     @pytest.mark.asyncio
     async def test_create_skill_missing_frontmatter(
-        self, storage_service: tuple[SkillService, AsyncMock],
+        self,
+        storage_service: tuple[SkillService, AsyncMock],
     ) -> None:
         svc, storage = storage_service
         resolver = MagicMock()
-        resolver.get_capability.side_effect = (
-            lambda cap: storage if cap == "entity_storage" else None
+        resolver.get_capability.side_effect = lambda cap: (
+            storage if cap == "entity_storage" else None
         )
         storage.backend = storage
         storage.raw_backend = storage
         storage.create_namespaced = lambda ns: storage
         await svc.start(resolver)
 
-        result = await svc.execute_tool("create_skill", {
-            "skill_md": "No frontmatter here",
-            "_user_id": "alice",
-        })
+        result = await svc.execute_tool(
+            "create_skill",
+            {
+                "skill_md": "No frontmatter here",
+                "_user_id": "alice",
+            },
+        )
         assert "error" in result
 
     @pytest.mark.asyncio
     async def test_create_skill_missing_name(
-        self, storage_service: tuple[SkillService, AsyncMock],
+        self,
+        storage_service: tuple[SkillService, AsyncMock],
     ) -> None:
         svc, storage = storage_service
         resolver = MagicMock()
-        resolver.get_capability.side_effect = (
-            lambda cap: storage if cap == "entity_storage" else None
+        resolver.get_capability.side_effect = lambda cap: (
+            storage if cap == "entity_storage" else None
         )
         storage.backend = storage
         storage.raw_backend = storage
         storage.create_namespaced = lambda ns: storage
         await svc.start(resolver)
 
-        result = await svc.execute_tool("create_skill", {
-            "skill_md": "---\ndescription: No name.\n---\nBody.",
-            "_user_id": "alice",
-        })
+        result = await svc.execute_tool(
+            "create_skill",
+            {
+                "skill_md": "---\ndescription: No name.\n---\nBody.",
+                "_user_id": "alice",
+            },
+        )
         assert "error" in result
 
 
@@ -1083,17 +1165,24 @@ class TestDeleteEntitySkill:
         storage.put = AsyncMock()
         storage.delete = AsyncMock()
         # Start with the skill in storage
-        storage.query = AsyncMock(return_value=[
-            {"_id": "skill_my-skill", "skill_md": _VALID_SKILL_MD,
-             "scope": "user", "owner_id": "alice"},
-        ])
+        storage.query = AsyncMock(
+            return_value=[
+                {
+                    "_id": "skill_my-skill",
+                    "skill_md": _VALID_SKILL_MD,
+                    "scope": "user",
+                    "owner_id": "alice",
+                },
+            ]
+        )
 
         svc = _make_skill_service(
-            directories=[], user_dir=str(tmp_path / "user-skills"),
+            directories=[],
+            user_dir=str(tmp_path / "user-skills"),
         )
         resolver = MagicMock()
-        resolver.get_capability.side_effect = (
-            lambda cap: storage if cap == "entity_storage" else None
+        resolver.get_capability.side_effect = lambda cap: (
+            storage if cap == "entity_storage" else None
         )
         storage.backend = storage
         storage.raw_backend = storage
@@ -1104,21 +1193,28 @@ class TestDeleteEntitySkill:
         assert "alice:test-entity-skill" in svc._catalog
 
         # Delete it
-        result = await svc.execute_tool("manage_skills", {
-            "action": "delete",
-            "skill_name": "test-entity-skill",
-            "_user_id": "alice",
-        })
+        result = await svc.execute_tool(
+            "manage_skills",
+            {
+                "action": "delete",
+                "skill_name": "test-entity-skill",
+                "_user_id": "alice",
+            },
+        )
         assert "deleted" in result
         assert "alice:test-entity-skill" not in svc._catalog
 
     @pytest.mark.asyncio
     async def test_cannot_delete_file_based_skill(
-        self, started_service: SkillService,
+        self,
+        started_service: SkillService,
     ) -> None:
-        result = await started_service.execute_tool("manage_skills", {
-            "action": "delete",
-            "skill_name": "test-skill",
-            "_user_id": "alice",
-        })
+        result = await started_service.execute_tool(
+            "manage_skills",
+            {
+                "action": "delete",
+                "skill_name": "test-skill",
+                "_user_id": "alice",
+            },
+        )
         assert "file-based" in result.lower() or "uninstall" in result.lower()

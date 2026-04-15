@@ -81,7 +81,9 @@ class TestRoastStart:
 
 class TestRoastRun:
     @pytest.mark.asyncio
-    async def test_no_roast_when_dice_fails(self, roast_service: RoastService, resolver: FakeResolver) -> None:
+    async def test_no_roast_when_dice_fails(
+        self, roast_service: RoastService, resolver: FakeResolver
+    ) -> None:
         """When random() > probability, no roast happens."""
         await roast_service.start(resolver)
 
@@ -92,7 +94,9 @@ class TestRoastRun:
             mock_random.choice.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_roast_with_template_fallback(self, roast_service: RoastService, resolver: FakeResolver) -> None:
+    async def test_roast_with_template_fallback(
+        self, roast_service: RoastService, resolver: FakeResolver
+    ) -> None:
         """When dice succeeds but no AI, uses template."""
         # Set up a fake presence service
         fake_presence = MagicMock()
@@ -104,14 +108,18 @@ class TestRoastRun:
 
         await roast_service.start(resolver)
 
-        with patch("gilbert.core.services.roast.random") as mock_random, \
-             patch("gilbert.core.services.roast.isinstance", side_effect=lambda obj, cls: True):
+        with (
+            patch("gilbert.core.services.roast.random") as mock_random,
+            patch("gilbert.core.services.roast.isinstance", side_effect=lambda obj, cls: True),
+        ):
             mock_random.random.return_value = 0.01  # Below threshold
             mock_random.choice.side_effect = lambda x: x[0]  # Pick first item
             await roast_service._run_roast()
 
     @pytest.mark.asyncio
-    async def test_no_roast_when_nobody_present(self, roast_service: RoastService, resolver: FakeResolver) -> None:
+    async def test_no_roast_when_nobody_present(
+        self, roast_service: RoastService, resolver: FakeResolver
+    ) -> None:
         """When nobody is present, no roast happens."""
         fake_presence = MagicMock()
         fake_presence.who_is_here = AsyncMock(return_value=[])
@@ -119,13 +127,17 @@ class TestRoastRun:
 
         await roast_service.start(resolver)
 
-        with patch("gilbert.core.services.roast.random") as mock_random, \
-             patch("gilbert.core.services.roast.isinstance", side_effect=lambda obj, cls: True):
+        with (
+            patch("gilbert.core.services.roast.random") as mock_random,
+            patch("gilbert.core.services.roast.isinstance", side_effect=lambda obj, cls: True),
+        ):
             mock_random.random.return_value = 0.01  # Below threshold
             await roast_service._run_roast()
 
     @pytest.mark.asyncio
-    async def test_no_presence_service(self, roast_service: RoastService, resolver: FakeResolver) -> None:
+    async def test_no_presence_service(
+        self, roast_service: RoastService, resolver: FakeResolver
+    ) -> None:
         """When no presence service, picks no one."""
         await roast_service.start(resolver)
 
@@ -153,7 +165,9 @@ class TestGenerateRoast:
         assert roast == "Hey Alice, nice work today!"
 
     @pytest.mark.asyncio
-    async def test_ai_failure_falls_back_to_template(self, roast_service: RoastService, resolver: FakeResolver) -> None:
+    async def test_ai_failure_falls_back_to_template(
+        self, roast_service: RoastService, resolver: FakeResolver
+    ) -> None:
         """When AI fails, falls back to template."""
         fake_ai = MagicMock()
         fake_ai.chat = AsyncMock(side_effect=Exception("API error"))
@@ -182,24 +196,30 @@ class TestNameResolution:
 
     @pytest.mark.asyncio
     async def test_resolves_user_id_to_display_name(
-        self, roast_service: RoastService, resolver: FakeResolver,
+        self,
+        roast_service: RoastService,
+        resolver: FakeResolver,
     ) -> None:
         """Should resolve internal user_id to the user's display name."""
         from gilbert.interfaces.presence import PresenceState, UserPresence
 
         fake_presence = MagicMock()
-        fake_presence.who_is_here = AsyncMock(return_value=[
-            UserPresence(user_id="usr_abc123", state=PresenceState.PRESENT),
-        ])
+        fake_presence.who_is_here = AsyncMock(
+            return_value=[
+                UserPresence(user_id="usr_abc123", state=PresenceState.PRESENT),
+            ]
+        )
         resolver.caps["presence"] = fake_presence
 
         # Provide a user service that resolves the ID
         fake_user_backend = MagicMock()
-        fake_user_backend.get_user = AsyncMock(return_value={
-            "_id": "usr_abc123",
-            "display_name": "Brian Dilley",
-            "email": "brian@test.com",
-        })
+        fake_user_backend.get_user = AsyncMock(
+            return_value={
+                "_id": "usr_abc123",
+                "display_name": "Brian Dilley",
+                "email": "brian@test.com",
+            }
+        )
         fake_user_svc = MagicMock()
         fake_user_svc.backend = fake_user_backend
         resolver.caps["users"] = fake_user_svc
@@ -212,15 +232,19 @@ class TestNameResolution:
 
     @pytest.mark.asyncio
     async def test_uuid_user_id_without_user_service(
-        self, roast_service: RoastService, resolver: FakeResolver,
+        self,
+        roast_service: RoastService,
+        resolver: FakeResolver,
     ) -> None:
         """Without a user service, UUID-style IDs are returned as-is (not ideal but safe)."""
         from gilbert.interfaces.presence import PresenceState, UserPresence
 
         fake_presence = MagicMock()
-        fake_presence.who_is_here = AsyncMock(return_value=[
-            UserPresence(user_id="usr_569171d4c248", state=PresenceState.PRESENT),
-        ])
+        fake_presence.who_is_here = AsyncMock(
+            return_value=[
+                UserPresence(user_id="usr_569171d4c248", state=PresenceState.PRESENT),
+            ]
+        )
         resolver.caps["presence"] = fake_presence
         # No users service
 
@@ -232,15 +256,19 @@ class TestNameResolution:
 
     @pytest.mark.asyncio
     async def test_email_user_id_fallback(
-        self, roast_service: RoastService, resolver: FakeResolver,
+        self,
+        roast_service: RoastService,
+        resolver: FakeResolver,
     ) -> None:
         """Email-style user_ids should be parsed into a readable name."""
         from gilbert.interfaces.presence import PresenceState, UserPresence
 
         fake_presence = MagicMock()
-        fake_presence.who_is_here = AsyncMock(return_value=[
-            UserPresence(user_id="john.doe@company.com", state=PresenceState.PRESENT),
-        ])
+        fake_presence.who_is_here = AsyncMock(
+            return_value=[
+                UserPresence(user_id="john.doe@company.com", state=PresenceState.PRESENT),
+            ]
+        )
         resolver.caps["presence"] = fake_presence
         # No users service — fallback parsing
 
@@ -252,15 +280,19 @@ class TestNameResolution:
 
     @pytest.mark.asyncio
     async def test_user_not_found_uses_fallback(
-        self, roast_service: RoastService, resolver: FakeResolver,
+        self,
+        roast_service: RoastService,
+        resolver: FakeResolver,
     ) -> None:
         """If user service can't find the user, falls back to ID parsing."""
         from gilbert.interfaces.presence import PresenceState, UserPresence
 
         fake_presence = MagicMock()
-        fake_presence.who_is_here = AsyncMock(return_value=[
-            UserPresence(user_id="brian.dilley@test.com", state=PresenceState.PRESENT),
-        ])
+        fake_presence.who_is_here = AsyncMock(
+            return_value=[
+                UserPresence(user_id="brian.dilley@test.com", state=PresenceState.PRESENT),
+            ]
+        )
         resolver.caps["presence"] = fake_presence
 
         fake_user_backend = MagicMock()
@@ -278,9 +310,12 @@ class TestNameResolution:
 
 class TestAnnounce:
     @pytest.mark.asyncio
-    async def test_announce_with_speakers(self, roast_service: RoastService, resolver: FakeResolver) -> None:
+    async def test_announce_with_speakers(
+        self, roast_service: RoastService, resolver: FakeResolver
+    ) -> None:
         """Announces via speaker service when available."""
         from gilbert.interfaces.speaker import SpeakerProvider
+
         fake_speaker = MagicMock(spec=SpeakerProvider)
         fake_speaker.announce = AsyncMock()
         resolver.caps["speaker_control"] = fake_speaker
@@ -291,7 +326,9 @@ class TestAnnounce:
         fake_speaker.announce.assert_awaited_once_with("Test roast", speaker_names=None)
 
     @pytest.mark.asyncio
-    async def test_announce_without_speakers(self, roast_service: RoastService, resolver: FakeResolver) -> None:
+    async def test_announce_without_speakers(
+        self, roast_service: RoastService, resolver: FakeResolver
+    ) -> None:
         """Gracefully handles missing speaker service."""
         await roast_service.start(resolver)
         # Should not raise

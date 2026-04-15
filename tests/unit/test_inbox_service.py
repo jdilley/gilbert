@@ -74,13 +74,21 @@ class FakeEmailBackend(EmailBackend):
         from_name: str = "",
     ) -> str:
         sent_id = self._next_send_id
-        self.sent.append({
-            "id": sent_id, "to": to, "subject": subject, "body_html": body_html,
-            "body_text": body_text, "cc": cc,
-            "in_reply_to": in_reply_to, "thread_id": thread_id,
-            "attachments": attachments,
-            "reply_to": reply_to, "from_name": from_name,
-        })
+        self.sent.append(
+            {
+                "id": sent_id,
+                "to": to,
+                "subject": subject,
+                "body_html": body_html,
+                "body_text": body_text,
+                "cc": cc,
+                "in_reply_to": in_reply_to,
+                "thread_id": thread_id,
+                "attachments": attachments,
+                "reply_to": reply_to,
+                "from_name": from_name,
+            }
+        )
         return sent_id
 
     async def mark_read(self, message_id: str) -> None:
@@ -169,6 +177,7 @@ class FakeStorageService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="storage", capabilities=frozenset({"entity_storage"}))
 
 
@@ -189,6 +198,7 @@ class FakeEventBusService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="event_bus", capabilities=frozenset({"event_bus"}))
 
 
@@ -198,6 +208,7 @@ class FakeSchedulerService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="scheduler", capabilities=frozenset({"scheduler"}))
 
     def add_job(self, **kwargs: Any) -> Any:
@@ -242,6 +253,7 @@ class FakeAclService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="access_control", capabilities=frozenset({"access_control"}))
 
 
@@ -312,36 +324,46 @@ def _make_mailbox(
 
 def _owner() -> UserContext:
     return UserContext(
-        user_id="owner", email="owner@example.com",
-        display_name="Owner", roles=frozenset({"user"}),
+        user_id="owner",
+        email="owner@example.com",
+        display_name="Owner",
+        roles=frozenset({"user"}),
     )
 
 
 def _shared_user() -> UserContext:
     return UserContext(
-        user_id="alice", email="alice@example.com",
-        display_name="Alice", roles=frozenset({"user"}),
+        user_id="alice",
+        email="alice@example.com",
+        display_name="Alice",
+        roles=frozenset({"user"}),
     )
 
 
 def _role_user() -> UserContext:
     return UserContext(
-        user_id="bob", email="bob@example.com",
-        display_name="Bob", roles=frozenset({"user", "sales"}),
+        user_id="bob",
+        email="bob@example.com",
+        display_name="Bob",
+        roles=frozenset({"user", "sales"}),
     )
 
 
 def _unrelated_user() -> UserContext:
     return UserContext(
-        user_id="carol", email="carol@example.com",
-        display_name="Carol", roles=frozenset({"user"}),
+        user_id="carol",
+        email="carol@example.com",
+        display_name="Carol",
+        roles=frozenset({"user"}),
     )
 
 
 def _admin_user() -> UserContext:
     return UserContext(
-        user_id="admin", email="admin@example.com",
-        display_name="Admin", roles=frozenset({"admin"}),
+        user_id="admin",
+        email="admin@example.com",
+        display_name="Admin",
+        roles=frozenset({"admin"}),
     )
 
 
@@ -391,13 +413,17 @@ def inbox_service(
 
 
 async def _attach_runtime(
-    svc: InboxService, mailbox: Mailbox, backend: FakeEmailBackend,
+    svc: InboxService,
+    mailbox: Mailbox,
+    backend: FakeEmailBackend,
 ) -> None:
     """Persist a mailbox and wire up a backend runtime without hitting the real
     backend registry / scheduler code path."""
     assert svc._storage is not None
     await svc._storage.put(
-        "inbox_mailboxes", mailbox.id, mailbox.to_dict(),
+        "inbox_mailboxes",
+        mailbox.id,
+        mailbox.to_dict(),
     )
     svc._runtimes[mailbox.id] = _MailboxRuntime(
         mailbox=mailbox,
@@ -431,8 +457,11 @@ class TestServiceInfo:
         svc._enabled = True
         names = {t.name for t in svc.get_tools()}
         assert names == {
-            "inbox_mailboxes", "inbox_search", "inbox_read",
-            "inbox_reply", "inbox_send",
+            "inbox_mailboxes",
+            "inbox_search",
+            "inbox_read",
+            "inbox_reply",
+            "inbox_send",
         }
 
     def test_tools_empty_when_disabled(self) -> None:
@@ -475,9 +504,7 @@ class TestAuthorizationHelpers:
         # Owner tag wins over everything
         assert determine_access(_owner(), m, is_admin=True) == MailboxAccess.OWNER
         # Admin tag when not owner and no share
-        assert (
-            determine_access(_admin_user(), m, is_admin=True) == MailboxAccess.ADMIN
-        )
+        assert determine_access(_admin_user(), m, is_admin=True) == MailboxAccess.ADMIN
         # Share-user tag
         assert determine_access(_shared_user(), m) == MailboxAccess.SHARED_USER
         # Share-role tag
@@ -492,31 +519,34 @@ class TestAuthorizationHelpers:
 class TestMailboxCrud:
     @pytest.mark.asyncio
     async def test_create_sets_owner_and_emits_event(
-        self, inbox_service: InboxService, event_bus_svc: FakeEventBusService,
+        self,
+        inbox_service: InboxService,
+        event_bus_svc: FakeEventBusService,
     ) -> None:
         mb = _make_mailbox(mailbox_id="", owner_user_id="")
         created = await inbox_service.create_mailbox(mb, _owner())
         assert created.owner_user_id == "owner"
         assert created.id  # got assigned
-        assert any(
-            e.event_type == "inbox.mailbox.created"
-            for e in event_bus_svc.bus.published
-        )
+        assert any(e.event_type == "inbox.mailbox.created" for e in event_bus_svc.bus.published)
 
     @pytest.mark.asyncio
     async def test_update_by_owner_allowed(
-        self, inbox_service: InboxService,
+        self,
+        inbox_service: InboxService,
     ) -> None:
         mb = _make_mailbox()
         await _attach_runtime(inbox_service, mb, FakeEmailBackend())
         updated = await inbox_service.update_mailbox(
-            mb.id, {"name": "New Name"}, _owner(),
+            mb.id,
+            {"name": "New Name"},
+            _owner(),
         )
         assert updated.name == "New Name"
 
     @pytest.mark.asyncio
     async def test_update_by_shared_user_forbidden(
-        self, inbox_service: InboxService,
+        self,
+        inbox_service: InboxService,
     ) -> None:
         from gilbert.core.services.inbox import InboxPermissionError
 
@@ -524,7 +554,9 @@ class TestMailboxCrud:
         await _attach_runtime(inbox_service, mb, FakeEmailBackend())
         with pytest.raises(InboxPermissionError):
             await inbox_service.update_mailbox(
-                mb.id, {"name": "Hacked"}, _shared_user(),
+                mb.id,
+                {"name": "Hacked"},
+                _shared_user(),
             )
 
     @pytest.mark.asyncio
@@ -541,8 +573,7 @@ class TestMailboxCrud:
         assert refreshed is not None
         assert "alice" in refreshed.shared_with_users
         assert any(
-            e.event_type == "inbox.mailbox.shares.changed"
-            for e in event_bus_svc.bus.published
+            e.event_type == "inbox.mailbox.shares.changed" for e in event_bus_svc.bus.published
         )
 
         await inbox_service.unshare_user(mb.id, "alice", _owner())
@@ -552,7 +583,8 @@ class TestMailboxCrud:
 
     @pytest.mark.asyncio
     async def test_share_role_roundtrip(
-        self, inbox_service: InboxService,
+        self,
+        inbox_service: InboxService,
     ) -> None:
         mb = _make_mailbox()
         await _attach_runtime(inbox_service, mb, FakeEmailBackend())
@@ -564,7 +596,8 @@ class TestMailboxCrud:
 
     @pytest.mark.asyncio
     async def test_delete_refuses_with_pending_outbox(
-        self, inbox_service: InboxService,
+        self,
+        inbox_service: InboxService,
     ) -> None:
         mb = _make_mailbox()
         await _attach_runtime(inbox_service, mb, FakeEmailBackend())
@@ -572,7 +605,8 @@ class TestMailboxCrud:
         # Queue a draft so the mailbox has non-terminal outbox rows.
         draft = OutboxDraft(
             to=[EmailAddress(email="alice@example.com")],
-            subject="hi", body_html="<p>hi</p>",
+            subject="hi",
+            body_html="<p>hi</p>",
         )
         await inbox_service.schedule_send(mb.id, draft, _owner())
 
@@ -581,15 +615,24 @@ class TestMailboxCrud:
 
     @pytest.mark.asyncio
     async def test_delete_cascades_messages(
-        self, inbox_service: InboxService, storage_svc: FakeStorageService,
+        self,
+        inbox_service: InboxService,
+        storage_svc: FakeStorageService,
     ) -> None:
         mb = _make_mailbox()
         await _attach_runtime(inbox_service, mb, FakeEmailBackend())
         await storage_svc.backend.put(
-            "inbox_messages", "m1",
-            {"mailbox_id": mb.id, "subject": "x", "body_text": "y",
-             "date": "2026-04-05T00:00:00+00:00", "is_inbound": True,
-             "thread_id": "t1", "sender_email": "a@b.c"},
+            "inbox_messages",
+            "m1",
+            {
+                "mailbox_id": mb.id,
+                "subject": "x",
+                "body_text": "y",
+                "date": "2026-04-05T00:00:00+00:00",
+                "is_inbound": True,
+                "thread_id": "t1",
+                "sender_email": "a@b.c",
+            },
         )
         await inbox_service.delete_mailbox(mb.id, _owner())
         assert await storage_svc.backend.get("inbox_messages", "m1") is None
@@ -602,7 +645,9 @@ class TestMailboxCrud:
 class TestPolling:
     @pytest.mark.asyncio
     async def test_poll_persists_with_mailbox_id(
-        self, inbox_service: InboxService, storage_svc: FakeStorageService,
+        self,
+        inbox_service: InboxService,
+        storage_svc: FakeStorageService,
     ) -> None:
         backend = FakeEmailBackend()
         backend.messages = [_make_message(message_id="m1", sender_email="alice@example.com")]
@@ -619,7 +664,9 @@ class TestPolling:
 
     @pytest.mark.asyncio
     async def test_poll_detects_own_messages_per_mailbox(
-        self, inbox_service: InboxService, storage_svc: FakeStorageService,
+        self,
+        inbox_service: InboxService,
+        storage_svc: FakeStorageService,
     ) -> None:
         backend = FakeEmailBackend()
         backend.messages = [
@@ -635,7 +682,9 @@ class TestPolling:
 
     @pytest.mark.asyncio
     async def test_poll_publishes_event_with_mailbox_id(
-        self, inbox_service: InboxService, event_bus_svc: FakeEventBusService,
+        self,
+        inbox_service: InboxService,
+        event_bus_svc: FakeEventBusService,
     ) -> None:
         backend = FakeEmailBackend()
         backend.messages = [_make_message(message_id="m1")]
@@ -644,15 +693,16 @@ class TestPolling:
 
         await inbox_service._poll_runtime(inbox_service._runtimes[mb.id])
         received = [
-            e for e in event_bus_svc.bus.published
-            if e.event_type == "inbox.message.received"
+            e for e in event_bus_svc.bus.published if e.event_type == "inbox.message.received"
         ]
         assert len(received) == 1
         assert received[0].data["mailbox_id"] == mb.id
 
     @pytest.mark.asyncio
     async def test_poll_isolation_between_mailboxes(
-        self, inbox_service: InboxService, storage_svc: FakeStorageService,
+        self,
+        inbox_service: InboxService,
+        storage_svc: FakeStorageService,
     ) -> None:
         backend_a = FakeEmailBackend()
         backend_a.messages = [_make_message(message_id="a1", thread_id="tx")]
@@ -684,23 +734,41 @@ class TestPolling:
 class TestMessageVisibility:
     @pytest.mark.asyncio
     async def test_search_scoped_to_accessible_mailboxes(
-        self, inbox_service: InboxService, storage_svc: FakeStorageService,
+        self,
+        inbox_service: InboxService,
+        storage_svc: FakeStorageService,
     ) -> None:
         mb_owned = _make_mailbox(mailbox_id="mbx_owned")
         mb_other = _make_mailbox(mailbox_id="mbx_other", owner_user_id="someone_else")
         await _attach_runtime(inbox_service, mb_owned, FakeEmailBackend())
         await _attach_runtime(inbox_service, mb_other, FakeEmailBackend())
 
-        await storage_svc.backend.put("inbox_messages", "m_owned", {
-            "mailbox_id": "mbx_owned", "subject": "A", "body_text": "x",
-            "sender_email": "a@b.c", "date": "2026-04-05T00:00:00+00:00",
-            "is_inbound": True, "thread_id": "t1",
-        })
-        await storage_svc.backend.put("inbox_messages", "m_other", {
-            "mailbox_id": "mbx_other", "subject": "B", "body_text": "y",
-            "sender_email": "c@d.e", "date": "2026-04-05T01:00:00+00:00",
-            "is_inbound": True, "thread_id": "t2",
-        })
+        await storage_svc.backend.put(
+            "inbox_messages",
+            "m_owned",
+            {
+                "mailbox_id": "mbx_owned",
+                "subject": "A",
+                "body_text": "x",
+                "sender_email": "a@b.c",
+                "date": "2026-04-05T00:00:00+00:00",
+                "is_inbound": True,
+                "thread_id": "t1",
+            },
+        )
+        await storage_svc.backend.put(
+            "inbox_messages",
+            "m_other",
+            {
+                "mailbox_id": "mbx_other",
+                "subject": "B",
+                "body_text": "y",
+                "sender_email": "c@d.e",
+                "date": "2026-04-05T01:00:00+00:00",
+                "is_inbound": True,
+                "thread_id": "t2",
+            },
+        )
 
         set_current_user(_owner())
         results = await inbox_service.search_messages()
@@ -709,7 +777,9 @@ class TestMessageVisibility:
 
     @pytest.mark.asyncio
     async def test_search_forbidden_mailbox_raises(
-        self, inbox_service: InboxService, storage_svc: FakeStorageService,
+        self,
+        inbox_service: InboxService,
+        storage_svc: FakeStorageService,
     ) -> None:
         from gilbert.core.services.inbox import InboxPermissionError
 
@@ -722,15 +792,25 @@ class TestMessageVisibility:
 
     @pytest.mark.asyncio
     async def test_shared_user_can_read(
-        self, inbox_service: InboxService, storage_svc: FakeStorageService,
+        self,
+        inbox_service: InboxService,
+        storage_svc: FakeStorageService,
     ) -> None:
         mb = _make_mailbox(shared_with_users=["alice"])
         await _attach_runtime(inbox_service, mb, FakeEmailBackend())
-        await storage_svc.backend.put("inbox_messages", "m1", {
-            "mailbox_id": mb.id, "subject": "x", "body_text": "y",
-            "sender_email": "a@b.c", "date": "2026-04-05T00:00:00+00:00",
-            "is_inbound": True, "thread_id": "t1",
-        })
+        await storage_svc.backend.put(
+            "inbox_messages",
+            "m1",
+            {
+                "mailbox_id": mb.id,
+                "subject": "x",
+                "body_text": "y",
+                "sender_email": "a@b.c",
+                "date": "2026-04-05T00:00:00+00:00",
+                "is_inbound": True,
+                "thread_id": "t1",
+            },
+        )
         set_current_user(_shared_user())
         results = await inbox_service.search_messages(mailbox_id=mb.id)
         assert len(results) == 1
@@ -742,13 +822,16 @@ class TestMessageVisibility:
 class TestOutbox:
     @pytest.mark.asyncio
     async def test_schedule_send_persists_pending(
-        self, inbox_service: InboxService,
+        self,
+        inbox_service: InboxService,
     ) -> None:
         mb = _make_mailbox()
         await _attach_runtime(inbox_service, mb, FakeEmailBackend())
 
         draft = OutboxDraft(
-            to=[EmailAddress(email="x@y.z")], subject="s", body_html="<p>h</p>",
+            to=[EmailAddress(email="x@y.z")],
+            subject="s",
+            body_html="<p>h</p>",
         )
         outbox_id = await inbox_service.schedule_send(mb.id, draft, _owner())
 
@@ -761,13 +844,16 @@ class TestOutbox:
 
     @pytest.mark.asyncio
     async def test_shared_user_can_cancel_owners_draft(
-        self, inbox_service: InboxService,
+        self,
+        inbox_service: InboxService,
     ) -> None:
         mb = _make_mailbox(shared_with_users=["alice"])
         await _attach_runtime(inbox_service, mb, FakeEmailBackend())
 
         draft = OutboxDraft(
-            to=[EmailAddress(email="x@y.z")], subject="s", body_html="<p>h</p>",
+            to=[EmailAddress(email="x@y.z")],
+            subject="s",
+            body_html="<p>h</p>",
         )
         outbox_id = await inbox_service.schedule_send(mb.id, draft, _owner())
 
@@ -782,7 +868,8 @@ class TestOutbox:
 
     @pytest.mark.asyncio
     async def test_unrelated_user_cannot_cancel(
-        self, inbox_service: InboxService,
+        self,
+        inbox_service: InboxService,
     ) -> None:
         from gilbert.core.services.inbox import InboxPermissionError
 
@@ -790,7 +877,9 @@ class TestOutbox:
         await _attach_runtime(inbox_service, mb, FakeEmailBackend())
 
         draft = OutboxDraft(
-            to=[EmailAddress(email="x@y.z")], subject="s", body_html="<p>h</p>",
+            to=[EmailAddress(email="x@y.z")],
+            subject="s",
+            body_html="<p>h</p>",
         )
         outbox_id = await inbox_service.schedule_send(mb.id, draft, _owner())
         with pytest.raises(InboxPermissionError):
@@ -807,8 +896,10 @@ class TestOutbox:
         await _attach_runtime(inbox_service, mb, backend)
 
         draft = OutboxDraft(
-            to=[EmailAddress(email="x@y.z")], subject="hello",
-            body_html="<p>hi</p>", body_text="hi",
+            to=[EmailAddress(email="x@y.z")],
+            subject="hello",
+            body_html="<p>hi</p>",
+            body_text="hi",
         )
         await inbox_service.schedule_send(mb.id, draft, _owner())
         await inbox_service._outbox_tick()
@@ -816,8 +907,7 @@ class TestOutbox:
         assert len(backend.sent) == 1
         assert backend.sent[0]["subject"] == "hello"
         assert any(
-            e.event_type == "inbox.outbox.sent"
-            and e.data["mailbox_id"] == mb.id
+            e.event_type == "inbox.outbox.sent" and e.data["mailbox_id"] == mb.id
             for e in event_bus_svc.bus.published
         )
 
@@ -840,7 +930,9 @@ class TestOutbox:
         await _attach_runtime(inbox_service, mb, backend)
 
         draft = OutboxDraft(
-            to=[EmailAddress(email="x@y.z")], subject="x", body_html="<p>x</p>",
+            to=[EmailAddress(email="x@y.z")],
+            subject="x",
+            body_html="<p>x</p>",
         )
         await inbox_service.schedule_send(mb.id, draft, _owner())
         await inbox_service._outbox_tick()
@@ -849,10 +941,7 @@ class TestOutbox:
         entries = await inbox_service.list_outbox(mailbox_id=mb.id)
         assert entries[0].status == OutboxStatus.FAILED
         assert "smtp down" in (entries[0].error or "")
-        assert any(
-            e.event_type == "inbox.outbox.failed"
-            for e in event_bus_svc.bus.published
-        )
+        assert any(e.event_type == "inbox.outbox.failed" for e in event_bus_svc.bus.published)
 
 
 # ── AI tool shape ─────────────────────────────────────────────────
@@ -861,11 +950,13 @@ class TestOutbox:
 class TestAiTools:
     @pytest.mark.asyncio
     async def test_inbox_mailboxes_lists_accessible(
-        self, inbox_service: InboxService,
+        self,
+        inbox_service: InboxService,
     ) -> None:
         mb_owned = _make_mailbox(mailbox_id="mbx_owned")
         mb_shared = _make_mailbox(
-            mailbox_id="mbx_shared", owner_user_id="someone",
+            mailbox_id="mbx_shared",
+            owner_user_id="someone",
             shared_with_users=["owner"],
         )
         mb_hidden = _make_mailbox(mailbox_id="mbx_hidden", owner_user_id="someone")
@@ -881,7 +972,8 @@ class TestAiTools:
 
     @pytest.mark.asyncio
     async def test_search_requires_mailbox_id(
-        self, inbox_service: InboxService,
+        self,
+        inbox_service: InboxService,
     ) -> None:
         set_current_user(_owner())
         result = await inbox_service.execute_tool("inbox_search", {})
@@ -890,13 +982,15 @@ class TestAiTools:
 
     @pytest.mark.asyncio
     async def test_search_forbidden_mailbox_gives_helpful_error(
-        self, inbox_service: InboxService,
+        self,
+        inbox_service: InboxService,
     ) -> None:
         mb = _make_mailbox(owner_user_id="someone_else")
         await _attach_runtime(inbox_service, mb, FakeEmailBackend())
         set_current_user(_unrelated_user())
         result = await inbox_service.execute_tool(
-            "inbox_search", {"mailbox_id": mb.id},
+            "inbox_search",
+            {"mailbox_id": mb.id},
         )
         assert "don't have access" in result
         assert "/inbox mailboxes" in result

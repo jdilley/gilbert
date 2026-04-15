@@ -120,7 +120,9 @@ class TestSubscriptions:
 
 class TestChatFiltering:
     def _conn(self, user_id: str = "user1", conv_ids: set[str] | None = None) -> WsConnection:
-        user = UserContext(user_id=user_id, email="", display_name="User", roles=frozenset({"user"}))
+        user = UserContext(
+            user_id=user_id, email="", display_name="User", roles=frozenset({"user"})
+        )
         manager = MagicMock(spec=WsConnectionManager)
         conn = WsConnection(user, 100, manager)
         if conv_ids:
@@ -144,16 +146,24 @@ class TestChatFiltering:
 
     def test_visible_to_filters(self) -> None:
         conn = self._conn(user_id="user1", conv_ids={"conv1"})
-        event = Event(event_type="chat.message.created", data={
-            "conversation_id": "conv1", "visible_to": ["user2"],
-        })
+        event = Event(
+            event_type="chat.message.created",
+            data={
+                "conversation_id": "conv1",
+                "visible_to": ["user2"],
+            },
+        )
         assert not conn.can_see_chat_event(event)
 
     def test_join_event_updates_membership(self) -> None:
         conn = self._conn(user_id="user1")
-        event = Event(event_type="chat.member.joined", data={
-            "conversation_id": "conv1", "user_id": "user1",
-        })
+        event = Event(
+            event_type="chat.member.joined",
+            data={
+                "conversation_id": "conv1",
+                "user_id": "user1",
+            },
+        )
         assert conn.can_see_chat_event(event)
         assert "conv1" in conn.shared_conv_ids
 
@@ -165,8 +175,12 @@ class TestConnectionManager:
     async def test_dispatches_to_eligible_connections(self) -> None:
         manager = WsConnectionManager()
 
-        admin_user = UserContext(user_id="admin", email="", display_name="Admin", roles=frozenset({"admin"}))
-        guest_user = UserContext(user_id="guest", email="", display_name="Guest", roles=frozenset({"everyone"}))
+        admin_user = UserContext(
+            user_id="admin", email="", display_name="Admin", roles=frozenset({"admin"})
+        )
+        guest_user = UserContext(
+            user_id="guest", email="", display_name="Guest", roles=frozenset({"everyone"})
+        )
 
         admin_conn = WsConnection(admin_user, 0, manager)
         guest_conn = WsConnection(guest_user, 200, manager)
@@ -186,7 +200,9 @@ class TestConnectionManager:
         admin_conn.queue.get_nowait()
 
         # Everyone event (chat is everyone-visible now)
-        event2 = Event(event_type="chat.message.created", data={"conversation_id": ""}, source="test")
+        event2 = Event(
+            event_type="chat.message.created", data={"conversation_id": ""}, source="test"
+        )
         await manager._dispatch_event(event2)
 
         assert not admin_conn.queue.empty()
@@ -201,24 +217,35 @@ class TestFrameDispatch:
         user = UserContext(user_id="test", email="", display_name="Test", roles=frozenset({"user"}))
         manager = MagicMock(spec=WsConnectionManager)
         from gilbert.web.ws_protocol import _rpc_handlers
+
         manager._handlers = dict(_rpc_handlers)
         manager.gilbert = None  # no ACL service → fall through to defaults
         return WsConnection(user, level, manager)
 
     async def test_subscribe(self) -> None:
         conn = self._conn()
-        result = await dispatch_frame(conn, {
-            "type": "gilbert.sub.add", "id": "1", "patterns": ["chat.*"],
-        })
+        result = await dispatch_frame(
+            conn,
+            {
+                "type": "gilbert.sub.add",
+                "id": "1",
+                "patterns": ["chat.*"],
+            },
+        )
         assert result["ok"] is True
         assert "chat.*" in conn.subscriptions
 
     async def test_unsubscribe(self) -> None:
         conn = self._conn()
         conn.subscriptions = {"*", "chat.*"}
-        result = await dispatch_frame(conn, {
-            "type": "gilbert.sub.remove", "id": "2", "patterns": ["*"],
-        })
+        result = await dispatch_frame(
+            conn,
+            {
+                "type": "gilbert.sub.remove",
+                "id": "2",
+                "patterns": ["*"],
+            },
+        )
         assert result["ok"] is True
         assert "*" not in conn.subscriptions
         assert "chat.*" in conn.subscriptions
@@ -241,12 +268,15 @@ class TestFrameDispatch:
 
     async def test_peer_publish_requires_role(self) -> None:
         conn = self._conn()  # level 100 (user), not peer/admin
-        result = await dispatch_frame(conn, {
-            "type": "gilbert.peer.publish",
-            "id": "5",
-            "event_type": "test.event",
-            "data": {},
-        })
+        result = await dispatch_frame(
+            conn,
+            {
+                "type": "gilbert.peer.publish",
+                "id": "5",
+                "event_type": "test.event",
+                "data": {},
+            },
+        )
         assert result["code"] == 403
 
 
@@ -258,6 +288,7 @@ class TestOutboundRpc:
         user = UserContext(user_id="test", email="", display_name="Test", roles=frozenset({"user"}))
         manager = MagicMock(spec=WsConnectionManager)
         from gilbert.web.ws_protocol import _rpc_handlers
+
         manager._handlers = dict(_rpc_handlers)
         manager.gilbert = None
         return WsConnection(user, level, manager)
@@ -270,12 +301,15 @@ class TestOutboundRpc:
             assert frame["type"] == "mcp.bridge.call"
             assert frame["id"].startswith("s")
             # Reply frame carries ref matching the outbound id
-            await dispatch_frame(conn, {
-                "type": "mcp.bridge.result",
-                "ref": frame["id"],
-                "ok": True,
-                "result": {"tools": ["a", "b"]},
-            })
+            await dispatch_frame(
+                conn,
+                {
+                    "type": "mcp.bridge.result",
+                    "ref": frame["id"],
+                    "ok": True,
+                    "result": {"tools": ["a", "b"]},
+                },
+            )
 
         browser_task = asyncio.create_task(fake_browser())
         result = await conn.call_client(
@@ -296,11 +330,14 @@ class TestOutboundRpc:
             for _ in range(3):
                 frame = await conn.queue.get()
                 ids.append(frame["id"])
-                await dispatch_frame(conn, {
-                    "type": "mcp.bridge.result",
-                    "ref": frame["id"],
-                    "ok": True,
-                })
+                await dispatch_frame(
+                    conn,
+                    {
+                        "type": "mcp.bridge.result",
+                        "ref": frame["id"],
+                        "ok": True,
+                    },
+                )
 
         drainer = asyncio.create_task(drain_and_reply())
         results = await asyncio.gather(
@@ -344,11 +381,14 @@ class TestOutboundRpc:
         """A frame with a ref that doesn't match anything pending is
         treated as a normal frame (and errors as unknown type here)."""
         conn = self._conn()
-        result = await dispatch_frame(conn, {
-            "type": "mcp.bridge.result",
-            "ref": "s999",
-            "ok": True,
-        })
+        result = await dispatch_frame(
+            conn,
+            {
+                "type": "mcp.bridge.result",
+                "ref": "s999",
+                "ok": True,
+            },
+        )
         assert result is not None
         assert result["type"] == "gilbert.error"
         assert result["code"] == 400
@@ -357,9 +397,12 @@ class TestOutboundRpc:
         """Non-string ref fields fall through to normal dispatch."""
         conn = self._conn()
         # Integer ref, no matching pending entry → unknown type error
-        result = await dispatch_frame(conn, {
-            "type": "unknown.frame",
-            "ref": 42,
-        })
+        result = await dispatch_frame(
+            conn,
+            {
+                "type": "unknown.frame",
+                "ref": 42,
+            },
+        )
         assert result is not None
         assert result["type"] == "gilbert.error"

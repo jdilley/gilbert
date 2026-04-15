@@ -110,18 +110,21 @@ class RoastService(Service):
     def config_params(self) -> list[ConfigParam]:
         return [
             ConfigParam(
-                key="probability", type=ToolParameterType.NUMBER,
+                key="probability",
+                type=ToolParameterType.NUMBER,
                 description="Probability of roasting per hour (0.0-1.0).",
                 default=0.10,
             ),
             ConfigParam(
-                key="ai_prompt", type=ToolParameterType.STRING,
+                key="ai_prompt",
+                type=ToolParameterType.STRING,
                 description="AI prompt template for generating roasts. Use {name} as placeholder.",
                 default="Generate a playful, friendly roast of {name}. Be funny and teasing but never mean or hurtful. Keep it to 1-2 sentences.",
                 multiline=True,
             ),
             ConfigParam(
-                key="speakers", type=ToolParameterType.ARRAY,
+                key="speakers",
+                type=ToolParameterType.ARRAY,
                 description="Speaker names for roast announcements (empty = all).",
                 default=[],
                 choices_from="speakers",

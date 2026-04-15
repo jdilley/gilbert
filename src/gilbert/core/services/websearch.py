@@ -32,9 +32,18 @@ from gilbert.interfaces.websearch import WebSearchBackend
 logger = logging.getLogger(__name__)
 
 
-_SKIP_TAGS = frozenset({
-    "script", "style", "noscript", "svg", "path", "head", "meta", "link",
-})
+_SKIP_TAGS = frozenset(
+    {
+        "script",
+        "style",
+        "noscript",
+        "svg",
+        "path",
+        "head",
+        "meta",
+        "link",
+    }
+)
 _MAX_FETCH_SIZE = 500_000  # 500KB
 _FETCH_TIMEOUT = 15
 
@@ -162,9 +171,11 @@ class WebSearchService(Service, ToolProvider):
     def config_params(self) -> list[ConfigParam]:
         params = [
             ConfigParam(
-                key="backend", type=ToolParameterType.STRING,
+                key="backend",
+                type=ToolParameterType.STRING,
                 description="Web search backend provider.",
-                default="tavily", restart_required=True,
+                default="tavily",
+                restart_required=True,
                 choices=tuple(WebSearchBackend.registered_backends().keys()),
             ),
         ]
@@ -172,13 +183,20 @@ class WebSearchService(Service, ToolProvider):
         backend_cls = backends.get(self._backend_name)
         if backend_cls is not None:
             for bp in backend_cls.backend_config_params():
-                params.append(ConfigParam(
-                    key=f"settings.{bp.key}", type=bp.type,
-                    description=bp.description, default=bp.default,
-                    restart_required=bp.restart_required, sensitive=bp.sensitive,
-                    choices=bp.choices, choices_from=bp.choices_from,
-                    multiline=bp.multiline, backend_param=True,
-                ))
+                params.append(
+                    ConfigParam(
+                        key=f"settings.{bp.key}",
+                        type=bp.type,
+                        description=bp.description,
+                        default=bp.default,
+                        restart_required=bp.restart_required,
+                        sensitive=bp.sensitive,
+                        choices=bp.choices,
+                        choices_from=bp.choices_from,
+                        multiline=bp.multiline,
+                        backend_param=True,
+                    )
+                )
         return params
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
@@ -193,7 +211,9 @@ class WebSearchService(Service, ToolProvider):
         )
 
     async def invoke_config_action(
-        self, key: str, payload: dict[str, Any],
+        self,
+        key: str,
+        payload: dict[str, Any],
     ) -> ConfigActionResult:
         return await invoke_backend_action(self._backend, key, payload)
 
@@ -341,8 +361,7 @@ class WebSearchService(Service, ToolProvider):
             parts.append(f"{i}. ![{query} - image {i}]({url})")
 
         parts.append(
-            "\nInclude the markdown image tags above in your response "
-            "to display them in the chat."
+            "\nInclude the markdown image tags above in your response to display them in the chat."
         )
         return "\n".join(parts)
 
@@ -371,10 +390,12 @@ class WebSearchService(Service, ToolProvider):
 
         content_type = response.headers.get("content-type", "")
         if "text/html" not in content_type and "text/plain" not in content_type:
-            return json.dumps({
-                "url": url,
-                "error": f"Unsupported content type: {content_type}",
-            })
+            return json.dumps(
+                {
+                    "url": url,
+                    "error": f"Unsupported content type: {content_type}",
+                }
+            )
 
         body = response.text[:_MAX_FETCH_SIZE]
 

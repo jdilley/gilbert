@@ -153,7 +153,9 @@ def _extract_pdf(
                         stats.vision_chars += len(vision_text)
                         logger.info(
                             "Vision page %d of %s: %d chars",
-                            page_num + 1, doc.name or "PDF", len(vision_text),
+                            page_num + 1,
+                            doc.name or "PDF",
+                            len(vision_text),
                         )
                 except Exception:
                     logger.warning("Vision failed on page %d", page_num + 1, exc_info=True)
@@ -193,6 +195,7 @@ def _run_vision_sync(vision: VisionService, png_bytes: bytes) -> str:
             # We're in a thread called from the async event loop —
             # can't use loop.run_until_complete, use asyncio.run in a new loop
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(asyncio.run, vision.describe_image(png_bytes, "image/png"))
                 return future.result(timeout=60)

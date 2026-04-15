@@ -49,14 +49,15 @@ def test_get_tools(service: StorageService) -> None:
 # --- store_entity ---
 
 
-async def test_tool_store_entity(
-    service: StorageService, storage_backend: StorageBackend
-) -> None:
-    result = await service.execute_tool("store_entity", {
-        "collection": "notes",
-        "id": "note-1",
-        "data": {"title": "Hello", "body": "World"},
-    })
+async def test_tool_store_entity(service: StorageService, storage_backend: StorageBackend) -> None:
+    result = await service.execute_tool(
+        "store_entity",
+        {
+            "collection": "notes",
+            "id": "note-1",
+            "data": {"title": "Hello", "body": "World"},
+        },
+    )
     parsed = json.loads(result)
     assert parsed["status"] == "ok"
     assert parsed["collection"] == "notes"
@@ -75,10 +76,13 @@ async def test_tool_get_entity_found(
     storage_backend.get = AsyncMock(  # type: ignore[union-attr]
         return_value={"title": "Hello", "body": "World"}
     )
-    result = await service.execute_tool("get_entity", {
-        "collection": "notes",
-        "id": "note-1",
-    })
+    result = await service.execute_tool(
+        "get_entity",
+        {
+            "collection": "notes",
+            "id": "note-1",
+        },
+    )
     parsed = json.loads(result)
     assert parsed["title"] == "Hello"
 
@@ -87,10 +91,13 @@ async def test_tool_get_entity_not_found(
     service: StorageService, storage_backend: StorageBackend
 ) -> None:
     storage_backend.get = AsyncMock(return_value=None)  # type: ignore[union-attr]
-    result = await service.execute_tool("get_entity", {
-        "collection": "notes",
-        "id": "missing",
-    })
+    result = await service.execute_tool(
+        "get_entity",
+        {
+            "collection": "notes",
+            "id": "missing",
+        },
+    )
     parsed = json.loads(result)
     assert "error" in parsed
 
@@ -104,11 +111,14 @@ async def test_tool_query_entities(
     storage_backend.query = AsyncMock(  # type: ignore[union-attr]
         return_value=[{"_id": "1", "name": "Alice"}, {"_id": "2", "name": "Bob"}]
     )
-    result = await service.execute_tool("query_entities", {
-        "collection": "users",
-        "filters": [{"field": "name", "op": "eq", "value": "Alice"}],
-        "limit": 10,
-    })
+    result = await service.execute_tool(
+        "query_entities",
+        {
+            "collection": "users",
+            "filters": [{"field": "name", "op": "eq", "value": "Alice"}],
+            "limit": 10,
+        },
+    )
     parsed = json.loads(result)
     assert len(parsed) == 2
 
@@ -134,10 +144,13 @@ async def test_tool_query_entities_with_sort(
     service: StorageService, storage_backend: StorageBackend
 ) -> None:
     storage_backend.query = AsyncMock(return_value=[])  # type: ignore[union-attr]
-    await service.execute_tool("query_entities", {
-        "collection": "items",
-        "sort": [{"field": "created_at", "descending": True}],
-    })
+    await service.execute_tool(
+        "query_entities",
+        {
+            "collection": "items",
+            "sort": [{"field": "created_at", "descending": True}],
+        },
+    )
     call_args = storage_backend.query.call_args[0][0]  # type: ignore[union-attr]
     assert len(call_args.sort) == 1
     assert call_args.sort[0].field == "created_at"

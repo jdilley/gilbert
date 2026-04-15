@@ -64,14 +64,10 @@ class UserProviderBackend(ABC):
         """Fetch all users from the external source."""
 
     @abstractmethod
-    async def get_external_user(
-        self, provider_user_id: str
-    ) -> ExternalUser | None:
+    async def get_external_user(self, provider_user_id: str) -> ExternalUser | None:
         """Fetch a single user by their external ID."""
 
-    async def get_external_user_by_email(
-        self, email: str
-    ) -> ExternalUser | None:
+    async def get_external_user_by_email(self, email: str) -> ExternalUser | None:
         """Fetch a single user by email. Default: linear scan."""
         for user in await self.list_external_users():
             if user.email == email:
@@ -123,9 +119,7 @@ class UserBackend(ABC):
         """Delete a user by ID."""
 
     @abstractmethod
-    async def list_users(
-        self, limit: int | None = None, offset: int = 0
-    ) -> list[dict[str, Any]]:
+    async def list_users(self, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
         """List users with optional pagination."""
 
     # ---- Provider links ----

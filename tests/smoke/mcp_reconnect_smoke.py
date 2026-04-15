@@ -65,7 +65,8 @@ def wait_for_port(port: int, timeout: float = 10.0) -> None:
 def start_server(port: int) -> subprocess.Popen:
     return subprocess.Popen(
         [sys.executable, str(FIXTURE), "--port", str(port)],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
 
@@ -115,22 +116,31 @@ async def scenario_delayed_start(report) -> None:
 
     # Give it enough time to rack up a couple retries against a dead URL.
     got_retries = await wait_until(
-        lambda: entry.retry_count >= 2, timeout=5.0,
+        lambda: entry.retry_count >= 2,
+        timeout=5.0,
     )
-    report("supervisor retries while server is down", got_retries,
-           f"retry_count={entry.retry_count}")
+    report(
+        "supervisor retries while server is down", got_retries, f"retry_count={entry.retry_count}"
+    )
 
     # Now bring the server up.
     proc = start_server(port)
     try:
         wait_for_port(port)
         connected = await wait_until(
-            lambda: entry.connected, timeout=5.0,
+            lambda: entry.connected,
+            timeout=5.0,
         )
-        report("supervisor reconnects once server comes up", connected,
-               f"retry_count={entry.retry_count} connected={entry.connected}")
-        report("retry_count reset after successful reconnect",
-               entry.retry_count == 0, f"retry_count={entry.retry_count}")
+        report(
+            "supervisor reconnects once server comes up",
+            connected,
+            f"retry_count={entry.retry_count} connected={entry.connected}",
+        )
+        report(
+            "retry_count reset after successful reconnect",
+            entry.retry_count == 0,
+            f"retry_count={entry.retry_count}",
+        )
     finally:
         await svc._stop_client(record.id)
         proc.terminate()
@@ -149,8 +159,7 @@ async def scenario_mid_session_drop(report) -> None:
     entry = await svc._start_client(record)
     assert entry is not None
     connected = await wait_until(lambda: entry.connected, timeout=5.0)
-    report("initial connect succeeded", connected,
-           f"last_error={entry.last_error}")
+    report("initial connect succeeded", connected, f"last_error={entry.last_error}")
 
     # Kill the server and wait for the health check to notice.
     proc.terminate()
@@ -160,19 +169,25 @@ async def scenario_mid_session_drop(report) -> None:
         lambda: not entry.connected or entry.retry_count >= 1,
         timeout=5.0,
     )
-    report("supervisor notices the drop", dropped,
-           f"retry_count={entry.retry_count} connected={entry.connected}")
+    report(
+        "supervisor notices the drop",
+        dropped,
+        f"retry_count={entry.retry_count} connected={entry.connected}",
+    )
 
     # Bring the server back on the same port.
     proc = start_server(port)
     try:
         wait_for_port(port)
         reconnected = await wait_until(
-            lambda: entry.connected, timeout=5.0,
+            lambda: entry.connected,
+            timeout=5.0,
         )
-        report("supervisor reconnects after the server returns",
-               reconnected,
-               f"retry_count={entry.retry_count} connected={entry.connected}")
+        report(
+            "supervisor reconnects after the server returns",
+            reconnected,
+            f"retry_count={entry.retry_count} connected={entry.connected}",
+        )
     finally:
         await svc._stop_client(record.id)
         proc.terminate()
@@ -189,10 +204,10 @@ async def scenario_stop_mid_backoff(report) -> None:
     entry = await svc._start_client(record)
     assert entry is not None
     got_retries = await wait_until(
-        lambda: entry.retry_count >= 1, timeout=5.0,
+        lambda: entry.retry_count >= 1,
+        timeout=5.0,
     )
-    report("supervisor entered backoff state", got_retries,
-           f"retry_count={entry.retry_count}")
+    report("supervisor entered backoff state", got_retries, f"retry_count={entry.retry_count}")
 
     # Stop and confirm the entry is gone.
     await svc._stop_client(record.id)

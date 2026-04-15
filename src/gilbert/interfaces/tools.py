@@ -109,7 +109,8 @@ class ToolProvider(Protocol):
         ...
 
     def get_tools(
-        self, user_ctx: UserContext | None = None,
+        self,
+        user_ctx: UserContext | None = None,
     ) -> list[ToolDefinition]:
         """Return the tool definitions this provider offers.
 

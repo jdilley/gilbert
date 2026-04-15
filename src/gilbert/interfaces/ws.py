@@ -87,6 +87,7 @@ class WsConnectionBase(Protocol):
 
 # ── Protocols ─────────────────────────────────────────────────────────
 
+
 @runtime_checkable
 class WsHandlerProvider(Protocol):
     """Protocol for services that expose WebSocket RPC handlers."""
@@ -109,5 +110,10 @@ def require_admin(conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, An
     Shared helper for WS handlers that require admin access.
     """
     if conn.user_level > 0:
-        return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Admin access required", "code": 403}
+        return {
+            "type": "gilbert.error",
+            "ref": frame.get("id"),
+            "error": "Admin access required",
+            "code": 403,
+        }
     return None

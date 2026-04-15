@@ -26,6 +26,7 @@ def mock_event_bus() -> EventBus:
 @pytest.fixture
 def mock_speaker() -> MagicMock:
     from gilbert.interfaces.speaker import SpeakerProvider
+
     # ``spec=SpeakerProvider`` makes ``isinstance(speaker, SpeakerProvider)``
     # return True at runtime so the service's protocol narrowing
     # doesn't silently skip the announce call.
@@ -53,9 +54,11 @@ class TestRingDetection:
         service._event_bus = mock_event_bus
         service._last_ring_ts = 1700000000000
 
-        mock_backend.get_ring_events = AsyncMock(return_value=[
-            _ring("G4 Doorbell", ts=1700000001000),
-        ])
+        mock_backend.get_ring_events = AsyncMock(
+            return_value=[
+                _ring("G4 Doorbell", ts=1700000001000),
+            ]
+        )
 
         await service._check_for_rings()
 
@@ -70,9 +73,11 @@ class TestRingDetection:
         service._event_bus = mock_event_bus
         service._last_ring_ts = 1700000002000
 
-        mock_backend.get_ring_events = AsyncMock(return_value=[
-            _ring("G4 Doorbell", ts=1700000001000),
-        ])
+        mock_backend.get_ring_events = AsyncMock(
+            return_value=[
+                _ring("G4 Doorbell", ts=1700000001000),
+            ]
+        )
 
         await service._check_for_rings()
 
@@ -84,9 +89,11 @@ class TestRingDetection:
         service._event_bus = mock_event_bus
         service._last_ring_ts = 1700000000000
 
-        mock_backend.get_ring_events = AsyncMock(return_value=[
-            _ring("G4 Doorbell", ts=1700000005000),
-        ])
+        mock_backend.get_ring_events = AsyncMock(
+            return_value=[
+                _ring("G4 Doorbell", ts=1700000005000),
+            ]
+        )
 
         await service._check_for_rings()
 
@@ -99,10 +106,12 @@ class TestRingDetection:
         service._last_ring_ts = 0
         service._doorbell_names = ["G4 Doorbell"]
 
-        mock_backend.get_ring_events = AsyncMock(return_value=[
-            _ring("G4 Doorbell"),
-            _ring("Other Camera"),
-        ])
+        mock_backend.get_ring_events = AsyncMock(
+            return_value=[
+                _ring("G4 Doorbell"),
+                _ring("Other Camera"),
+            ]
+        )
 
         await service._check_for_rings()
 
@@ -124,10 +133,12 @@ class TestRingDetection:
         service._event_bus = mock_event_bus
         service._last_ring_ts = 0
 
-        mock_backend.get_ring_events = AsyncMock(return_value=[
-            _ring("Front Doorbell", ts=1700000001000),
-            _ring("Rear Doorbell", ts=1700000002000),
-        ])
+        mock_backend.get_ring_events = AsyncMock(
+            return_value=[
+                _ring("Front Doorbell", ts=1700000001000),
+                _ring("Rear Doorbell", ts=1700000002000),
+            ]
+        )
 
         await service._check_for_rings()
 
@@ -151,9 +162,11 @@ class TestAnnouncement:
         resolver.get_capability = MagicMock(return_value=mock_speaker)
         service._resolver = resolver
 
-        mock_backend.get_ring_events = AsyncMock(return_value=[
-            _ring("G4 Doorbell Pro"),
-        ])
+        mock_backend.get_ring_events = AsyncMock(
+            return_value=[
+                _ring("G4 Doorbell Pro"),
+            ]
+        )
 
         await service._check_for_rings()
 
@@ -177,9 +190,11 @@ class TestAnnouncement:
         resolver.get_capability = MagicMock(return_value=mock_speaker)
         service._resolver = resolver
 
-        mock_backend.get_ring_events = AsyncMock(return_value=[
-            _ring("G4 Doorbell"),
-        ])
+        mock_backend.get_ring_events = AsyncMock(
+            return_value=[
+                _ring("G4 Doorbell"),
+            ]
+        )
 
         await service._check_for_rings()
 
@@ -201,8 +216,10 @@ class TestAnnouncement:
         resolver.get_capability = MagicMock(return_value=None)
         service._resolver = resolver
 
-        mock_backend.get_ring_events = AsyncMock(return_value=[
-            _ring("G4 Doorbell"),
-        ])
+        mock_backend.get_ring_events = AsyncMock(
+            return_value=[
+                _ring("G4 Doorbell"),
+            ]
+        )
 
         await service._check_for_rings()  # Should not raise

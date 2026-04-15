@@ -128,8 +128,6 @@ class AuthConfig(BaseConfig):
     allow_user_creation: bool = True
 
 
-
-
 class MusicConfig(BaseConfig):
     """Music service configuration."""
 
@@ -162,7 +160,6 @@ class PresenceConfig(BaseConfig):
     settings: dict[str, Any] = {}
 
 
-
 class KnowledgeConfig(BaseConfig):
     """Document knowledge store configuration.
 
@@ -192,7 +189,6 @@ class DoorbellConfig(BaseConfig):
     poll_interval_seconds: float = 5.0
     speakers: list[str] = []
     settings: dict[str, Any] = {}
-
 
 
 class GreetingConfig(BaseConfig):
@@ -371,10 +367,7 @@ def load_config(
     plugins_raw = base.get("plugins")
     if isinstance(plugins_raw, list):
         base["plugins"] = {
-            "sources": [
-                s if isinstance(s, dict) else {"source": s}
-                for s in plugins_raw
-            ]
+            "sources": [s if isinstance(s, dict) else {"source": s} for s in plugins_raw]
         }
 
     return GilbertConfig.model_validate(base)

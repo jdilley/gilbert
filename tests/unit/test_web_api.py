@@ -117,9 +117,7 @@ async def test_dashboard_admin_sees_restart_menu_item(
     nav = result["nav"]
     system = next(g for g in nav if g["key"] == "system")
 
-    restart_items = [
-        i for i in system["items"] if i.get("action") == "restart_host"
-    ]
+    restart_items = [i for i in system["items"] if i.get("action") == "restart_host"]
     assert len(restart_items) == 1, "expected exactly one Restart item"
 
     restart = restart_items[0]
@@ -177,7 +175,5 @@ async def test_dashboard_group_default_url_skips_action_only_items(
     # the action-only Restart entry (which has no url field to begin
     # with, but belt-and-suspenders: assert the group URL isn't the
     # empty-string fallback either).
-    url_bearing = [
-        i.get("url") for i in system["items"] if i.get("url")
-    ]
+    url_bearing = [i.get("url") for i in system["items"] if i.get("url")]
     assert system["url"] in url_bearing

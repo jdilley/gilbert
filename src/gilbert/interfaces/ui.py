@@ -87,8 +87,10 @@ class UIElement:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> UIElement:
         """Deserialize from stored/transported JSON."""
-        options = [UIOption(value=o["value"], label=o["label"], selected=o.get("selected", False))
-                   for o in data.get("options", [])]
+        options = [
+            UIOption(value=o["value"], label=o["label"], selected=o.get("selected", False))
+            for o in data.get("options", [])
+        ]
         return cls(
             type=data.get("type", "label"),
             name=data.get("name", ""),

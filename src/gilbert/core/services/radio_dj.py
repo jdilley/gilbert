@@ -93,7 +93,15 @@ class RadioDJService(Service):
             capabilities=frozenset({"radio_dj", "ai_tools"}),
             requires=frozenset({"music", "speaker_control", "scheduler"}),
             optional=frozenset({"presence", "entity_storage", "event_bus", "configuration"}),
-            events=frozenset({"radio_dj.genre.changed", "radio_dj.started", "radio_dj.stopped", "radio_dj.track.liked", "radio_dj.track.vetoed"}),
+            events=frozenset(
+                {
+                    "radio_dj.genre.changed",
+                    "radio_dj.started",
+                    "radio_dj.stopped",
+                    "radio_dj.track.liked",
+                    "radio_dj.track.vetoed",
+                }
+            ),
             toggleable=True,
             toggle_description="AI radio DJ announcements",
         )
@@ -194,33 +202,39 @@ class RadioDJService(Service):
     def config_params(self) -> list[ConfigParam]:
         return [
             ConfigParam(
-                key="default_genres", type=ToolParameterType.ARRAY,
+                key="default_genres",
+                type=ToolParameterType.ARRAY,
                 description="Genre rotation for cold start.",
                 default=_DEFAULT_GENRES,
             ),
             ConfigParam(
-                key="min_switch_interval", type=ToolParameterType.INTEGER,
+                key="min_switch_interval",
+                type=ToolParameterType.INTEGER,
                 description="Minimum minutes between auto genre switches.",
                 default=_DEFAULT_MIN_SWITCH_MINUTES,
             ),
             ConfigParam(
-                key="default_volume", type=ToolParameterType.INTEGER,
+                key="default_volume",
+                type=ToolParameterType.INTEGER,
                 description="Playback volume (0-100).",
                 default=_DEFAULT_VOLUME,
             ),
             ConfigParam(
-                key="speakers", type=ToolParameterType.ARRAY,
+                key="speakers",
+                type=ToolParameterType.ARRAY,
                 description="Speaker names (empty = all).",
                 default=[],
                 choices_from="speakers",
             ),
             ConfigParam(
-                key="stop_when_empty", type=ToolParameterType.BOOLEAN,
+                key="stop_when_empty",
+                type=ToolParameterType.BOOLEAN,
                 description="Stop playback when nobody is present.",
                 default=True,
             ),
             ConfigParam(
-                key="poll_interval", type=ToolParameterType.INTEGER,
+                key="poll_interval",
+                type=ToolParameterType.INTEGER,
                 description="Seconds between presence polls.",
                 default=_DEFAULT_POLL_INTERVAL,
             ),
@@ -235,12 +249,16 @@ class RadioDJService(Service):
         if self._storage is None:
             return
         try:
-            await self._storage.put(_STATE_COLLECTION, _STATE_ENTITY_ID, {
-                "active": self._active,
-                "current_genre": self._current_genre,
-                "genre_rotation_index": self._genre_rotation_index,
-                "updated_at": datetime.now(UTC).isoformat(),
-            })
+            await self._storage.put(
+                _STATE_COLLECTION,
+                _STATE_ENTITY_ID,
+                {
+                    "active": self._active,
+                    "current_genre": self._current_genre,
+                    "genre_rotation_index": self._genre_rotation_index,
+                    "updated_at": datetime.now(UTC).isoformat(),
+                },
+            )
         except Exception:
             logger.warning("Failed to persist radio DJ state", exc_info=True)
 
@@ -287,17 +305,16 @@ class RadioDJService(Service):
         prefs = await self._get_preferences(user_id)
         liked: list[dict[str, Any]] = prefs.get("liked_tracks", [])
         key = (now.title.lower(), now.artist.lower())
-        if any(
-            (t.get("title", "").lower(), t.get("artist", "").lower()) == key
-            for t in liked
-        ):
+        if any((t.get("title", "").lower(), t.get("artist", "").lower()) == key for t in liked):
             return
-        liked.append({
-            "title": now.title,
-            "artist": now.artist,
-            "album": now.album,
-            "uri": now.uri,
-        })
+        liked.append(
+            {
+                "title": now.title,
+                "artist": now.artist,
+                "album": now.album,
+                "uri": now.uri,
+            }
+        )
         prefs["liked_tracks"] = liked
         await self._save_preferences(user_id, prefs)
 
@@ -314,12 +331,14 @@ class RadioDJService(Service):
             return (t.get("title", "").lower(), t.get("artist", "").lower())
 
         if not any(_track_key(t) == key for t in vetoed):
-            vetoed.append({
-                "title": now.title,
-                "artist": now.artist,
-                "album": now.album,
-                "uri": now.uri,
-            })
+            vetoed.append(
+                {
+                    "title": now.title,
+                    "artist": now.artist,
+                    "album": now.album,
+                    "uri": now.uri,
+                }
+            )
         # Remove from liked if present
         prefs["liked_tracks"] = [t for t in liked if _track_key(t) != key]
         prefs["vetoed_tracks"] = vetoed
@@ -427,7 +446,9 @@ class RadioDJService(Service):
         try:
             try:
                 results: list[MusicItem] = await self._music_svc.search(
-                    genre, kind=MusicItemKind.PLAYLIST, limit=1,
+                    genre,
+                    kind=MusicItemKind.PLAYLIST,
+                    limit=1,
                 )
             except MusicSearchUnavailableError as exc:
                 logger.warning("Radio DJ: %s", exc)
@@ -455,18 +476,22 @@ class RadioDJService(Service):
             await self._persist_state()
 
             if self._event_bus and old_genre != genre:
-                await self._event_bus.publish(Event(
-                    event_type="radio_dj.genre.changed",
-                    data={
-                        "old_genre": old_genre,
-                        "new_genre": genre,
-                    },
-                    source="radio_dj",
-                ))
+                await self._event_bus.publish(
+                    Event(
+                        event_type="radio_dj.genre.changed",
+                        data={
+                            "old_genre": old_genre,
+                            "new_genre": genre,
+                        },
+                        source="radio_dj",
+                    )
+                )
 
             logger.info(
                 "Radio DJ playing: %s (playlist: %s, uri: %s)",
-                genre, playlist.title, playable.uri,
+                genre,
+                playlist.title,
+                playable.uri,
             )
             return True
 
@@ -497,11 +522,13 @@ class RadioDJService(Service):
         ok = await self._play_genre(genre)
         if ok:
             if self._event_bus:
-                await self._event_bus.publish(Event(
-                    event_type="radio_dj.started",
-                    data={"genre": genre},
-                    source="radio_dj",
-                ))
+                await self._event_bus.publish(
+                    Event(
+                        event_type="radio_dj.started",
+                        data={"genre": genre},
+                        source="radio_dj",
+                    )
+                )
             return f"Radio started — playing {genre}"
         return f"Failed to find music for '{genre}'"
 
@@ -513,11 +540,13 @@ class RadioDJService(Service):
         self._current_genre = None
         await self._persist_state()
         if self._event_bus:
-            await self._event_bus.publish(Event(
-                event_type="radio_dj.stopped",
-                data={},
-                source="radio_dj",
-            ))
+            await self._event_bus.publish(
+                Event(
+                    event_type="radio_dj.stopped",
+                    data={},
+                    source="radio_dj",
+                )
+            )
         return "Radio stopped."
 
     async def request_genre(self, query: str) -> str:
@@ -547,16 +576,18 @@ class RadioDJService(Service):
         if now is not None and now.title:
             await self._add_liked_track(user_id, now)
         if self._event_bus:
-            await self._event_bus.publish(Event(
-                event_type="radio_dj.track.liked",
-                data={
-                    "user_id": user_id,
-                    "genre": self._current_genre,
-                    "title": now.title if now else "",
-                    "artist": now.artist if now else "",
-                },
-                source="radio_dj",
-            ))
+            await self._event_bus.publish(
+                Event(
+                    event_type="radio_dj.track.liked",
+                    data={
+                        "user_id": user_id,
+                        "genre": self._current_genre,
+                        "title": now.title if now else "",
+                        "artist": now.artist if now else "",
+                    },
+                    source="radio_dj",
+                )
+            )
         if now is not None and now.title:
             return f"Liked: {now.title} — {now.artist} ({self._current_genre})"
         return f"Liked: {self._current_genre}"
@@ -571,16 +602,18 @@ class RadioDJService(Service):
         if now is not None and now.title:
             await self._add_vetoed_track(user_id, now)
         if self._event_bus:
-            await self._event_bus.publish(Event(
-                event_type="radio_dj.track.vetoed",
-                data={
-                    "user_id": user_id,
-                    "genre": genre,
-                    "title": now.title if now else "",
-                    "artist": now.artist if now else "",
-                },
-                source="radio_dj",
-            ))
+            await self._event_bus.publish(
+                Event(
+                    event_type="radio_dj.track.vetoed",
+                    data={
+                        "user_id": user_id,
+                        "genre": genre,
+                        "title": now.title if now else "",
+                        "artist": now.artist if now else "",
+                    },
+                    source="radio_dj",
+                )
+            )
         # Switch to a different genre
         present = await self._get_present_user_ids()
         new_genre = await self.select_genre(present)
@@ -890,4 +923,6 @@ class RadioDJService(Service):
         if vetoes is not None:
             prefs["vetoes"] = vetoes
         await self._save_preferences(user_id, prefs)
-        return json.dumps({"status": "ok", "user_id": user_id, "likes": prefs["likes"], "vetoes": prefs["vetoes"]})
+        return json.dumps(
+            {"status": "ok", "user_id": user_id, "likes": prefs["likes"], "vetoes": prefs["vetoes"]}
+        )

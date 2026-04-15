@@ -44,6 +44,7 @@ class FakeConfigService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="configuration", capabilities=frozenset({"configuration"}))
 
 
@@ -105,12 +106,16 @@ class TestBackupStart:
     async def test_reads_config(
         self, backup_service: BackupService, scheduler: FakeScheduler
     ) -> None:
-        config_svc = FakeConfigService({"backup": {
-            "enabled": True,
-            "retention_days": 7,
-            "backup_hour": 5,
-            "backup_minute": 30,
-        }})
+        config_svc = FakeConfigService(
+            {
+                "backup": {
+                    "enabled": True,
+                    "retention_days": 7,
+                    "backup_hour": 5,
+                    "backup_minute": 30,
+                }
+            }
+        )
         resolver = FakeResolver()
         resolver.caps["scheduler"] = scheduler
         resolver.caps["configuration"] = config_svc
@@ -134,8 +139,10 @@ class TestCreateArchive:
 
         archive_path = tmp_path / "test-backup.tar.gz"
 
-        with patch("gilbert.core.services.backup.DATA_DIR", data_dir), \
-             patch("gilbert.core.services.backup._BACKUPS_DIR", data_dir / "backups"):
+        with (
+            patch("gilbert.core.services.backup.DATA_DIR", data_dir),
+            patch("gilbert.core.services.backup._BACKUPS_DIR", data_dir / "backups"),
+        ):
             backup_service._create_archive(archive_path)
 
         assert archive_path.exists()
@@ -143,6 +150,7 @@ class TestCreateArchive:
 
         # Verify the archive contents
         import tarfile
+
         with tarfile.open(archive_path, "r:gz") as tar:
             names = tar.getnames()
             # Should include test.txt but not backups/
@@ -160,6 +168,7 @@ class TestPruneOldBackups:
         old_file.write_text("old")
         old_mtime = time.time() - (60 * 86400)
         import os
+
         os.utime(old_file, (old_mtime, old_mtime))
 
         # Create a "recent" backup
@@ -174,7 +183,9 @@ class TestPruneOldBackups:
         assert not old_file.exists()
         assert new_file.exists()
 
-    def test_keeps_files_within_retention(self, backup_service: BackupService, tmp_path: Path) -> None:
+    def test_keeps_files_within_retention(
+        self, backup_service: BackupService, tmp_path: Path
+    ) -> None:
         """Test that recent backups are kept."""
         backups_dir = tmp_path / "backups"
         backups_dir.mkdir()

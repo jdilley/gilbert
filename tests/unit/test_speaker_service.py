@@ -31,16 +31,28 @@ class StubSpeakerBackend(SpeakerBackend):
         self._grouping = grouping
         self._speakers: list[SpeakerInfo] = [
             SpeakerInfo(
-                speaker_id="uid-1", name="Speaker 1", ip_address="192.168.1.10",
-                model="Sonos One", volume=30, state=PlaybackState.STOPPED,
+                speaker_id="uid-1",
+                name="Speaker 1",
+                ip_address="192.168.1.10",
+                model="Sonos One",
+                volume=30,
+                state=PlaybackState.STOPPED,
             ),
             SpeakerInfo(
-                speaker_id="uid-2", name="Speaker 2", ip_address="192.168.1.11",
-                model="Sonos One", volume=50, state=PlaybackState.STOPPED,
+                speaker_id="uid-2",
+                name="Speaker 2",
+                ip_address="192.168.1.11",
+                model="Sonos One",
+                volume=50,
+                state=PlaybackState.STOPPED,
             ),
             SpeakerInfo(
-                speaker_id="uid-3", name="Speaker 3", ip_address="192.168.1.12",
-                model="Sonos Five", volume=40, state=PlaybackState.PLAYING,
+                speaker_id="uid-3",
+                name="Speaker 3",
+                ip_address="192.168.1.12",
+                model="Sonos Five",
+                volume=40,
+                state=PlaybackState.PLAYING,
             ),
         ]
         self._groups: list[SpeakerGroup] = []
@@ -241,7 +253,8 @@ async def test_start_initializes_backend(
 
 
 async def test_stop_closes_backend(
-    service: SpeakerService, stub_backend: StubSpeakerBackend,
+    service: SpeakerService,
+    stub_backend: StubSpeakerBackend,
 ) -> None:
     await service.stop()
     assert stub_backend.closed
@@ -290,9 +303,7 @@ def test_get_tools_without_grouping() -> None:
 # --- List speakers ---
 
 
-async def test_tool_list_speakers(
-    service: SpeakerService, resolver: ServiceResolver
-) -> None:
+async def test_tool_list_speakers(service: SpeakerService, resolver: ServiceResolver) -> None:
     await service.start(resolver)
     result = await service.execute_tool("list_speakers", {})
     parsed = json.loads(result)
@@ -315,9 +326,7 @@ async def test_tool_set_volume(
     assert stub_backend.volume_changes == [("uid-2", 75)]
 
 
-async def test_tool_get_volume(
-    service: SpeakerService, resolver: ServiceResolver
-) -> None:
+async def test_tool_get_volume(service: SpeakerService, resolver: ServiceResolver) -> None:
     await service.start(resolver)
     result = await service.execute_tool("get_volume", {"speaker": "Speaker 1"})
     parsed = json.loads(result)
@@ -340,10 +349,13 @@ async def test_tool_play_audio(
     service: SpeakerService, stub_backend: StubSpeakerBackend, resolver: ServiceResolver
 ) -> None:
     await service.start(resolver)
-    result = await service.execute_tool("play_audio", {
-        "uri": "http://example.com/song.mp3",
-        "speakers": ["Speaker 1"],
-    })
+    result = await service.execute_tool(
+        "play_audio",
+        {
+            "uri": "http://example.com/song.mp3",
+            "speakers": ["Speaker 1"],
+        },
+    )
     parsed = json.loads(result)
     assert parsed["status"] == "playing"
     assert stub_backend.last_play_request is not None
@@ -356,10 +368,13 @@ async def test_tool_play_audio_uses_last_speakers(
 ) -> None:
     await service.start(resolver)
     # First play with explicit speakers
-    await service.execute_tool("play_audio", {
-        "uri": "http://example.com/a.mp3",
-        "speakers": ["Speaker 2"],
-    })
+    await service.execute_tool(
+        "play_audio",
+        {
+            "uri": "http://example.com/a.mp3",
+            "speakers": ["Speaker 2"],
+        },
+    )
     # Second play without specifying speakers — should use last
     await service.execute_tool("play_audio", {"uri": "http://example.com/b.mp3"})
     assert stub_backend.last_play_request is not None
@@ -390,9 +405,7 @@ async def test_tool_stop_audio_all(
 # --- Aliases ---
 
 
-async def test_set_and_resolve_alias(
-    service: SpeakerService, resolver: ServiceResolver
-) -> None:
+async def test_set_and_resolve_alias(service: SpeakerService, resolver: ServiceResolver) -> None:
     await service.start(resolver)
     await service.set_alias("uid-2", "Living Room Speaker")
 
@@ -417,9 +430,7 @@ async def test_alias_collision_with_other_alias(
         await service.set_alias("uid-2", "Kitchen")
 
 
-async def test_remove_alias(
-    service: SpeakerService, resolver: ServiceResolver
-) -> None:
+async def test_remove_alias(service: SpeakerService, resolver: ServiceResolver) -> None:
     await service.start(resolver)
     await service.set_alias("uid-2", "Bedroom")
     await service.remove_alias("Bedroom")
@@ -434,22 +445,26 @@ async def test_alias_in_play_command(
     await service.start(resolver)
     await service.set_alias("uid-3", "Office")
 
-    await service.execute_tool("play_audio", {
-        "uri": "http://example.com/test.mp3",
-        "speakers": ["Office"],
-    })
+    await service.execute_tool(
+        "play_audio",
+        {
+            "uri": "http://example.com/test.mp3",
+            "speakers": ["Office"],
+        },
+    )
     assert stub_backend.last_play_request is not None
     assert stub_backend.last_play_request.speaker_ids == ["uid-3"]
 
 
-async def test_tool_set_alias(
-    service: SpeakerService, resolver: ServiceResolver
-) -> None:
+async def test_tool_set_alias(service: SpeakerService, resolver: ServiceResolver) -> None:
     await service.start(resolver)
-    result = await service.execute_tool("set_speaker_alias", {
-        "speaker": "Speaker 1",
-        "alias": "Front Porch",
-    })
+    result = await service.execute_tool(
+        "set_speaker_alias",
+        {
+            "speaker": "Speaker 1",
+            "alias": "Front Porch",
+        },
+    )
     parsed = json.loads(result)
     assert parsed["status"] == "ok"
 
@@ -457,9 +472,7 @@ async def test_tool_set_alias(
     assert sid == "uid-1"
 
 
-async def test_tool_remove_alias(
-    service: SpeakerService, resolver: ServiceResolver
-) -> None:
+async def test_tool_remove_alias(service: SpeakerService, resolver: ServiceResolver) -> None:
     await service.start(resolver)
     await service.set_alias("uid-1", "Garage")
     result = await service.execute_tool("remove_speaker_alias", {"alias": "Garage"})
@@ -474,9 +487,12 @@ async def test_tool_group_speakers(
     service: SpeakerService, stub_backend: StubSpeakerBackend, resolver: ServiceResolver
 ) -> None:
     await service.start(resolver)
-    result = await service.execute_tool("group_speakers", {
-        "speakers": ["Speaker 1", "Speaker 2"],
-    })
+    result = await service.execute_tool(
+        "group_speakers",
+        {
+            "speakers": ["Speaker 1", "Speaker 2"],
+        },
+    )
     parsed = json.loads(result)
     assert parsed["status"] == "grouped"
     assert len(parsed["member_ids"]) == 2
@@ -486,9 +502,12 @@ async def test_tool_ungroup_speakers(
     service: SpeakerService, stub_backend: StubSpeakerBackend, resolver: ServiceResolver
 ) -> None:
     await service.start(resolver)
-    result = await service.execute_tool("ungroup_speakers", {
-        "speakers": ["Speaker 1", "Speaker 2"],
-    })
+    result = await service.execute_tool(
+        "ungroup_speakers",
+        {
+            "speakers": ["Speaker 1", "Speaker 2"],
+        },
+    )
     parsed = json.loads(result)
     assert parsed["status"] == "ungrouped"
 
@@ -498,9 +517,12 @@ async def test_tool_list_groups(
 ) -> None:
     await service.start(resolver)
     # Create a group first
-    await service.execute_tool("group_speakers", {
-        "speakers": ["Speaker 1", "Speaker 2"],
-    })
+    await service.execute_tool(
+        "group_speakers",
+        {
+            "speakers": ["Speaker 1", "Speaker 2"],
+        },
+    )
     result = await service.execute_tool("list_speaker_groups", {})
     parsed = json.loads(result)
     assert len(parsed) == 1
@@ -510,9 +532,7 @@ async def test_tool_list_groups(
 # --- Announce ---
 
 
-async def test_announce_requires_tts(
-    service: SpeakerService, resolver: ServiceResolver
-) -> None:
+async def test_announce_requires_tts(service: SpeakerService, resolver: ServiceResolver) -> None:
     await service.start(resolver)
     result = await service.execute_tool("announce", {"text": "Hello everyone"})
     parsed = json.loads(result)
@@ -535,11 +555,13 @@ async def test_announce_with_tts(
     from gilbert.core.services.tts import TTSService
 
     mock_tts = MagicMock(spec=TTSService)
-    mock_tts.synthesize = AsyncMock(return_value=SynthesisResult(
-        audio=b"fake-announcement-audio",
-        format=AudioFormat.MP3,
-        characters_used=15,
-    ))
+    mock_tts.synthesize = AsyncMock(
+        return_value=SynthesisResult(
+            audio=b"fake-announcement-audio",
+            format=AudioFormat.MP3,
+            characters_used=15,
+        )
+    )
 
     # Build resolver that provides TTS
     mock_resolver = AsyncMock(spec=ServiceResolver)
@@ -566,11 +588,14 @@ async def test_announce_with_tts(
     service._enabled = True
     await service.start(mock_resolver)
 
-    result = await service.execute_tool("announce", {
-        "text": "Dinner is ready",
-        "speakers": ["Speaker 1", "Speaker 2"],
-        "volume": 60,
-    })
+    result = await service.execute_tool(
+        "announce",
+        {
+            "text": "Dinner is ready",
+            "speakers": ["Speaker 1", "Speaker 2"],
+            "volume": 60,
+        },
+    )
     parsed = json.loads(result)
     assert parsed["status"] == "announced"
     assert parsed["text"] == "Dinner is ready"
@@ -696,9 +721,7 @@ def test_config_speaker_full() -> None:
 # --- Unknown tool ---
 
 
-async def test_tool_unknown_raises(
-    service: SpeakerService, resolver: ServiceResolver
-) -> None:
+async def test_tool_unknown_raises(service: SpeakerService, resolver: ServiceResolver) -> None:
     await service.start(resolver)
     with pytest.raises(KeyError, match="Unknown tool"):
         await service.execute_tool("nonexistent", {})

@@ -58,9 +58,7 @@ class FakeSpeaker:
         speaker_names: list[str] | None = None,
         volume: int | None = None,
     ) -> str:
-        self.calls.append(
-            {"text": text, "speaker_names": speaker_names, "volume": volume}
-        )
+        self.calls.append({"text": text, "speaker_names": speaker_names, "volume": volume})
         if self.raise_exc is not None:
             raise self.raise_exc
         return self.result
@@ -181,9 +179,7 @@ async def test_chat_destination_no_tts_capability_fails_gracefully(
     svc = AudioOutputService()
     svc._resolver = FakeResolver(tts=None)  # type: ignore[assignment]
 
-    result = await svc.execute_tool(
-        "audio_output", {"text": "hello", "destination": "chat"}
-    )
+    result = await svc.execute_tool("audio_output", {"text": "hello", "destination": "chat"})
     assert "Text-to-speech is not available" in result
     # No file should have been written
     audio_dir = tmp_path / "audio"
@@ -201,9 +197,7 @@ async def test_chat_destination_tts_raises_returns_error_message(
 
     with patch("gilbert.core.services.audio_output.get_output_dir") as m_get_dir:
         m_get_dir.return_value = tmp_path
-        result = await svc.execute_tool(
-            "audio_output", {"text": "hello", "destination": "chat"}
-        )
+        result = await svc.execute_tool("audio_output", {"text": "hello", "destination": "chat"})
     assert "Failed to synthesize audio" in result
     assert list(tmp_path.glob("audio-*.mp3")) == []
 
@@ -216,9 +210,7 @@ async def test_chat_destination_no_duration_still_works(tmp_path: Path) -> None:
 
     with patch("gilbert.core.services.audio_output.get_output_dir") as m_get_dir:
         m_get_dir.return_value = tmp_path
-        result = await svc.execute_tool(
-            "audio_output", {"text": "no duration"}
-        )
+        result = await svc.execute_tool("audio_output", {"text": "no duration"})
     # Duration string omitted, but link still present
     assert "[▶ Play or download](/output/audio/audio-" in result
     assert "Audio ready." in result  # no parenthetical duration
@@ -258,9 +250,7 @@ async def test_speaker_destination_without_volume_or_speakers() -> None:
     speaker = FakeSpeaker()
     svc._resolver = FakeResolver(speaker=speaker)  # type: ignore[assignment]
 
-    await svc.execute_tool(
-        "audio_output", {"text": "no extras", "destination": "speakers"}
-    )
+    await svc.execute_tool("audio_output", {"text": "no extras", "destination": "speakers"})
 
     call = speaker.calls[0]
     assert call["volume"] is None
@@ -272,9 +262,7 @@ async def test_speaker_destination_no_speaker_capability_fails_gracefully() -> N
     svc = AudioOutputService()
     svc._resolver = FakeResolver(speaker=None)  # type: ignore[assignment]
 
-    result = await svc.execute_tool(
-        "audio_output", {"text": "hi", "destination": "speakers"}
-    )
+    result = await svc.execute_tool("audio_output", {"text": "hi", "destination": "speakers"})
     assert "Speaker control is not available" in result
 
 
@@ -284,9 +272,7 @@ async def test_speaker_destination_announce_raises_returns_error() -> None:
     speaker = FakeSpeaker(raise_exc=RuntimeError("sonos dead"))
     svc._resolver = FakeResolver(speaker=speaker)  # type: ignore[assignment]
 
-    result = await svc.execute_tool(
-        "audio_output", {"text": "hi", "destination": "speakers"}
-    )
+    result = await svc.execute_tool("audio_output", {"text": "hi", "destination": "speakers"})
     assert "Failed to play audio on speakers" in result
 
 
@@ -297,9 +283,7 @@ async def test_speaker_destination_preview_truncates_long_text() -> None:
     svc._resolver = FakeResolver(speaker=speaker)  # type: ignore[assignment]
 
     long_text = ("This is a very long announcement " * 10).strip()
-    result = await svc.execute_tool(
-        "audio_output", {"text": long_text, "destination": "speakers"}
-    )
+    result = await svc.execute_tool("audio_output", {"text": long_text, "destination": "speakers"})
     # Preview is truncated to 80 chars plus ellipsis
     assert "..." in result
     # But the full text was still sent to the speaker service
@@ -366,9 +350,7 @@ async def test_unknown_destination_returns_error() -> None:
     svc = AudioOutputService()
     svc._resolver = FakeResolver(tts=FakeTTS(), speaker=FakeSpeaker())  # type: ignore[assignment]
 
-    result = await svc.execute_tool(
-        "audio_output", {"text": "hi", "destination": "telegram"}
-    )
+    result = await svc.execute_tool("audio_output", {"text": "hi", "destination": "telegram"})
     assert "Unknown destination" in result
     assert "telegram" in result
 

@@ -91,9 +91,7 @@ class SQLiteStorage(StorageBackend):
                 data TEXT NOT NULL DEFAULT '{{}}'
             )
         """)
-        await db.execute(
-            "INSERT OR IGNORE INTO _collections (name) VALUES (?)", (collection,)
-        )
+        await db.execute("INSERT OR IGNORE INTO _collections (name) VALUES (?)", (collection,))
         await db.commit()
         self._known_collections.add(collection)
 
@@ -130,9 +128,7 @@ class SQLiteStorage(StorageBackend):
             return None
         db = await self._conn()
         table = self._table_name(collection)
-        async with db.execute(
-            f'SELECT data FROM "{table}" WHERE id = ?', (entity_id,)
-        ) as cursor:
+        async with db.execute(f'SELECT data FROM "{table}" WHERE id = ?', (entity_id,)) as cursor:
             row = await cursor.fetchone()
             if row is None:
                 return None
@@ -152,9 +148,7 @@ class SQLiteStorage(StorageBackend):
             return False
         db = await self._conn()
         table = self._table_name(collection)
-        async with db.execute(
-            f'SELECT 1 FROM "{table}" WHERE id = ?', (entity_id,)
-        ) as cursor:
+        async with db.execute(f'SELECT 1 FROM "{table}" WHERE id = ?', (entity_id,)) as cursor:
             return await cursor.fetchone() is not None
 
     # --- Query Operations ---
@@ -209,18 +203,17 @@ class SQLiteStorage(StorageBackend):
         await self._ensure_collection_table(index.collection)
         db = await self._conn()
         table = self._table_name(index.collection)
-        name = index.name or f"idx_{index.collection}_{'_'.join(f.replace('.', '_') for f in index.fields)}"
+        name = (
+            index.name
+            or f"idx_{index.collection}_{'_'.join(f.replace('.', '_') for f in index.fields)}"
+        )
 
         # Build index expression using json_extract
-        expressions = [
-            f"json_extract(data, '$.{field}')" for field in index.fields
-        ]
+        expressions = [f"json_extract(data, '$.{field}')" for field in index.fields]
         unique = "UNIQUE" if index.unique else ""
         expr_str = ", ".join(expressions)
 
-        await db.execute(
-            f'CREATE {unique} INDEX IF NOT EXISTS "{name}" ON "{table}" ({expr_str})'
-        )
+        await db.execute(f'CREATE {unique} INDEX IF NOT EXISTS "{name}" ON "{table}" ({expr_str})')
         await db.execute(
             "INSERT OR REPLACE INTO _indexes (name, collection, fields, is_unique) VALUES (?, ?, ?, ?)",
             (name, index.collection, json.dumps(index.fields), int(index.unique)),
@@ -257,9 +250,7 @@ class SQLiteStorage(StorageBackend):
         )
 
         # Check if already exists.
-        async with db.execute(
-            "SELECT 1 FROM _foreign_keys WHERE name = ?", (name,)
-        ) as cursor:
+        async with db.execute("SELECT 1 FROM _foreign_keys WHERE name = ?", (name,)) as cursor:
             if await cursor.fetchone() is not None:
                 return
 
@@ -271,7 +262,7 @@ class SQLiteStorage(StorageBackend):
             parent_lookup = f'SELECT 1 FROM "{parent_table}" WHERE id = NEW_val'
         else:
             parent_lookup = (
-                f"SELECT 1 FROM \"{parent_table}\" "
+                f'SELECT 1 FROM "{parent_table}" '
                 f"WHERE json_extract(data, '$.{fk.ref_field}') = NEW_val"
             )
 
@@ -287,7 +278,7 @@ class SQLiteStorage(StorageBackend):
             BEGIN
                 SELECT RAISE(ABORT, 'Foreign key violation: {name}')
                 WHERE NOT EXISTS (
-                    {parent_lookup.replace('NEW_val', child_json_path)}
+                    {parent_lookup.replace("NEW_val", child_json_path)}
                 );
             END
         """)
@@ -301,7 +292,7 @@ class SQLiteStorage(StorageBackend):
             BEGIN
                 SELECT RAISE(ABORT, 'Foreign key violation: {name}')
                 WHERE NOT EXISTS (
-                    {parent_lookup.replace('NEW_val', child_json_path)}
+                    {parent_lookup.replace("NEW_val", child_json_path)}
                 );
             END
         """)

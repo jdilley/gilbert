@@ -122,7 +122,9 @@ class TestBuiltinRoles:
         assert service.get_role_level("user") == 100
         assert service.get_role_level("everyone") == 200
 
-    async def test_unknown_role_defaults_to_everyone_level(self, service: AccessControlService) -> None:
+    async def test_unknown_role_defaults_to_everyone_level(
+        self, service: AccessControlService
+    ) -> None:
         assert service.get_role_level("nonexistent") == 200
 
     async def test_cannot_delete_builtin(self, service: AccessControlService) -> None:
@@ -286,9 +288,14 @@ class TestTools:
         assert "admin" in names
 
     async def test_tool_create_role(self, service: AccessControlService) -> None:
-        result = await service.execute_tool("create_role", {
-            "name": "ops", "level": 75, "description": "Operations",
-        })
+        result = await service.execute_tool(
+            "create_role",
+            {
+                "name": "ops",
+                "level": 75,
+                "description": "Operations",
+            },
+        )
         parsed = json.loads(result)
         assert parsed["status"] == "created"
 
@@ -322,7 +329,9 @@ class TestCollectionACL:
         assert service.check_collection_read(_user(frozenset({"everyone"})), "speaker_aliases")
         assert service.check_collection_write(_user(frozenset({"user"})), "speaker_aliases")
 
-    async def test_set_collection_acl_restricts_sensitive(self, service: AccessControlService) -> None:
+    async def test_set_collection_acl_restricts_sensitive(
+        self, service: AccessControlService
+    ) -> None:
         await service.set_collection_acl("users", read_role="admin", write_role="admin")
         assert not service.check_collection_read(_user(frozenset({"user"})), "users")
         assert service.check_collection_read(_user(frozenset({"admin"})), "users")
@@ -346,10 +355,13 @@ class TestCollectionACL:
         assert any(a["collection"] == "test_col" for a in parsed)
 
     async def test_tool_set_collection_acl(self, service: AccessControlService) -> None:
-        result = await service.execute_tool("set_collection_acl", {
-            "collection": "my_col", "read_role": "everyone", "write_role": "user",
-        })
+        result = await service.execute_tool(
+            "set_collection_acl",
+            {
+                "collection": "my_col",
+                "read_role": "everyone",
+                "write_role": "user",
+            },
+        )
         parsed = json.loads(result)
         assert parsed["status"] == "set"
-
-

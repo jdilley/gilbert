@@ -62,14 +62,21 @@ async def event_stream(websocket: WebSocket) -> None:
     manager.register(conn)
 
     # Send welcome frame
-    conn.enqueue({
-        "type": "gilbert.welcome",
-        "user_id": user_ctx.user_id,
-        "roles": sorted(user_ctx.roles),
-        "subscriptions": sorted(conn.subscriptions),
-    })
+    conn.enqueue(
+        {
+            "type": "gilbert.welcome",
+            "user_id": user_ctx.user_id,
+            "roles": sorted(user_ctx.roles),
+            "subscriptions": sorted(conn.subscriptions),
+        }
+    )
 
-    logger.info("WebSocket connected: user=%s, level=%d, roles=%s", user_ctx.user_id, user_level, sorted(user_ctx.roles))
+    logger.info(
+        "WebSocket connected: user=%s, level=%d, roles=%s",
+        user_ctx.user_id,
+        user_level,
+        sorted(user_ctx.roles),
+    )
 
     # Tasks spawned per-frame by ``_recv_loop`` so a handler that
     # awaits for a client reply (e.g. the MCP browser bridge) doesn't
@@ -166,19 +173,23 @@ async def _recv_loop(
         try:
             frame = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
-            conn.enqueue({
-                "type": "gilbert.error",
-                "error": "Invalid JSON",
-                "code": 400,
-            })
+            conn.enqueue(
+                {
+                    "type": "gilbert.error",
+                    "error": "Invalid JSON",
+                    "code": 400,
+                }
+            )
             continue
 
         if not isinstance(frame, dict) or "type" not in frame:
-            conn.enqueue({
-                "type": "gilbert.error",
-                "error": "Frame must be a JSON object with a 'type' field",
-                "code": 400,
-            })
+            conn.enqueue(
+                {
+                    "type": "gilbert.error",
+                    "error": "Frame must be a JSON object with a 'type' field",
+                    "code": 400,
+                }
+            )
             continue
 
         task = asyncio.create_task(_dispatch_and_respond(conn, frame))
@@ -198,15 +209,18 @@ async def _dispatch_and_respond(conn: WsConnection, frame: dict[str, Any]) -> No
         response = await dispatch_frame(conn, frame)
     except Exception:
         logger.warning(
-            "Frame dispatch error for type=%s", frame.get("type"),
+            "Frame dispatch error for type=%s",
+            frame.get("type"),
             exc_info=True,
         )
-        conn.enqueue({
-            "type": "gilbert.error",
-            "ref": frame.get("id"),
-            "error": "Internal server error",
-            "code": 500,
-        })
+        conn.enqueue(
+            {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Internal server error",
+                "code": 500,
+            }
+        )
         return
     if response is not None:
         conn.enqueue(response)

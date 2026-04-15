@@ -85,10 +85,14 @@ async def test_load_uses_default_when_no_saved(
 async def test_load_loads_saved_persona(
     helper: _PersonaHelper, stub_storage: StubStorageBackend
 ) -> None:
-    await stub_storage.put("persona", "active", {
-        "text": "Custom persona text",
-        "customized": True,
-    })
+    await stub_storage.put(
+        "persona",
+        "active",
+        {
+            "text": "Custom persona text",
+            "customized": True,
+        },
+    )
     await helper.load()
     assert helper.persona == "Custom persona text"
     assert helper.is_customized is True
@@ -97,9 +101,7 @@ async def test_load_loads_saved_persona(
 # --- Update ---
 
 
-async def test_update_persona(
-    helper: _PersonaHelper, stub_storage: StubStorageBackend
-) -> None:
+async def test_update_persona(helper: _PersonaHelper, stub_storage: StubStorageBackend) -> None:
     await helper.load()
     await helper.update_persona("Be a pirate.")
     assert helper.persona == "Be a pirate."
@@ -111,9 +113,7 @@ async def test_update_persona(
     assert saved["customized"] is True
 
 
-async def test_reset_persona(
-    helper: _PersonaHelper, stub_storage: StubStorageBackend
-) -> None:
+async def test_reset_persona(helper: _PersonaHelper, stub_storage: StubStorageBackend) -> None:
     await helper.load()
     await helper.update_persona("Custom")
     await helper.reset_persona()
@@ -153,8 +153,12 @@ def test_ai_service_has_persona_tools() -> None:
     from gilbert.interfaces.ai import AIBackend, AIRequest, AIResponse, Message, MessageRole
 
     class _StubBackend(AIBackend):
-        async def initialize(self, config: dict[str, Any]) -> None: pass
-        async def close(self) -> None: pass
+        async def initialize(self, config: dict[str, Any]) -> None:
+            pass
+
+        async def close(self) -> None:
+            pass
+
         async def generate(self, request: AIRequest) -> AIResponse:
             return AIResponse(message=Message(role=MessageRole.ASSISTANT, content=""), model="stub")
 
@@ -174,8 +178,12 @@ async def test_tool_get_persona(
     from gilbert.interfaces.ai import AIBackend, AIRequest, AIResponse, Message, MessageRole
 
     class _StubBackend(AIBackend):
-        async def initialize(self, config: dict[str, Any]) -> None: pass
-        async def close(self) -> None: pass
+        async def initialize(self, config: dict[str, Any]) -> None:
+            pass
+
+        async def close(self) -> None:
+            pass
+
         async def generate(self, request: AIRequest) -> AIResponse:
             return AIResponse(message=Message(role=MessageRole.ASSISTANT, content=""), model="stub")
 
@@ -196,8 +204,12 @@ async def test_tool_update_persona(
     from gilbert.interfaces.ai import AIBackend, AIRequest, AIResponse, Message, MessageRole
 
     class _StubBackend(AIBackend):
-        async def initialize(self, config: dict[str, Any]) -> None: pass
-        async def close(self) -> None: pass
+        async def initialize(self, config: dict[str, Any]) -> None:
+            pass
+
+        async def close(self) -> None:
+            pass
+
         async def generate(self, request: AIRequest) -> AIResponse:
             return AIResponse(message=Message(role=MessageRole.ASSISTANT, content=""), model="stub")
 
@@ -221,8 +233,12 @@ async def test_tool_reset_persona(
     from gilbert.interfaces.ai import AIBackend, AIRequest, AIResponse, Message, MessageRole
 
     class _StubBackend(AIBackend):
-        async def initialize(self, config: dict[str, Any]) -> None: pass
-        async def close(self) -> None: pass
+        async def initialize(self, config: dict[str, Any]) -> None:
+            pass
+
+        async def close(self) -> None:
+            pass
+
         async def generate(self, request: AIRequest) -> AIResponse:
             return AIResponse(message=Message(role=MessageRole.ASSISTANT, content=""), model="stub")
 
@@ -247,8 +263,12 @@ async def test_tool_unknown_raises(
     from gilbert.interfaces.ai import AIBackend, AIRequest, AIResponse, Message, MessageRole
 
     class _StubBackend(AIBackend):
-        async def initialize(self, config: dict[str, Any]) -> None: pass
-        async def close(self) -> None: pass
+        async def initialize(self, config: dict[str, Any]) -> None:
+            pass
+
+        async def close(self) -> None:
+            pass
+
         async def generate(self, request: AIRequest) -> AIResponse:
             return AIResponse(message=Message(role=MessageRole.ASSISTANT, content=""), model="stub")
 

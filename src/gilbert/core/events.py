@@ -44,9 +44,7 @@ class InMemoryEventBus(EventBus):
         if not handlers:
             return
 
-        results = await asyncio.gather(
-            *(h(event) for h in handlers), return_exceptions=True
-        )
+        results = await asyncio.gather(*(h(event) for h in handlers), return_exceptions=True)
         for result in results:
             if isinstance(result, Exception):
                 logger.error("Event handler error for %s: %s", event.event_type, result)

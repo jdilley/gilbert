@@ -50,9 +50,7 @@ def _iter_tool_definitions(tree: ast.AST):
             continue
         func = node.func
         is_direct = isinstance(func, ast.Name) and func.id == "ToolDefinition"
-        is_qualified = (
-            isinstance(func, ast.Attribute) and func.attr == "ToolDefinition"
-        )
+        is_qualified = isinstance(func, ast.Attribute) and func.attr == "ToolDefinition"
         if is_direct or is_qualified:
             yield node
 
@@ -80,9 +78,7 @@ def _collect_slash_commands() -> dict[tuple[str, str], list[str]]:
                 slash_group = _string_value(kwargs.get("slash_group")) or ""
                 tool_name = _string_value(kwargs.get("name")) or "(unknown)"
                 rel = path.relative_to(root.parents[3])
-                registry.setdefault(
-                    (slash_group, slash_cmd), []
-                ).append(f"{rel}:{tool_name}")
+                registry.setdefault((slash_group, slash_cmd), []).append(f"{rel}:{tool_name}")
     return registry
 
 
@@ -131,6 +127,4 @@ def test_at_least_one_slash_command_is_registered() -> None:
     registry = _collect_slash_commands()
     # Somewhat arbitrary floor — plenty of headroom for future additions,
     # but catches "the regex broke and matched nothing".
-    assert len(registry) >= 20, (
-        f"Expected at least 20 core slash commands, found {len(registry)}"
-    )
+    assert len(registry) >= 20, f"Expected at least 20 core slash commands, found {len(registry)}"

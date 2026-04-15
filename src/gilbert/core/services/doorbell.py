@@ -62,7 +62,9 @@ class DoorbellService(Service):
             name="doorbell",
             capabilities=frozenset({"doorbell"}),
             requires=frozenset({"scheduler", "event_bus"}),
-            optional=frozenset({"configuration", "credentials", "speaker_control", "text_to_speech"}),
+            optional=frozenset(
+                {"configuration", "credentials", "speaker_control", "text_to_speech"}
+            ),
             events=frozenset({"doorbell.ring"}),
             toggleable=True,
             toggle_description="Doorbell ring detection",
@@ -156,20 +158,24 @@ class DoorbellService(Service):
     def config_params(self) -> list[ConfigParam]:
         params = [
             ConfigParam(
-                key="poll_interval_seconds", type=ToolParameterType.NUMBER,
+                key="poll_interval_seconds",
+                type=ToolParameterType.NUMBER,
                 description="How often to poll for ring events (seconds).",
                 default=_DEFAULT_POLL_INTERVAL,
             ),
             ConfigParam(
-                key="speakers", type=ToolParameterType.ARRAY,
+                key="speakers",
+                type=ToolParameterType.ARRAY,
                 description="Speaker names for doorbell announcements (empty = all speakers).",
                 default=[],
                 choices_from="speakers",
             ),
             ConfigParam(
-                key="backend", type=ToolParameterType.STRING,
+                key="backend",
+                type=ToolParameterType.STRING,
                 description="Doorbell backend provider.",
-                default="unifi", restart_required=True,
+                default="unifi",
+                restart_required=True,
                 choices=tuple(DoorbellBackend.registered_backends().keys()) or ("unifi",),
             ),
         ]
@@ -177,13 +183,20 @@ class DoorbellService(Service):
         backend_cls = backends.get(self._backend_name)
         if backend_cls is not None:
             for bp in backend_cls.backend_config_params():
-                params.append(ConfigParam(
-                    key=f"settings.{bp.key}", type=bp.type,
-                    description=bp.description, default=bp.default,
-                    restart_required=bp.restart_required, sensitive=bp.sensitive,
-                    choices=bp.choices, choices_from=bp.choices_from,
-                    multiline=bp.multiline, backend_param=True,
-                ))
+                params.append(
+                    ConfigParam(
+                        key=f"settings.{bp.key}",
+                        type=bp.type,
+                        description=bp.description,
+                        default=bp.default,
+                        restart_required=bp.restart_required,
+                        sensitive=bp.sensitive,
+                        choices=bp.choices,
+                        choices_from=bp.choices_from,
+                        multiline=bp.multiline,
+                        backend_param=True,
+                    )
+                )
         return params
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
@@ -198,7 +211,9 @@ class DoorbellService(Service):
         )
 
     async def invoke_config_action(
-        self, key: str, payload: dict[str, Any],
+        self,
+        key: str,
+        payload: dict[str, Any],
     ) -> ConfigActionResult:
         return await invoke_backend_action(self._backend, key, payload)
 
@@ -238,15 +253,17 @@ class DoorbellService(Service):
             logger.info("Doorbell ring detected: %s", door_name)
 
             if self._event_bus is not None:
-                await self._event_bus.publish(Event(
-                    event_type="doorbell.ring",
-                    data={
-                        "door": door_name,
-                        "camera": camera_name,
-                        "timestamp": _epoch_ms_to_iso(event.timestamp),
-                    },
-                    source="doorbell",
-                ))
+                await self._event_bus.publish(
+                    Event(
+                        event_type="doorbell.ring",
+                        data={
+                            "door": door_name,
+                            "camera": camera_name,
+                            "timestamp": _epoch_ms_to_iso(event.timestamp),
+                        },
+                        source="doorbell",
+                    )
+                )
 
             await self._announce(door_name)
 

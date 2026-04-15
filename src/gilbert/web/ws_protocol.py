@@ -56,9 +56,11 @@ _rpc_handlers: dict[str, RpcHandler] = {}
 
 def rpc_handler(frame_type: str) -> Callable[[RpcHandler], RpcHandler]:
     """Decorator to register an RPC handler for a frame type."""
+
     def decorator(fn: RpcHandler) -> RpcHandler:
         _rpc_handlers[frame_type] = fn
         return fn
+
     return decorator
 
 
@@ -139,8 +141,10 @@ class WsConnection:
         # Filter by membership
         if event.event_type.startswith(("chat.message.", "chat.member.")):
             if conv_id and conv_id not in self.shared_conv_ids:
-                if not (event.event_type == "chat.member.joined"
-                        and event.data.get("user_id") == self.user_id):
+                if not (
+                    event.event_type == "chat.member.joined"
+                    and event.data.get("user_id") == self.user_id
+                ):
                     return False
             visible_to = event.data.get("visible_to")
             if visible_to is not None and self.user_id not in visible_to:
@@ -167,20 +171,23 @@ class WsConnection:
         ui_blocks = data.get("ui_blocks")
         if ui_blocks and isinstance(ui_blocks, list):
             filtered = [
-                b for b in ui_blocks
+                b
+                for b in ui_blocks
                 if (not b.get("for_user") or b.get("for_user") == self.user_id)
                 and b.get("exclude_user") != self.user_id
             ]
             if len(filtered) != len(ui_blocks):
                 data = {**data, "ui_blocks": filtered}
 
-        self.enqueue({
-            "type": "gilbert.event",
-            "event_type": event.event_type,
-            "data": data,
-            "source": event.source,
-            "timestamp": event.timestamp.isoformat() if event.timestamp else "",
-        })
+        self.enqueue(
+            {
+                "type": "gilbert.event",
+                "event_type": event.event_type,
+                "data": data,
+                "source": event.source,
+                "timestamp": event.timestamp.isoformat() if event.timestamp else "",
+            }
+        )
 
     async def call_client(
         self,
@@ -265,6 +272,7 @@ class WsConnectionManager:
 
         # Discover service-provided handlers
         from gilbert.interfaces.ws import WsHandlerProvider
+
         for svc in gilbert.service_manager.get_all_by_capability("ws_handlers"):
             # Services exposing ws_handlers always inherit from
             # ``Service`` *and* implement the ``WsHandlerProvider``
@@ -277,13 +285,15 @@ class WsConnectionManager:
                     if frame_type in self._handlers:
                         logger.warning(
                             "WS handler conflict: %s already registered, skipping from %s",
-                            frame_type, svc.service_info().name,
+                            frame_type,
+                            svc.service_info().name,
                         )
                     else:
                         self._handlers[frame_type] = handler
                 logger.info(
                     "Registered %d WS handlers from %s",
-                    len(service_handlers), svc.service_info().name,
+                    len(service_handlers),
+                    svc.service_info().name,
                 )
 
         logger.info("WebSocket manager ready: %d handlers registered", len(self._handlers))
@@ -362,14 +372,24 @@ async def _handle_ping(conn: WsConnection, frame: dict[str, Any]) -> dict[str, A
 @rpc_handler("gilbert.peer.publish")
 async def _handle_peer_publish(conn: WsConnection, frame: dict[str, Any]) -> dict[str, Any] | None:
     if conn.user_level > _PEER_LEVEL:
-        return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Peer publishing requires peer or admin role", "code": 403}
+        return {
+            "type": "gilbert.error",
+            "ref": frame.get("id"),
+            "error": "Peer publishing requires peer or admin role",
+            "code": 403,
+        }
 
     event_type = frame.get("event_type", "")
     data = frame.get("data", {})
     source = f"peer:{frame.get('source', conn.user_id)}"
 
     if not event_type:
-        return {"type": "gilbert.error", "ref": frame.get("id"), "error": "event_type is required", "code": 400}
+        return {
+            "type": "gilbert.error",
+            "ref": frame.get("id"),
+            "error": "event_type is required",
+            "code": 400,
+        }
 
     # Tag to prevent loops
     data = {**data, "_from_peer": True}
@@ -380,11 +400,13 @@ async def _handle_peer_publish(conn: WsConnection, frame: dict[str, Any]) -> dic
         event_bus_svc = gilbert.service_manager.get_by_capability("event_bus")
         if event_bus_svc is not None:
             if isinstance(event_bus_svc, EventBusProvider):
-                await event_bus_svc.bus.publish(Event(
-                    event_type=event_type,
-                    data=data,
-                    source=source,
-                ))
+                await event_bus_svc.bus.publish(
+                    Event(
+                        event_type=event_type,
+                        data=data,
+                        source=source,
+                    )
+                )
 
     return {"type": "gilbert.peer.publish.result", "ref": frame.get("id"), "ok": True}
 

@@ -28,9 +28,7 @@ class StorageUserBackend(UserBackend):
         await self._storage.ensure_index(
             IndexDefinition(collection=_USERS, fields=["username"], unique=True)
         )
-        await self._storage.ensure_index(
-            IndexDefinition(collection=_USERS, fields=["email"])
-        )
+        await self._storage.ensure_index(IndexDefinition(collection=_USERS, fields=["email"]))
         await self._storage.ensure_index(
             IndexDefinition(collection=_PROVIDER_USERS, fields=["provider_type"])
         )
@@ -107,9 +105,7 @@ class StorageUserBackend(UserBackend):
     async def delete_user(self, user_id: str) -> None:
         await self._storage.delete(_USERS, user_id)
 
-    async def list_users(
-        self, limit: int | None = None, offset: int = 0
-    ) -> list[dict[str, Any]]:
+    async def list_users(self, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
         return await self._storage.query(
             Query(
                 collection=_USERS,
@@ -130,9 +126,7 @@ class StorageUserBackend(UserBackend):
         links: list[dict[str, str]] = existing.get("provider_links", [])
         # Replace if provider_type already linked.
         links = [lk for lk in links if lk.get("provider_type") != provider_type]
-        links.append(
-            {"provider_type": provider_type, "provider_user_id": provider_user_id}
-        )
+        links.append({"provider_type": provider_type, "provider_user_id": provider_user_id})
         existing.pop("_id", None)
         existing["provider_links"] = links
         await self._storage.put(_USERS, user_id, existing)
@@ -193,9 +187,7 @@ class StorageUserBackend(UserBackend):
         return await self._storage.query(
             Query(
                 collection=_PROVIDER_USERS,
-                filters=[
-                    Filter(field="provider_type", op=FilterOp.EQ, value=provider_type)
-                ],
+                filters=[Filter(field="provider_type", op=FilterOp.EQ, value=provider_type)],
                 sort=[SortField(field="email")],
                 limit=limit,
                 offset=offset,

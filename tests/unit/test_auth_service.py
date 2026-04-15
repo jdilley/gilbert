@@ -66,6 +66,7 @@ class StubStorageService(Service):
 
     def create_namespaced(self, namespace: str) -> Any:
         from gilbert.interfaces.storage import NamespacedStorageBackend
+
         return NamespacedStorageBackend(self.backend, namespace)
 
 
@@ -119,9 +120,7 @@ def _make_auth_service_resolver(
 
 
 @pytest.fixture
-async def auth_service(
-    sqlite_storage: StorageBackend, user_service: UserService
-) -> AuthService:
+async def auth_service(sqlite_storage: StorageBackend, user_service: UserService) -> AuthService:
     """AuthService with NO providers (bare)."""
     config = AuthConfig(
         enabled=True,
@@ -182,9 +181,7 @@ async def test_authenticate_unknown_provider(auth_service: AuthService) -> None:
 async def test_authenticate_success_creates_user_and_session(
     auth_service_with_provider: AuthService, user_service: UserService
 ) -> None:
-    ctx = await auth_service_with_provider.authenticate(
-        "stub", {"email": "test@example.com"}
-    )
+    ctx = await auth_service_with_provider.authenticate("stub", {"email": "test@example.com"})
     assert ctx is not None
     assert ctx.email == "test@example.com"
     assert ctx.session_id is not None
@@ -199,18 +196,14 @@ async def test_authenticate_success_creates_user_and_session(
 async def test_authenticate_failure(
     auth_service_with_provider: AuthService,
 ) -> None:
-    result = await auth_service_with_provider.authenticate(
-        "stub", {"email": "wrong@example.com"}
-    )
+    result = await auth_service_with_provider.authenticate("stub", {"email": "wrong@example.com"})
     assert result is None
 
 
 async def test_validate_session(
     auth_service_with_provider: AuthService,
 ) -> None:
-    ctx = await auth_service_with_provider.authenticate(
-        "stub", {"email": "test@example.com"}
-    )
+    ctx = await auth_service_with_provider.authenticate("stub", {"email": "test@example.com"})
     assert ctx is not None
     session_id = ctx.session_id
     assert session_id is not None
@@ -229,9 +222,7 @@ async def test_validate_invalid_session(auth_service: AuthService) -> None:
 async def test_invalidate_session(
     auth_service_with_provider: AuthService,
 ) -> None:
-    ctx = await auth_service_with_provider.authenticate(
-        "stub", {"email": "test@example.com"}
-    )
+    ctx = await auth_service_with_provider.authenticate("stub", {"email": "test@example.com"})
     assert ctx is not None and ctx.session_id is not None
 
     await auth_service_with_provider.invalidate_session(ctx.session_id)
@@ -243,14 +234,15 @@ async def test_authenticate_links_existing_user(
     auth_service_with_provider: AuthService, user_service: UserService
 ) -> None:
     """If a user with the same email already exists, link rather than create."""
-    await user_service.create_user("existing", {
-        "email": "test@example.com",
-        "display_name": "Existing",
-    })
-
-    ctx = await auth_service_with_provider.authenticate(
-        "stub", {"email": "test@example.com"}
+    await user_service.create_user(
+        "existing",
+        {
+            "email": "test@example.com",
+            "display_name": "Existing",
+        },
     )
+
+    ctx = await auth_service_with_provider.authenticate("stub", {"email": "test@example.com"})
     assert ctx is not None
     assert ctx.user_id == "existing"
 

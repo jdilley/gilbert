@@ -42,9 +42,15 @@ def chunk_text(
 
         # If adding this paragraph exceeds chunk_size, emit current chunk
         if current_text and len(current_text) + len(para) + 2 > chunk_size:
-            chunks.append(_make_chunk(
-                document_id, chunk_index, current_text, current_offset, text,
-            ))
+            chunks.append(
+                _make_chunk(
+                    document_id,
+                    chunk_index,
+                    current_text,
+                    current_offset,
+                    text,
+                )
+            )
             chunk_index += 1
 
             # Start new chunk with overlap from the end of the previous
@@ -61,9 +67,15 @@ def chunk_text(
                 if not sentence:
                     continue
                 if current_text and len(current_text) + len(sentence) + 1 > chunk_size:
-                    chunks.append(_make_chunk(
-                        document_id, chunk_index, current_text, current_offset, text,
-                    ))
+                    chunks.append(
+                        _make_chunk(
+                            document_id,
+                            chunk_index,
+                            current_text,
+                            current_offset,
+                            text,
+                        )
+                    )
                     chunk_index += 1
                     overlap_start = max(0, len(current_text) - chunk_overlap)
                     overlap_text = current_text[overlap_start:]
@@ -82,9 +94,15 @@ def chunk_text(
 
     # Emit final chunk
     if current_text.strip():
-        chunks.append(_make_chunk(
-            document_id, chunk_index, current_text, current_offset, text,
-        ))
+        chunks.append(
+            _make_chunk(
+                document_id,
+                chunk_index,
+                current_text,
+                current_offset,
+                text,
+            )
+        )
 
     return chunks
 

@@ -78,14 +78,18 @@ class StorageService(Service):
     def config_params(self) -> list[ConfigParam]:
         return [
             ConfigParam(
-                key="backend", type=ToolParameterType.STRING,
+                key="backend",
+                type=ToolParameterType.STRING,
                 description="Storage backend type.",
-                default="sqlite", restart_required=True,
+                default="sqlite",
+                restart_required=True,
             ),
             ConfigParam(
-                key="connection", type=ToolParameterType.STRING,
+                key="connection",
+                type=ToolParameterType.STRING,
                 description="Database connection string/path.",
-                default=".gilbert/gilbert.db", restart_required=True,
+                default=".gilbert/gilbert.db",
+                restart_required=True,
             ),
         ]
 
@@ -226,11 +230,13 @@ class StorageService(Service):
         entity_id = arguments["id"]
         data = arguments["data"]
         await self._backend.put(collection, entity_id, data)
-        return json.dumps({
-            "status": "ok",
-            "collection": collection,
-            "id": entity_id,
-        })
+        return json.dumps(
+            {
+                "status": "ok",
+                "collection": collection,
+                "id": entity_id,
+            }
+        )
 
     async def _tool_get_entity(self, arguments: dict[str, Any]) -> str:
         collection = arguments["collection"]

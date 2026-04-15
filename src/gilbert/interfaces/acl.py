@@ -109,6 +109,7 @@ DEFAULT_RPC_LEVEL: int = 100  # unlisted frame types → user role
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+
 def resolve_default_rpc_level(frame_type: str) -> int:
     """Resolve the minimum role level from the hardcoded RPC defaults.
 

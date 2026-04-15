@@ -111,7 +111,9 @@ class _McpAsgiEndpoint:
         auth_result = await authenticate_mcp_request(mcp_server_svc, request)
         if auth_result is None:
             await _send_json(
-                send, 401, {"error": "unauthorized"},
+                send,
+                401,
+                {"error": "unauthorized"},
                 headers=[
                     (b"www-authenticate", b'Bearer realm="gilbert-mcp"'),
                 ],
@@ -149,6 +151,7 @@ async def _get_http_app(app_state: Any, gilbert: Gilbert) -> Any:
     if existing is not None:
         return existing
     from gilbert.core.services.mcp_server_http import MCPServerHttpApp
+
     http_app = MCPServerHttpApp(_ResolverShim(gilbert))
     app_state.mcp_http_app = http_app
     return http_app

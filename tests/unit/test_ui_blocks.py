@@ -11,9 +11,17 @@ from gilbert.interfaces.ui import ToolOutput, UIBlock, UIElement, UIOption
 
 class TestUIElementSerialization:
     def test_text_element_round_trip(self) -> None:
-        el = UIElement(type="text", name="email", label="Email", placeholder="you@example.com", required=True)
+        el = UIElement(
+            type="text", name="email", label="Email", placeholder="you@example.com", required=True
+        )
         d = el.to_dict()
-        assert d == {"type": "text", "name": "email", "label": "Email", "placeholder": "you@example.com", "required": True}
+        assert d == {
+            "type": "text",
+            "name": "email",
+            "label": "Email",
+            "placeholder": "you@example.com",
+            "required": True,
+        }
         restored = UIElement.from_dict(d)
         assert restored.type == "text"
         assert restored.name == "email"
@@ -21,8 +29,13 @@ class TestUIElementSerialization:
 
     def test_select_element_with_options(self) -> None:
         el = UIElement(
-            type="select", name="room", label="Room",
-            options=[UIOption("living", "Living Room"), UIOption("kitchen", "Kitchen", selected=True)],
+            type="select",
+            name="room",
+            label="Room",
+            options=[
+                UIOption("living", "Living Room"),
+                UIOption("kitchen", "Kitchen", selected=True),
+            ],
         )
         d = el.to_dict()
         assert len(d["options"]) == 2
@@ -35,7 +48,9 @@ class TestUIElementSerialization:
         assert restored.options[1].selected is True
 
     def test_range_element(self) -> None:
-        el = UIElement(type="range", name="vol", label="Volume", min_val=0, max_val=100, step=5, default=50)
+        el = UIElement(
+            type="range", name="vol", label="Volume", min_val=0, max_val=100, step=5, default=50
+        )
         d = el.to_dict()
         assert d["min"] == 0
         assert d["max"] == 100
@@ -59,7 +74,8 @@ class TestUIElementSerialization:
 
     def test_image_element_round_trip(self) -> None:
         el = UIElement(
-            type="image", name="poster",
+            type="image",
+            name="poster",
             url="https://img.example/poster.jpg",
             label="Inception poster",
             max_width=96,
@@ -137,12 +153,19 @@ class TestToolOutput:
         assert out.ui_blocks == []
 
     def test_with_blocks(self) -> None:
-        block = UIBlock(title="Pick one", elements=[
-            UIElement(type="buttons", name="choice", options=[
-                UIOption("a", "Option A"),
-                UIOption("b", "Option B"),
-            ]),
-        ])
+        block = UIBlock(
+            title="Pick one",
+            elements=[
+                UIElement(
+                    type="buttons",
+                    name="choice",
+                    options=[
+                        UIOption("a", "Option A"),
+                        UIOption("b", "Option B"),
+                    ],
+                ),
+            ],
+        )
         out = ToolOutput(text="Here are your options.", ui_blocks=[block])
         assert len(out.ui_blocks) == 1
         assert out.ui_blocks[0].title == "Pick one"
@@ -158,6 +181,7 @@ class TestToolOutputInAgenticLoop:
     def ai_service(self) -> MagicMock:
         """Minimal mock of AIService with _execute_tool_calls accessible."""
         from gilbert.core.services.ai import AIService
+
         svc = MagicMock(spec=AIService)
         # Use the real methods
         svc._execute_tool_calls = AIService._execute_tool_calls.__get__(svc, AIService)
@@ -180,7 +204,10 @@ class TestToolOutputInAgenticLoop:
         tools_by_name = {"test_tool": (provider, tool_def)}
 
         results, ui_blocks = await ai_service._execute_tool_calls(
-            [tc], tools_by_name, user_ctx=None, profile=None,
+            [tc],
+            tools_by_name,
+            user_ctx=None,
+            profile=None,
         )
 
         assert len(results) == 1
@@ -194,17 +221,22 @@ class TestToolOutputInAgenticLoop:
 
         block = UIBlock(block_id="blk-1", title="Test Form", tool_name="my_tool")
         provider = MagicMock()
-        provider.execute_tool = AsyncMock(return_value=ToolOutput(
-            text="Form shown.",
-            ui_blocks=[block],
-        ))
+        provider.execute_tool = AsyncMock(
+            return_value=ToolOutput(
+                text="Form shown.",
+                ui_blocks=[block],
+            )
+        )
         tool_def = ToolDefinition(name="my_tool", description="test", parameters=[])
 
         tc = ToolCall(tool_call_id="call_2", tool_name="my_tool", arguments={})
         tools_by_name = {"my_tool": (provider, tool_def)}
 
         results, ui_blocks = await ai_service._execute_tool_calls(
-            [tc], tools_by_name, user_ctx=None, profile=None,
+            [tc],
+            tools_by_name,
+            user_ctx=None,
+            profile=None,
         )
 
         assert len(results) == 1
@@ -218,14 +250,20 @@ class TestToolOutputInAgenticLoop:
 
         block = UIBlock(title="No ID")  # block_id is ""
         provider = MagicMock()
-        provider.execute_tool = AsyncMock(return_value=ToolOutput(
-            text="ok", ui_blocks=[block],
-        ))
+        provider.execute_tool = AsyncMock(
+            return_value=ToolOutput(
+                text="ok",
+                ui_blocks=[block],
+            )
+        )
         tool_def = ToolDefinition(name="t", description="test", parameters=[])
 
         tc = ToolCall(tool_call_id="c1", tool_name="t", arguments={})
         results, ui_blocks = await ai_service._execute_tool_calls(
-            [tc], {"t": (provider, tool_def)}, user_ctx=None, profile=None,
+            [tc],
+            {"t": (provider, tool_def)},
+            user_ctx=None,
+            profile=None,
         )
 
         assert len(ui_blocks) == 1
@@ -238,14 +276,20 @@ class TestToolOutputInAgenticLoop:
 
         block = UIBlock(title="Form")  # tool_name is ""
         provider = MagicMock()
-        provider.execute_tool = AsyncMock(return_value=ToolOutput(
-            text="ok", ui_blocks=[block],
-        ))
+        provider.execute_tool = AsyncMock(
+            return_value=ToolOutput(
+                text="ok",
+                ui_blocks=[block],
+            )
+        )
         tool_def = ToolDefinition(name="config_tool", description="test", parameters=[])
 
         tc = ToolCall(tool_call_id="c1", tool_name="config_tool", arguments={})
         results, ui_blocks = await ai_service._execute_tool_calls(
-            [tc], {"config_tool": (provider, tool_def)}, user_ctx=None, profile=None,
+            [tc],
+            {"config_tool": (provider, tool_def)},
+            user_ctx=None,
+            profile=None,
         )
 
         assert ui_blocks[0].tool_name == "config_tool"
@@ -260,7 +304,10 @@ class TestToolOutputInAgenticLoop:
 
         tc = ToolCall(tool_call_id="c1", tool_name="t", arguments={})
         results, ui_blocks = await ai_service._execute_tool_calls(
-            [tc], {"t": (provider, tool_def)}, user_ctx=None, profile=None,
+            [tc],
+            {"t": (provider, tool_def)},
+            user_ctx=None,
+            profile=None,
         )
 
         assert len(results) == 1
@@ -274,13 +321,19 @@ class TestToolOutputInAgenticLoop:
         provider1 = MagicMock()
         provider1.execute_tool = AsyncMock(return_value="plain")
         provider2 = MagicMock()
-        provider2.execute_tool = AsyncMock(return_value=ToolOutput(
-            text="form here", ui_blocks=[UIBlock(block_id="b1", title="F1")],
-        ))
+        provider2.execute_tool = AsyncMock(
+            return_value=ToolOutput(
+                text="form here",
+                ui_blocks=[UIBlock(block_id="b1", title="F1")],
+            )
+        )
         provider3 = MagicMock()
-        provider3.execute_tool = AsyncMock(return_value=ToolOutput(
-            text="another", ui_blocks=[UIBlock(block_id="b2", title="F2")],
-        ))
+        provider3.execute_tool = AsyncMock(
+            return_value=ToolOutput(
+                text="another",
+                ui_blocks=[UIBlock(block_id="b2", title="F2")],
+            )
+        )
 
         def td(name: str) -> ToolDefinition:
             return ToolDefinition(name=name, description="test", parameters=[])
@@ -297,7 +350,10 @@ class TestToolOutputInAgenticLoop:
         }
 
         results, ui_blocks = await ai_service._execute_tool_calls(
-            calls, tools, user_ctx=None, profile=None,
+            calls,
+            tools,
+            user_ctx=None,
+            profile=None,
         )
 
         assert len(results) == 3

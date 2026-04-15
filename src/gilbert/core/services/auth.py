@@ -136,24 +136,30 @@ class AuthService(Service):
     def config_params(self) -> list[ConfigParam]:
         params: list[ConfigParam] = [
             ConfigParam(
-                key="session_ttl_seconds", type=ToolParameterType.INTEGER,
+                key="session_ttl_seconds",
+                type=ToolParameterType.INTEGER,
                 description="Session time-to-live in seconds.",
                 default=86400,
             ),
             ConfigParam(
-                key="default_roles", type=ToolParameterType.ARRAY,
+                key="default_roles",
+                type=ToolParameterType.ARRAY,
                 description="Default roles assigned to new users.",
                 default=["user"],
             ),
             ConfigParam(
-                key="allow_user_creation", type=ToolParameterType.BOOLEAN,
+                key="allow_user_creation",
+                type=ToolParameterType.BOOLEAN,
                 description="Whether new users can be created on first login.",
                 default=True,
             ),
             ConfigParam(
-                key="root_password", type=ToolParameterType.STRING,
+                key="root_password",
+                type=ToolParameterType.STRING,
                 description="Root admin password.",
-                default="", restart_required=True, sensitive=True,
+                default="",
+                restart_required=True,
+                sensitive=True,
             ),
         ]
         # Per-backend params: discovered from the registry so adding a
@@ -163,19 +169,30 @@ class AuthService(Service):
         for name, cls in AuthBackend.registered_backends().items():
             if name == _LOCAL_BACKEND:
                 continue
-            params.append(ConfigParam(
-                key=f"{name}.enabled", type=ToolParameterType.BOOLEAN,
-                description=f"Enable the {name} auth backend.",
-                default=False, restart_required=True, backend_param=True,
-            ))
+            params.append(
+                ConfigParam(
+                    key=f"{name}.enabled",
+                    type=ToolParameterType.BOOLEAN,
+                    description=f"Enable the {name} auth backend.",
+                    default=False,
+                    restart_required=True,
+                    backend_param=True,
+                )
+            )
             for bp in cls.backend_config_params():
-                params.append(ConfigParam(
-                    key=f"{name}.{bp.key}", type=bp.type,
-                    description=bp.description, default=bp.default,
-                    restart_required=bp.restart_required,
-                    sensitive=bp.sensitive, choices=bp.choices,
-                    multiline=bp.multiline, backend_param=True,
-                ))
+                params.append(
+                    ConfigParam(
+                        key=f"{name}.{bp.key}",
+                        type=bp.type,
+                        description=bp.description,
+                        default=bp.default,
+                        restart_required=bp.restart_required,
+                        sensitive=bp.sensitive,
+                        choices=bp.choices,
+                        multiline=bp.multiline,
+                        backend_param=True,
+                    )
+                )
         return params
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
@@ -212,16 +229,20 @@ class AuthService(Service):
             except Exception:
                 continue
             for a in raw:
-                actions.append(replace(
-                    a,
-                    key=f"{name}.{a.key}",
-                    backend_action=True,
-                    backend=name,
-                ))
+                actions.append(
+                    replace(
+                        a,
+                        key=f"{name}.{a.key}",
+                        backend_action=True,
+                        backend=name,
+                    )
+                )
         return actions
 
     async def invoke_config_action(
-        self, key: str, payload: dict[str, Any],
+        self,
+        key: str,
+        payload: dict[str, Any],
     ) -> ConfigActionResult:
         backend_name, _, action_key = key.partition(".")
         if not backend_name or not action_key:
@@ -291,9 +312,7 @@ class AuthService(Service):
 
         return await self._finalize_auth(auth_info, provider_type)
 
-    async def _finalize_auth(
-        self, auth_info: AuthInfo, provider_type: str
-    ) -> UserContext | None:
+    async def _finalize_auth(self, auth_info: AuthInfo, provider_type: str) -> UserContext | None:
         """Resolve local user, update last_login, create session."""
         user = await self._resolve_local_user(auth_info)
         if user is None:

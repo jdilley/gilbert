@@ -78,8 +78,13 @@ async def drive_backend(url: str, *, bearer: str | None = None) -> list[str]:
     backend = HttpMCPBackend()
     auth = MCPAuthConfig(kind="bearer", bearer_token=bearer) if bearer else MCPAuthConfig()
     record = MCPServerRecord(
-        id="smoke", name="Smoke", slug="smoke",
-        transport="http", url=url, command=(), owner_id="alice",
+        id="smoke",
+        name="Smoke",
+        slug="smoke",
+        transport="http",
+        url=url,
+        command=(),
+        owner_id="alice",
         auth=auth,
     )
     await backend.connect(record)
@@ -120,8 +125,13 @@ async def drive_through_service(url: str) -> None:
     svc._acl_svc = FakeACL()
 
     record = MCPServerRecord(
-        id="smoke-svc", name="SmokeSvc", slug="smoke-svc",
-        transport="http", url=url, command=(), owner_id="alice",
+        id="smoke-svc",
+        name="SmokeSvc",
+        slug="smoke-svc",
+        transport="http",
+        url=url,
+        command=(),
+        owner_id="alice",
         scope="private",
     )
     # Use the service's private start-client path so the lifecycle
@@ -134,17 +144,20 @@ async def drive_through_service(url: str) -> None:
             break
         await asyncio.sleep(0.05)
     assert entry.connected, (
-        f"expected connected, got error: {entry.last_error} "
-        f"(retry_count={entry.retry_count})"
+        f"expected connected, got error: {entry.last_error} (retry_count={entry.retry_count})"
     )
     assert entry.tools, "expected at least one tool"
 
     alice = UserContext(
-        user_id="alice", email="a@x", display_name="A",
+        user_id="alice",
+        email="a@x",
+        display_name="A",
         roles=frozenset({"user"}),
     )
     bob = UserContext(
-        user_id="bob", email="b@x", display_name="B",
+        user_id="bob",
+        email="b@x",
+        display_name="B",
         roles=frozenset({"user"}),
     )
 
@@ -155,7 +168,8 @@ async def drive_through_service(url: str) -> None:
 
     set_current_user(alice)
     result = await svc.execute_tool(
-        "mcp__smoke-svc__echo", {"text": "through service"},
+        "mcp__smoke-svc__echo",
+        {"text": "through service"},
     )
     assert "through service" in result, f"unexpected service result: {result!r}"
 
@@ -177,10 +191,15 @@ async def drive_oauth_components() -> None:
     # Token storage round trip
     ts = EntityStorageTokenStorage(storage, "srv1")
     assert await ts.get_tokens() is None
-    await ts.set_tokens(OAuthToken(
-        access_token="at-smoke", token_type="Bearer",
-        expires_in=3600, refresh_token="rt-smoke", scope="read write",
-    ))
+    await ts.set_tokens(
+        OAuthToken(
+            access_token="at-smoke",
+            token_type="Bearer",
+            expires_in=3600,
+            refresh_token="rt-smoke",
+            scope="read write",
+        )
+    )
     got = await ts.get_tokens()
     assert got is not None and got.access_token == "at-smoke"
     assert got.scope == "read write"
@@ -188,8 +207,12 @@ async def drive_oauth_components() -> None:
     # Flow manager: begin → capture state → complete → resolved
     mgr = OAuthFlowManager(storage)
     record = MCPServerRecord(
-        id="oauth1", name="OAuth", slug="oauth",
-        transport="http", url="https://example.com/mcp", command=(),
+        id="oauth1",
+        name="OAuth",
+        slug="oauth",
+        transport="http",
+        url="https://example.com/mcp",
+        command=(),
         owner_id="alice",
         auth=MCPAuthConfig(kind="oauth"),
     )
@@ -224,15 +247,15 @@ async def main() -> int:
     port = pick_free_port()
     proc = subprocess.Popen(
         [sys.executable, str(FIXTURE), "--port", str(port)],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         wait_for_port(port)
         url = f"http://127.0.0.1:{port}/mcp"
         try:
             names = await drive_backend(url)
-            record("connect → list_tools → call_tool round-trip",
-                   True, f"tools: {names}")
+            record("connect → list_tools → call_tool round-trip", True, f"tools: {names}")
         except Exception as exc:  # noqa: BLE001
             record("connect → list_tools → call_tool round-trip", False, str(exc))
     finally:
@@ -244,7 +267,8 @@ async def main() -> int:
     port = pick_free_port()
     proc = subprocess.Popen(
         [sys.executable, str(FIXTURE), "--port", str(port), "--bearer", "s3cret"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         wait_for_port(port)
@@ -258,11 +282,9 @@ async def main() -> int:
 
         try:
             names = await drive_backend(url, bearer="s3cret")
-            record("backend sends correct bearer → round-trip works",
-                   True, f"tools: {names}")
+            record("backend sends correct bearer → round-trip works", True, f"tools: {names}")
         except Exception as exc:  # noqa: BLE001
-            record("backend sends correct bearer → round-trip works",
-                   False, str(exc))
+            record("backend sends correct bearer → round-trip works", False, str(exc))
     finally:
         proc.terminate()
         proc.wait(timeout=5)
@@ -272,7 +294,8 @@ async def main() -> int:
     port = pick_free_port()
     proc = subprocess.Popen(
         [sys.executable, str(FIXTURE), "--port", str(port)],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         wait_for_port(port)
@@ -281,8 +304,7 @@ async def main() -> int:
             await drive_through_service(url)
             record("service visibility + execute_tool work against real HTTP", True)
         except Exception as exc:  # noqa: BLE001
-            record("service visibility + execute_tool work against real HTTP",
-                   False, str(exc))
+            record("service visibility + execute_tool work against real HTTP", False, str(exc))
     finally:
         proc.terminate()
         proc.wait(timeout=5)

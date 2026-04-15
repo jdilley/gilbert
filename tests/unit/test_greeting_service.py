@@ -32,6 +32,7 @@ class FakeStorageService:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="storage", capabilities=frozenset({"entity_storage"}))
 
 
@@ -54,6 +55,7 @@ class FakeEventBusSvc:
 
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
+
         return ServiceInfo(name="event_bus", capabilities=frozenset({"event_bus"}))
 
 
@@ -99,14 +101,18 @@ class TestGreetingService:
         assert "entity_storage" in info.requires
 
     @pytest.mark.asyncio
-    async def test_subscribes_to_presence_arrived(self, greeting_service: GreetingService, resolver: FakeResolver) -> None:
+    async def test_subscribes_to_presence_arrived(
+        self, greeting_service: GreetingService, resolver: FakeResolver
+    ) -> None:
         await greeting_service.start(resolver)
         bus = resolver.caps["event_bus"].bus
         assert "presence.arrived" in bus.handlers
         assert len(bus.handlers["presence.arrived"]) == 1
 
     @pytest.mark.asyncio
-    async def test_unsubscribes_on_stop(self, greeting_service: GreetingService, resolver: FakeResolver) -> None:
+    async def test_unsubscribes_on_stop(
+        self, greeting_service: GreetingService, resolver: FakeResolver
+    ) -> None:
         await greeting_service.start(resolver)
         bus = resolver.caps["event_bus"].bus
         assert len(bus.handlers["presence.arrived"]) == 1
@@ -114,7 +120,9 @@ class TestGreetingService:
         assert len(bus.handlers["presence.arrived"]) == 0
 
     async def test_get_display_name_from_email(self, greeting_service: GreetingService) -> None:
-        assert await greeting_service._get_display_name("brian.dilley@example.com") == "Brian Dilley"
+        assert (
+            await greeting_service._get_display_name("brian.dilley@example.com") == "Brian Dilley"
+        )
 
     async def test_get_display_name_from_plain(self, greeting_service: GreetingService) -> None:
         assert await greeting_service._get_display_name("Brian") == "Brian"
@@ -128,7 +136,9 @@ class TestGreetingService:
         assert isinstance(result, bool)
 
     @pytest.mark.asyncio
-    async def test_dedup_prevents_double_greeting(self, greeting_service: GreetingService, resolver: FakeResolver) -> None:
+    async def test_dedup_prevents_double_greeting(
+        self, greeting_service: GreetingService, resolver: FakeResolver
+    ) -> None:
         await greeting_service.start(resolver)
 
         # Mark user as greeted
@@ -141,7 +151,9 @@ class TestGreetingService:
         assert await greeting_service._has_been_greeted_today("unknown") is False
 
     @pytest.mark.asyncio
-    async def test_generate_greeting_fallback(self, greeting_service: GreetingService, resolver: FakeResolver) -> None:
+    async def test_generate_greeting_fallback(
+        self, greeting_service: GreetingService, resolver: FakeResolver
+    ) -> None:
         """Without AI service, falls back to simple greeting."""
         await greeting_service.start(resolver)
         greeting = await greeting_service._generate_greeting("Brian")
@@ -150,7 +162,9 @@ class TestGreetingService:
 
     @pytest.mark.asyncio
     async def test_generate_greeting_uses_ai_chat_capability(
-        self, greeting_service: GreetingService, resolver: FakeResolver,
+        self,
+        greeting_service: GreetingService,
+        resolver: FakeResolver,
     ) -> None:
         """AI greeting looks up 'ai_chat' capability, not 'ai'."""
         await greeting_service.start(resolver)
@@ -165,7 +179,9 @@ class TestGreetingService:
 
     @pytest.mark.asyncio
     async def test_generate_greeting_wrong_capability_falls_back(
-        self, greeting_service: GreetingService, resolver: FakeResolver,
+        self,
+        greeting_service: GreetingService,
+        resolver: FakeResolver,
     ) -> None:
         """If AI is registered under 'ai' instead of 'ai_chat', falls back."""
         await greeting_service.start(resolver)
@@ -180,7 +196,9 @@ class TestGreetingService:
 
     @pytest.mark.asyncio
     async def test_startup_greets_already_present(
-        self, greeting_service: GreetingService, resolver: FakeResolver,
+        self,
+        greeting_service: GreetingService,
+        resolver: FakeResolver,
     ) -> None:
         """Startup check greets people already present."""
         await greeting_service.start(resolver)
@@ -191,10 +209,12 @@ class TestGreetingService:
         from gilbert.interfaces.presence import PresenceState, UserPresence
 
         mock_presence = AsyncMock()
-        mock_presence.who_is_here = AsyncMock(return_value=[
-            UserPresence(user_id="usr_1", state=PresenceState.PRESENT),
-            UserPresence(user_id="usr_2", state=PresenceState.NEARBY),
-        ])
+        mock_presence.who_is_here = AsyncMock(
+            return_value=[
+                UserPresence(user_id="usr_1", state=PresenceState.PRESENT),
+                UserPresence(user_id="usr_2", state=PresenceState.NEARBY),
+            ]
+        )
         resolver.caps["presence"] = mock_presence
 
         # Mock speaker to capture announcements
@@ -209,7 +229,9 @@ class TestGreetingService:
 
     @pytest.mark.asyncio
     async def test_startup_skips_outside_window(
-        self, greeting_service: GreetingService, resolver: FakeResolver,
+        self,
+        greeting_service: GreetingService,
+        resolver: FakeResolver,
     ) -> None:
         """Startup check does nothing outside greeting window."""
         await greeting_service.start(resolver)

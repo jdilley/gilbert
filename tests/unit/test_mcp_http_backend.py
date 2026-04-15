@@ -32,9 +32,14 @@ class TestRegistry:
 class TestAuthHeaders:
     def _record(self, auth: MCPAuthConfig) -> MCPServerRecord:
         return MCPServerRecord(
-            id="x", name="X", slug="x",
-            transport="http", url="https://example.com/mcp",
-            command=(), owner_id="alice", auth=auth,
+            id="x",
+            name="X",
+            slug="x",
+            transport="http",
+            url="https://example.com/mcp",
+            command=(),
+            owner_id="alice",
+            auth=auth,
         )
 
     def test_none_auth_emits_no_headers(self) -> None:
@@ -70,9 +75,13 @@ class TestConnect:
     async def test_http_connect_rejects_missing_url(self) -> None:
         backend = HttpMCPBackend()
         record = MCPServerRecord(
-            id="x", name="Remote", slug="remote",
-            transport="http", url=None,
-            command=(), owner_id="alice",
+            id="x",
+            name="Remote",
+            slug="remote",
+            transport="http",
+            url=None,
+            command=(),
+            owner_id="alice",
         )
         with pytest.raises(ValueError, match="URL"):
             await backend.connect(record)
@@ -81,9 +90,13 @@ class TestConnect:
     async def test_sse_connect_rejects_missing_url(self) -> None:
         backend = SseMCPBackend()
         record = MCPServerRecord(
-            id="x", name="Remote", slug="remote",
-            transport="sse", url=None,
-            command=(), owner_id="alice",
+            id="x",
+            name="Remote",
+            slug="remote",
+            transport="sse",
+            url=None,
+            command=(),
+            owner_id="alice",
         )
         with pytest.raises(ValueError, match="URL"):
             await backend.connect(record)

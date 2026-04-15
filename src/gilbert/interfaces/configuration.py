@@ -111,7 +111,9 @@ class ConfigActionProvider(Protocol):
         ...
 
     async def invoke_config_action(
-        self, key: str, payload: dict[str, Any],
+        self,
+        key: str,
+        payload: dict[str, Any],
     ) -> ConfigActionResult:
         """Invoke an action by key. ``payload`` is free-form per-action."""
         ...
@@ -137,7 +139,9 @@ class BackendActionProvider(Protocol):
         ...
 
     async def invoke_backend_action(
-        self, key: str, payload: dict[str, Any],
+        self,
+        key: str,
+        payload: dict[str, Any],
     ) -> ConfigActionResult:
         """Invoke a backend-level action by key."""
         ...

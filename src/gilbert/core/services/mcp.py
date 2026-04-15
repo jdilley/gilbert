@@ -244,12 +244,8 @@ class MCPService(Service):
         self._enabled = True
         self._connect_timeout = float(section.get("connect_timeout_seconds", 15))
         self._call_timeout = float(section.get("call_timeout_seconds", 60))
-        self._reconnect_initial_delay = float(
-            section.get("reconnect_initial_delay_seconds", 1.0)
-        )
-        self._reconnect_max_delay = float(
-            section.get("reconnect_max_delay_seconds", 60.0)
-        )
+        self._reconnect_initial_delay = float(section.get("reconnect_initial_delay_seconds", 1.0))
+        self._reconnect_max_delay = float(section.get("reconnect_max_delay_seconds", 60.0))
 
         await self._load_and_autostart()
         logger.info(
@@ -333,7 +329,9 @@ class MCPService(Service):
         backend_cls = MCPBackend.registered_backends().get(record.transport)
         if backend_cls is None:
             logger.warning(
-                "Unknown MCP transport %r for server %s", record.transport, record.slug,
+                "Unknown MCP transport %r for server %s",
+                record.transport,
+                record.slug,
             )
             return None
 
@@ -360,10 +358,12 @@ class MCPService(Service):
         # which is exactly what we want — a remote can't probe for
         # sampling support on servers that haven't granted it.
         if record.allow_sampling:
+
             async def _sampling_handler(ctx: Any, params: Any) -> Any:
                 # Capture ``entry`` so reconnects see the current
                 # record (including budget parameter updates).
                 return await self._on_sampling_request(entry.record, params)
+
             await backend.set_sampling_callback(_sampling_handler)
 
         entry.supervisor = asyncio.create_task(self._supervise(entry))
@@ -421,7 +421,8 @@ class MCPService(Service):
                     # Jittered backoff so parallel supervisors don't stampede
                     # a recovering remote all at the same moment.
                     jitter = random.uniform(
-                        -self._reconnect_jitter, self._reconnect_jitter,
+                        -self._reconnect_jitter,
+                        self._reconnect_jitter,
                     )
                     delay = max(0.1, backoff * (1.0 + jitter))
                     entry.next_retry_at = datetime.now(UTC) + timedelta(
@@ -429,10 +430,15 @@ class MCPService(Service):
                     )
                     logger.info(
                         "MCP %s connect attempt %d failed: %s (next retry in %.1fs)",
-                        record.slug, entry.retry_count, exc, delay,
+                        record.slug,
+                        entry.retry_count,
+                        exc,
+                        delay,
                     )
                     await self._persist_connection_state(
-                        record.id, last_error=str(exc), connected=False,
+                        record.id,
+                        last_error=str(exc),
+                        connected=False,
                     )
                     try:
                         await asyncio.sleep(delay)
@@ -451,7 +457,9 @@ class MCPService(Service):
                 entry.connected = True
                 entry.last_error = None
                 await self._persist_connection_state(
-                    record.id, last_error=None, connected=True,
+                    record.id,
+                    last_error=None,
+                    connected=True,
                 )
 
                 try:
@@ -463,7 +471,8 @@ class MCPService(Service):
                     # backend and fall through to reconnect.
                     logger.info(
                         "MCP %s health check failed, reconnecting: %s",
-                        record.slug, exc,
+                        record.slug,
+                        exc,
                     )
                     entry.connected = False
                     entry.last_error = f"connection lost: {exc}"
@@ -487,10 +496,12 @@ class MCPService(Service):
             raise
 
     def _make_invalidate_cache(
-        self, entry: _ClientEntry,
+        self,
+        entry: _ClientEntry,
     ) -> Callable[[], Awaitable[None]]:
         async def _cb() -> None:
             entry.tools_fetched_at = 0.0
+
         return _cb
 
     async def _attempt_connect(self, entry: _ClientEntry) -> None:
@@ -537,7 +548,9 @@ class MCPService(Service):
             return None
         assert self._storage is not None
         return auth_for_stored_tokens(
-            self._storage, record, self._oauth_redirect_uri(),
+            self._storage,
+            record,
+            self._oauth_redirect_uri(),
         )
 
     def _oauth_redirect_uri(self) -> str:
@@ -582,15 +595,17 @@ class MCPService(Service):
                 specs = await entry.backend.list_tools()
             except Exception as exc:
                 entry.last_error = str(exc)
-                logger.warning(
-                    "MCP list_tools failed for %s: %s", entry.record.slug, exc
-                )
+                logger.warning("MCP list_tools failed for %s: %s", entry.record.slug, exc)
                 return
             entry.tools = specs
             entry.tools_fetched_at = time.monotonic()
 
     async def _persist_connection_state(
-        self, server_id: str, *, last_error: str | None, connected: bool,
+        self,
+        server_id: str,
+        *,
+        last_error: str | None,
+        connected: bool,
     ) -> None:
         assert self._storage is not None
         doc = await self._storage.get(MCP_SERVERS_COLLECTION, server_id)
@@ -652,12 +667,8 @@ class MCPService(Service):
     async def on_config_changed(self, config: dict[str, Any]) -> None:
         self._connect_timeout = float(config.get("connect_timeout_seconds", 15))
         self._call_timeout = float(config.get("call_timeout_seconds", 60))
-        self._reconnect_initial_delay = float(
-            config.get("reconnect_initial_delay_seconds", 1.0)
-        )
-        self._reconnect_max_delay = float(
-            config.get("reconnect_max_delay_seconds", 60.0)
-        )
+        self._reconnect_initial_delay = float(config.get("reconnect_initial_delay_seconds", 1.0))
+        self._reconnect_max_delay = float(config.get("reconnect_max_delay_seconds", 60.0))
 
     # ── visibility / RBAC ─────────────────────────────────────────────
 
@@ -683,7 +694,8 @@ class MCPService(Service):
 
     def _visible_clients(self, user_ctx: UserContext) -> list[_ClientEntry]:
         out = [
-            entry for entry in self._clients.values()
+            entry
+            for entry in self._clients.values()
             if entry.connected and self._can_see_server(entry.record, user_ctx)
         ]
         # Browser-hosted session entries are strictly private to the
@@ -735,7 +747,9 @@ class MCPService(Service):
         if entry is None:
             raise PermissionError(f"MCP tool {name!r} is not available to this user")
         if not entry.connected:
-            raise RuntimeError(f"MCP server {slug!r} is not connected: {entry.last_error or 'unknown error'}")
+            raise RuntimeError(
+                f"MCP server {slug!r} is not connected: {entry.last_error or 'unknown error'}"
+            )
 
         async with asyncio.timeout(self._call_timeout):
             result = await entry.backend.call_tool(tool_name, arguments)
@@ -751,7 +765,7 @@ class MCPService(Service):
     def _decode_tool_name(name: str) -> tuple[str, str]:
         if not name.startswith(TOOL_NAME_PREFIX):
             raise KeyError(f"Not an MCP tool name: {name!r}")
-        remainder = name[len(TOOL_NAME_PREFIX):]
+        remainder = name[len(TOOL_NAME_PREFIX) :]
         slug, sep, tool = remainder.partition(TOOL_NAME_SEP)
         if not sep or not tool:
             raise KeyError(f"Malformed MCP tool name: {name!r}")
@@ -775,7 +789,9 @@ class MCPService(Service):
         return None
 
     def _to_tool_definition(
-        self, record: MCPServerRecord, spec: MCPToolSpec,
+        self,
+        record: MCPServerRecord,
+        spec: MCPToolSpec,
     ) -> ToolDefinition:
         params = self._translate_schema(spec.input_schema)
         # ``required_role="everyone"`` because visibility (``_can_see_server``)
@@ -853,7 +869,10 @@ class MCPService(Service):
         return entry.record if entry else None
 
     async def assert_slug_unique(
-        self, slug: str, *, excluding_id: str | None = None,
+        self,
+        slug: str,
+        *,
+        excluding_id: str | None = None,
     ) -> None:
         """Enforce global slug uniqueness at save time."""
         assert self._storage is not None
@@ -882,9 +901,7 @@ class MCPService(Service):
         now = datetime.now(UTC)
         record = replace(record, created_at=now, updated_at=now)
         await self.assert_slug_unique(record.slug)
-        await self._storage.put(
-            MCP_SERVERS_COLLECTION, record.id, self._doc_from_record(record)
-        )
+        await self._storage.put(MCP_SERVERS_COLLECTION, record.id, self._doc_from_record(record))
         if record.enabled and record.auto_start:
             await self._start_client(record)
         else:
@@ -897,9 +914,7 @@ class MCPService(Service):
         await self.assert_slug_unique(record.slug, excluding_id=record.id)
         now = datetime.now(UTC)
         record = replace(record, updated_at=now)
-        await self._storage.put(
-            MCP_SERVERS_COLLECTION, record.id, self._doc_from_record(record)
-        )
+        await self._storage.put(MCP_SERVERS_COLLECTION, record.id, self._doc_from_record(record))
         # Drop the cached sampling budget so new budget parameters
         # (or a full disable) take effect on the next request
         # instead of keeping the old one around with stale limits.
@@ -973,7 +988,9 @@ class MCPService(Service):
     # --- handlers ----------------------------------------------------
 
     async def _ws_list(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         user_ctx = conn.user_ctx
         servers = [
@@ -988,7 +1005,9 @@ class MCPService(Service):
         }
 
     async def _ws_get(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         server_id = str(frame.get("id_") or frame.get("server_id") or "").strip()
         if not server_id:
@@ -1003,7 +1022,9 @@ class MCPService(Service):
         }
 
     async def _ws_create(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         payload = frame.get("server") or {}
         if not isinstance(payload, dict):
@@ -1039,7 +1060,9 @@ class MCPService(Service):
         }
 
     async def _ws_update(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         payload = frame.get("server") or {}
         if not isinstance(payload, dict):
@@ -1074,10 +1097,8 @@ class MCPService(Service):
         # server's ability to spend AI budget on the owner's behalf.
         # Regular users can't raise these fields on their own servers.
         sampling_changing = (
-            bool(payload.get("allow_sampling", old.allow_sampling))
-            != old.allow_sampling
-            or str(payload.get("sampling_profile", old.sampling_profile))
-            != old.sampling_profile
+            bool(payload.get("allow_sampling", old.allow_sampling)) != old.allow_sampling
+            or str(payload.get("sampling_profile", old.sampling_profile)) != old.sampling_profile
             or int(payload.get("sampling_budget_tokens", old.sampling_budget_tokens))
             != old.sampling_budget_tokens
             or int(
@@ -1120,7 +1141,9 @@ class MCPService(Service):
         }
 
     async def _ws_delete(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         server_id = str(frame.get("server_id") or "").strip()
         if not server_id:
@@ -1138,7 +1161,9 @@ class MCPService(Service):
         }
 
     async def _ws_start(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         server_id = str(frame.get("server_id") or "").strip()
         if not server_id:
@@ -1173,7 +1198,9 @@ class MCPService(Service):
         }
 
     async def _ws_stop(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         server_id = str(frame.get("server_id") or "").strip()
         if not server_id:
@@ -1187,7 +1214,9 @@ class MCPService(Service):
         record = replace(entry.record, enabled=False)
         assert self._storage is not None
         await self._storage.put(
-            MCP_SERVERS_COLLECTION, record.id, self._doc_from_record(record),
+            MCP_SERVERS_COLLECTION,
+            record.id,
+            self._doc_from_record(record),
         )
         await self._stop_client(server_id)
         self._register_record(record)
@@ -1198,7 +1227,9 @@ class MCPService(Service):
         }
 
     async def _ws_test(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         """Dry-run connect → list_tools → disconnect.
 
@@ -1237,7 +1268,9 @@ class MCPService(Service):
         }
 
     async def _ws_tools(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         server_id = str(frame.get("server_id") or "").strip()
         if not server_id:
@@ -1262,7 +1295,9 @@ class MCPService(Service):
         }
 
     async def _ws_oauth_start(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         """Kick off an OAuth 2.1 flow for a remote MCP server.
 
@@ -1279,19 +1314,23 @@ class MCPService(Service):
             return _ws_error(frame, "Server not found", code=404)
         if not self._can_edit_record(entry.record, conn.user_ctx):
             return _ws_error(
-                frame, "You cannot authenticate this MCP server", code=403,
+                frame,
+                "You cannot authenticate this MCP server",
+                code=403,
             )
         record = entry.record
         if record.auth.kind != "oauth":
             return _ws_error(
-                frame, "This MCP server is not configured for OAuth",
+                frame,
+                "This MCP server is not configured for OAuth",
             )
         if record.transport not in ("http", "sse"):
             return _ws_error(frame, "OAuth is only supported for remote transports")
         assert self._oauth is not None
 
         state, provider = await self._oauth.begin(
-            record, redirect_uri=self._oauth_redirect_uri(),
+            record,
+            redirect_uri=self._oauth_redirect_uri(),
         )
 
         async def _run() -> None:
@@ -1318,14 +1357,18 @@ class MCPService(Service):
                 raise
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "MCP OAuth connect failed for %s: %s", record.slug, exc,
+                    "MCP OAuth connect failed for %s: %s",
+                    record.slug,
+                    exc,
                 )
                 existing = self._clients.get(record.id)
                 if existing is not None:
                     existing.connected = False
                     existing.last_error = str(exc)
                 await self._persist_connection_state(
-                    record.id, last_error=str(exc), connected=False,
+                    record.id,
+                    last_error=str(exc),
+                    connected=False,
                 )
                 with contextlib.suppress(Exception):
                     await backend.close()
@@ -1368,7 +1411,9 @@ class MCPService(Service):
         }
 
     async def _ws_oauth_cancel(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         server_id = str(frame.get("server_id") or "").strip()
         if not server_id:
@@ -1387,7 +1432,9 @@ class MCPService(Service):
         }
 
     async def _ws_resources_list(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         """List resources advertised by a connected MCP server.
 
@@ -1413,7 +1460,9 @@ class MCPService(Service):
                 specs = await entry.backend.list_resources()
         except NotImplementedError:
             return _ws_error(
-                frame, "This MCP server does not support resources", code=501,
+                frame,
+                "This MCP server does not support resources",
+                code=501,
             )
         except Exception as exc:  # noqa: BLE001
             return _ws_error(frame, f"list_resources failed: {exc}")
@@ -1425,7 +1474,9 @@ class MCPService(Service):
         }
 
     async def _ws_resources_read(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         """Read a single resource by URI.
 
@@ -1453,7 +1504,9 @@ class MCPService(Service):
                 contents = await entry.backend.read_resource(uri)
         except NotImplementedError:
             return _ws_error(
-                frame, "This MCP server does not support resources", code=501,
+                frame,
+                "This MCP server does not support resources",
+                code=501,
             )
         except Exception as exc:  # noqa: BLE001
             return _ws_error(frame, f"read_resource failed: {exc}")
@@ -1466,7 +1519,9 @@ class MCPService(Service):
         }
 
     async def _ws_prompts_list(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         """List prompt templates advertised by a connected MCP server.
 
@@ -1491,7 +1546,9 @@ class MCPService(Service):
                 specs = await entry.backend.list_prompts()
         except NotImplementedError:
             return _ws_error(
-                frame, "This MCP server does not support prompts", code=501,
+                frame,
+                "This MCP server does not support prompts",
+                code=501,
             )
         except Exception as exc:  # noqa: BLE001
             return _ws_error(frame, f"list_prompts failed: {exc}")
@@ -1503,7 +1560,9 @@ class MCPService(Service):
         }
 
     async def _ws_prompts_get(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         """Render a prompt with concrete argument values.
 
@@ -1535,7 +1594,9 @@ class MCPService(Service):
                 result = await entry.backend.get_prompt(name, arguments)
         except NotImplementedError:
             return _ws_error(
-                frame, "This MCP server does not support prompts", code=501,
+                frame,
+                "This MCP server does not support prompts",
+                code=501,
             )
         except Exception as exc:  # noqa: BLE001
             return _ws_error(frame, f"get_prompt failed: {exc}")
@@ -1545,9 +1606,7 @@ class MCPService(Service):
             "server_id": server_id,
             "name": name,
             "description": result.description,
-            "messages": [
-                self._serialize_prompt_message(m) for m in result.messages
-            ],
+            "messages": [self._serialize_prompt_message(m) for m in result.messages],
         }
 
     @staticmethod
@@ -1601,7 +1660,9 @@ class MCPService(Service):
         }
 
     async def _on_sampling_request(
-        self, record: MCPServerRecord, params: Any,
+        self,
+        record: MCPServerRecord,
+        params: Any,
     ) -> Any:
         """Handle a ``sampling/createMessage`` request from a remote
         MCP server.
@@ -1623,7 +1684,9 @@ class MCPService(Service):
 
         def _error(code: int, message: str) -> mcp_types.ErrorData:
             logger.info(
-                "MCP sampling refused for %s: %s", record.slug, message,
+                "MCP sampling refused for %s: %s",
+                record.slug,
+                message,
             )
             return mcp_types.ErrorData(code=code, message=message)
 
@@ -1720,7 +1783,9 @@ class MCPService(Service):
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "MCP sampling call failed for %s: %s", record.slug, exc,
+                "MCP sampling call failed for %s: %s",
+                record.slug,
+                exc,
             )
             return _error(-32000, f"Sampling call failed: {exc}")
 
@@ -1736,9 +1801,7 @@ class MCPService(Service):
 
         reply_text = getattr(response.message, "content", "") or ""
         stop_reason_raw = str(getattr(response, "stop_reason", "end_turn"))
-        stop_reason = (
-            "maxTokens" if "max" in stop_reason_raw else "endTurn"
-        )
+        stop_reason = "maxTokens" if "max" in stop_reason_raw else "endTurn"
 
         return mcp_types.CreateMessageResult(
             role="assistant",
@@ -1750,7 +1813,9 @@ class MCPService(Service):
     # ── Browser bridge (session-ephemeral MCP servers) ────────────────
 
     async def _ws_bridge_announce(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         """Register a set of browser-hosted MCP servers for this session.
 
@@ -1786,9 +1851,7 @@ class MCPService(Service):
         results: list[dict[str, Any]] = []
         for item in servers_raw:
             if not isinstance(item, dict):
-                results.append(
-                    {"ok": False, "error": "server entry must be an object"}
-                )
+                results.append({"ok": False, "error": "server entry must be an object"})
                 continue
             slug = str(item.get("slug") or "").strip().lower()
             name = str(item.get("name") or slug).strip()
@@ -1796,14 +1859,10 @@ class MCPService(Service):
                 results.append({"ok": False, "error": "slug is required"})
                 continue
             if not SLUG_RE.match(slug):
-                results.append(
-                    {"slug": slug, "ok": False, "error": f"invalid slug {slug!r}"}
-                )
+                results.append({"slug": slug, "ok": False, "error": f"invalid slug {slug!r}"})
                 continue
             if TOOL_NAME_SEP in slug:
-                results.append(
-                    {"slug": slug, "ok": False, "error": "slug must not contain '__'"}
-                )
+                results.append({"slug": slug, "ok": False, "error": "slug must not contain '__'"})
                 continue
             # Collision with a persisted server the user can already see.
             if self._user_sees_persisted_slug(user_ctx, slug):
@@ -1853,7 +1912,9 @@ class MCPService(Service):
                 exc_label = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
                 logger.info(
                     "Browser MCP %s announce failed for %s: %s",
-                    slug, user_id, exc_label,
+                    slug,
+                    user_id,
+                    exc_label,
                 )
                 results.append({"slug": slug, "ok": False, "error": exc_label})
                 continue
@@ -1874,7 +1935,9 @@ class MCPService(Service):
         }
 
     def _user_sees_persisted_slug(
-        self, user_ctx: UserContext, slug: str,
+        self,
+        user_ctx: UserContext,
+        slug: str,
     ) -> bool:
         """Would the user see a persisted server with this slug?"""
         for entry in self._clients.values():
@@ -1885,7 +1948,9 @@ class MCPService(Service):
         return False
 
     def _make_session_close_callback(
-        self, user_id: str, conn: Any,
+        self,
+        user_id: str,
+        conn: Any,
     ) -> Callable[[], None]:
         """Build a close callback bound to a specific user+conn pair.
 
@@ -1895,10 +1960,12 @@ class MCPService(Service):
         the owner check rejects the teardown so the active session
         survives.
         """
+
         def _cb() -> None:
             if self._session_conn.get(user_id) is not conn:
                 return
             self._teardown_session(user_id)
+
         return _cb
 
     def _teardown_session(self, user_id: str) -> None:
@@ -1922,7 +1989,10 @@ class MCPService(Service):
                 asyncio.run(coro)
 
     async def complete_oauth_callback(
-        self, state: str, code: str, received_state: str | None,
+        self,
+        state: str,
+        code: str,
+        received_state: str | None,
     ) -> bool:
         """Called by the FastAPI callback route when a browser redirect
         hits ``/api/mcp/oauth/callback``. Resolves the pending flow
@@ -1938,15 +2008,15 @@ class MCPService(Service):
         return user_ctx.user_id == record.owner_id or self._is_admin(user_ctx)
 
     def _serialize_record(
-        self, record: MCPServerRecord, viewer: UserContext,
+        self,
+        record: MCPServerRecord,
+        viewer: UserContext,
     ) -> dict[str, Any]:
         """JSON-safe view of a record. Env values are masked unless the
         viewer is the owner or an admin — every other viewer gets the keys
         only, with ``"****"`` for values, so they can see which variables
         exist without leaking secrets."""
-        owner_or_admin = (
-            viewer.user_id == record.owner_id or self._is_admin(viewer)
-        )
+        owner_or_admin = viewer.user_id == record.owner_id or self._is_admin(viewer)
         env_out: dict[str, str] = {}
         for k, v in record.env.items():
             env_out[k] = v if owner_or_admin else "****"
@@ -1955,7 +2025,9 @@ class MCPService(Service):
             "oauth_scopes": list(record.auth.oauth_scopes),
             "oauth_client_name": record.auth.oauth_client_name,
             "bearer_token": (
-                record.auth.bearer_token if owner_or_admin else ("****" if record.auth.bearer_token else "")
+                record.auth.bearer_token
+                if owner_or_admin
+                else ("****" if record.auth.bearer_token else "")
             ),
         }
         entry = self._clients.get(record.id)
@@ -1983,12 +2055,8 @@ class MCPService(Service):
             # flag itself is visible to everyone who can see the
             # server — they deserve to know the server can consume
             # AI budget on their behalf.
-            "sampling_profile": (
-                record.sampling_profile if owner_or_admin else ""
-            ),
-            "sampling_budget_tokens": (
-                record.sampling_budget_tokens if owner_or_admin else 0
-            ),
+            "sampling_profile": (record.sampling_profile if owner_or_admin else ""),
+            "sampling_budget_tokens": (record.sampling_budget_tokens if owner_or_admin else 0),
             "sampling_budget_window_seconds": (
                 record.sampling_budget_window_seconds if owner_or_admin else 0
             ),
@@ -2000,8 +2068,7 @@ class MCPService(Service):
             "created_at": record.created_at.isoformat() if record.created_at else None,
             "updated_at": record.updated_at.isoformat() if record.updated_at else None,
             "last_connected_at": (
-                record.last_connected_at.isoformat()
-                if record.last_connected_at else None
+                record.last_connected_at.isoformat() if record.last_connected_at else None
             ),
             "last_error": record.last_error,
             "connected": bool(entry and entry.connected),
@@ -2009,8 +2076,7 @@ class MCPService(Service):
             "needs_oauth": record.id in self._needs_oauth,
             "retry_count": entry.retry_count if entry else 0,
             "next_retry_at": (
-                entry.next_retry_at.isoformat()
-                if entry and entry.next_retry_at else None
+                entry.next_retry_at.isoformat() if entry and entry.next_retry_at else None
             ),
         }
 
@@ -2033,8 +2099,12 @@ class MCPService(Service):
         name = str(payload.get("name") or "").strip()
         slug = str(payload.get("slug") or _slugify(name)).strip().lower()
         env = env_override if env_override is not None else dict(payload.get("env") or {})
-        auth = auth_override if auth_override is not None else _auth_from_payload(
-            payload.get("auth") or {},
+        auth = (
+            auth_override
+            if auth_override is not None
+            else _auth_from_payload(
+                payload.get("auth") or {},
+            )
         )
         return MCPServerRecord(
             id=str(payload.get("id") or fallback_id or ""),
@@ -2084,13 +2154,9 @@ class MCPService(Service):
                 raise ValueError("Stdio MCP servers require a command")
         elif record.transport in ("http", "sse"):
             if not record.url:
-                raise ValueError(
-                    f"{record.transport.upper()} MCP servers require a URL"
-                )
+                raise ValueError(f"{record.transport.upper()} MCP servers require a URL")
             if not (record.url.startswith("http://") or record.url.startswith("https://")):
-                raise ValueError(
-                    "MCP server URL must start with http:// or https://"
-                )
+                raise ValueError("MCP server URL must start with http:// or https://")
         elif record.transport == "browser":
             # Browser-hosted MCP servers are session-ephemeral and never
             # reach the persisted-create path. Rejecting them here keeps
@@ -2112,13 +2178,9 @@ class MCPService(Service):
         if record.scope not in ("private", "shared", "public"):
             raise ValueError(f"Invalid scope: {record.scope}")
         if record.scope == "shared" and not record.allowed_roles and not record.allowed_users:
-            raise ValueError(
-                "Shared MCP servers must grant access to at least one role or user"
-            )
+            raise ValueError("Shared MCP servers must grant access to at least one role or user")
         if record.scope == "private" and (record.allowed_roles or record.allowed_users):
-            raise ValueError(
-                "Private MCP servers cannot have allowed_roles or allowed_users"
-            )
+            raise ValueError("Private MCP servers cannot have allowed_roles or allowed_users")
         if record.allow_sampling:
             if record.transport == "stdio":
                 raise ValueError(
@@ -2130,8 +2192,7 @@ class MCPService(Service):
                 )
             if record.sampling_budget_window_seconds <= 0:
                 raise ValueError(
-                    "sampling_budget_window_seconds must be positive when "
-                    "sampling is enabled",
+                    "sampling_budget_window_seconds must be positive when sampling is enabled",
                 )
             if not record.sampling_profile.strip():
                 raise ValueError(
@@ -2268,7 +2329,10 @@ def _render_block(block: MCPContentBlock) -> str:
 
 
 def _ws_error(
-    frame: dict[str, Any], error: str, *, code: int = 400,
+    frame: dict[str, Any],
+    error: str,
+    *,
+    code: int = 400,
 ) -> dict[str, Any]:
     return {
         "type": "gilbert.error",
@@ -2307,7 +2371,8 @@ def _auth_from_payload(raw: dict[str, Any]) -> MCPAuthConfig:
 
 
 def _merge_auth(
-    existing: MCPAuthConfig, incoming: dict[str, Any],
+    existing: MCPAuthConfig,
+    incoming: dict[str, Any],
 ) -> MCPAuthConfig:
     """Merge an incoming auth payload over the existing auth.
 
@@ -2332,7 +2397,8 @@ def _merge_auth(
 
 
 def _merge_env(
-    existing: dict[str, str], incoming: dict[str, Any],
+    existing: dict[str, str],
+    incoming: dict[str, Any],
 ) -> dict[str, str]:
     """Merge an incoming env payload over the existing env.
 

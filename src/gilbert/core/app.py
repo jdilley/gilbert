@@ -116,7 +116,11 @@ class Gilbert:
             directories = []
 
         # Scan plugin directories for manifests
-        cache_dir = plugins_raw.get("cache_dir", ".gilbert/plugin-cache") if isinstance(plugins_raw, dict) else ".gilbert/plugin-cache"
+        cache_dir = (
+            plugins_raw.get("cache_dir", ".gilbert/plugin-cache")
+            if isinstance(plugins_raw, dict)
+            else ".gilbert/plugin-cache"
+        )
         loader = PluginLoader(cache_dir=cache_dir)
         manifests = loader.scan_directories(directories)
         plugin_defaults = loader.collect_default_configs(manifests)
@@ -156,7 +160,6 @@ class Gilbert:
         await config_svc.seed_storage(storage)
         await config_svc.load_from_storage(storage)
         self.config = config_svc.config
-
 
         # 4b. Access control (early — other services declare required_role)
         from gilbert.core.services.access_control import AccessControlService
@@ -310,7 +313,8 @@ class Gilbert:
         # venv), clear the flag so the UI stops nagging about restart.
         plugin_mgr_svc = self.service_manager.list_services().get("plugin_manager")
         if plugin_mgr_svc is not None and hasattr(
-            plugin_mgr_svc, "reconcile_loaded_plugins",
+            plugin_mgr_svc,
+            "reconcile_loaded_plugins",
         ):
             try:
                 await plugin_mgr_svc.reconcile_loaded_plugins(self)
@@ -353,7 +357,8 @@ class Gilbert:
             from gilbert.interfaces.storage import NamespacedStorageBackend
 
             plugin_storage = NamespacedStorageBackend(
-                raw_backend, f"gilbert.plugin.{name}",
+                raw_backend,
+                f"gilbert.plugin.{name}",
             )
 
         return PluginContext(
@@ -437,11 +442,13 @@ class Gilbert:
                 context = self.make_plugin_context(manifest.name)
                 await plugin.setup(context)
                 after = set(self.service_manager.list_services().keys())
-                self._plugins.append(LoadedPlugin(
-                    plugin=plugin,
-                    install_path=manifest.path,
-                    registered_services=sorted(after - before),
-                ))
+                self._plugins.append(
+                    LoadedPlugin(
+                        plugin=plugin,
+                        install_path=manifest.path,
+                        registered_services=sorted(after - before),
+                    )
+                )
             except Exception:
                 logger.exception("Failed to load plugin: %s", manifest.name)
 
@@ -456,11 +463,13 @@ class Gilbert:
                 context = self.make_plugin_context(meta.name)
                 await plugin.setup(context)
                 after = set(self.service_manager.list_services().keys())
-                self._plugins.append(LoadedPlugin(
-                    plugin=plugin,
-                    install_path=Path(source.source),
-                    registered_services=sorted(after - before),
-                ))
+                self._plugins.append(
+                    LoadedPlugin(
+                        plugin=plugin,
+                        install_path=Path(source.source),
+                        registered_services=sorted(after - before),
+                    )
+                )
             except Exception:
                 logger.exception("Failed to load plugin: %s", source.source)
 

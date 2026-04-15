@@ -175,13 +175,16 @@ class PresenceService(Service):
 
         params = [
             ConfigParam(
-                key="backend", type=ToolParameterType.STRING,
+                key="backend",
+                type=ToolParameterType.STRING,
                 description="Presence backend type.",
-                default="unifi", restart_required=True,
+                default="unifi",
+                restart_required=True,
                 choices=tuple(PresenceBackend.registered_backends().keys()),
             ),
             ConfigParam(
-                key="poll_interval_seconds", type=ToolParameterType.NUMBER,
+                key="poll_interval_seconds",
+                type=ToolParameterType.NUMBER,
                 description="How often to poll for presence changes (seconds).",
                 default=_DEFAULT_POLL_INTERVAL,
             ),
@@ -190,13 +193,20 @@ class PresenceService(Service):
         backend_cls = backends.get(self._backend_name)
         if backend_cls is not None:
             for bp in backend_cls.backend_config_params():
-                params.append(ConfigParam(
-                    key=bp.key, type=bp.type,
-                    description=bp.description, default=bp.default,
-                    restart_required=bp.restart_required, sensitive=bp.sensitive,
-                    choices=bp.choices, choices_from=bp.choices_from,
-                    multiline=bp.multiline, backend_param=True,
-                ))
+                params.append(
+                    ConfigParam(
+                        key=bp.key,
+                        type=bp.type,
+                        description=bp.description,
+                        default=bp.default,
+                        restart_required=bp.restart_required,
+                        sensitive=bp.sensitive,
+                        choices=bp.choices,
+                        choices_from=bp.choices_from,
+                        multiline=bp.multiline,
+                        backend_param=True,
+                    )
+                )
         return params
 
     async def on_config_changed(self, config: dict[str, Any]) -> None:
@@ -211,7 +221,9 @@ class PresenceService(Service):
         )
 
     async def invoke_config_action(
-        self, key: str, payload: dict[str, Any],
+        self,
+        key: str,
+        payload: dict[str, Any],
     ) -> ConfigActionResult:
         return await invoke_backend_action(self._backend, key, payload)
 
@@ -273,9 +285,13 @@ class PresenceService(Service):
             "since": presence.since,
             "source": presence.source,
         }
-        await self._event_bus.publish(Event(
-            event_type="presence.arrived", data=data, source="presence",
-        ))
+        await self._event_bus.publish(
+            Event(
+                event_type="presence.arrived",
+                data=data,
+                source="presence",
+            )
+        )
 
     async def _emit_departed(self, user_id: str) -> None:
         """Publish presence.departed event."""
@@ -283,9 +299,13 @@ class PresenceService(Service):
         if self._event_bus is None:
             return
         data = {"user_id": user_id, "state": "away", "source": "presence"}
-        await self._event_bus.publish(Event(
-            event_type="presence.departed", data=data, source="presence",
-        ))
+        await self._event_bus.publish(
+            Event(
+                event_type="presence.departed",
+                data=data,
+                source="presence",
+            )
+        )
 
     # --- Entity persistence ---
 
@@ -298,9 +318,12 @@ class PresenceService(Service):
         try:
             from gilbert.interfaces.storage import Query
 
-            records = await self._storage.query(Query(
-                collection=self._COLLECTION, limit=500,
-            ))
+            records = await self._storage.query(
+                Query(
+                    collection=self._COLLECTION,
+                    limit=500,
+                )
+            )
             return {r["user_id"] for r in records if "user_id" in r}
         except Exception:
             logger.warning("Failed to load stored presence", exc_info=True)
@@ -326,13 +349,17 @@ class PresenceService(Service):
 
             # Upsert records for users who are here
             for p in currently_here.values():
-                await self._storage.put(self._COLLECTION, p.user_id, {
-                    "user_id": p.user_id,
-                    "state": p.state.value,
-                    "since": p.since or "",
-                    "source": p.source or "",
-                    "updated_at": now,
-                })
+                await self._storage.put(
+                    self._COLLECTION,
+                    p.user_id,
+                    {
+                        "user_id": p.user_id,
+                        "state": p.state.value,
+                        "since": p.since or "",
+                        "source": p.source or "",
+                        "updated_at": now,
+                    },
+                )
         except Exception:
             logger.warning("Failed to persist presence to entity store", exc_info=True)
 
@@ -444,7 +471,8 @@ class PresenceService(Service):
         return json.dumps(resolved)
 
     async def _resolve_presence_list(
-        self, presences: list[UserPresence],
+        self,
+        presences: list[UserPresence],
     ) -> list[dict[str, Any]]:
         """Resolve a list of presences, filtering to known users only."""
         results = []
@@ -455,7 +483,8 @@ class PresenceService(Service):
         return results
 
     async def _resolve_presence(
-        self, p: UserPresence,
+        self,
+        p: UserPresence,
     ) -> dict[str, Any] | None:
         """Resolve a UserPresence to a dict with user info.
 

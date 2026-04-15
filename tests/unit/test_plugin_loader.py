@@ -66,15 +66,18 @@ class TestManifestParsing:
 
     def test_parse_full_manifest(self, tmp_path: Path) -> None:
         plugin_dir = tmp_path / "my-plugin"
-        _write_manifest(plugin_dir, {
-            "name": "my-plugin",
-            "version": "2.0.0",
-            "description": "A cool plugin",
-            "provides": ["cool_capability"],
-            "requires": ["entity_storage"],
-            "depends_on": ["other-plugin"],
-            "config": {"poll_interval": 30, "enabled": True},
-        })
+        _write_manifest(
+            plugin_dir,
+            {
+                "name": "my-plugin",
+                "version": "2.0.0",
+                "description": "A cool plugin",
+                "provides": ["cool_capability"],
+                "requires": ["entity_storage"],
+                "depends_on": ["other-plugin"],
+                "config": {"poll_interval": 30, "enabled": True},
+            },
+        )
 
         manifest = PluginLoader._parse_manifest(plugin_dir, plugin_dir / "plugin.yaml")
 
@@ -117,13 +120,16 @@ class TestManifestParsing:
 
     def test_to_plugin_meta(self, tmp_path: Path) -> None:
         plugin_dir = tmp_path / "meta-test"
-        _write_manifest(plugin_dir, {
-            "name": "meta-test",
-            "version": "1.0.0",
-            "provides": ["cap1"],
-            "requires": ["cap2"],
-            "depends_on": ["dep1"],
-        })
+        _write_manifest(
+            plugin_dir,
+            {
+                "name": "meta-test",
+                "version": "1.0.0",
+                "provides": ["cap1"],
+                "requires": ["cap2"],
+                "depends_on": ["dep1"],
+            },
+        )
 
         manifest = PluginLoader._parse_manifest(plugin_dir, plugin_dir / "plugin.yaml")
         meta = manifest.to_plugin_meta()
@@ -237,7 +243,9 @@ class TestTopologicalSort:
             loader.topological_sort([m1, m2])
 
     def test_missing_dependency_warns_but_continues(self, tmp_path: Path) -> None:
-        m1 = PluginManifest(tmp_path / "a", {"name": "a", "version": "1.0.0", "depends_on": ["nonexistent"]})
+        m1 = PluginManifest(
+            tmp_path / "a", {"name": "a", "version": "1.0.0", "depends_on": ["nonexistent"]}
+        )
 
         loader = PluginLoader()
         sorted_m = loader.topological_sort([m1])
@@ -254,7 +262,9 @@ class TestTopologicalSort:
         m_a = PluginManifest(tmp_path / "a", {"name": "a", "version": "1.0.0"})
         m_b = PluginManifest(tmp_path / "b", {"name": "b", "version": "1.0.0", "depends_on": ["a"]})
         m_c = PluginManifest(tmp_path / "c", {"name": "c", "version": "1.0.0", "depends_on": ["a"]})
-        m_d = PluginManifest(tmp_path / "d", {"name": "d", "version": "1.0.0", "depends_on": ["b", "c"]})
+        m_d = PluginManifest(
+            tmp_path / "d", {"name": "d", "version": "1.0.0", "depends_on": ["b", "c"]}
+        )
 
         loader = PluginLoader()
         sorted_m = loader.topological_sort([m_d, m_c, m_b, m_a])
@@ -314,7 +324,7 @@ class TestPluginLoading:
     async def test_validation_rejects_empty_name(self, tmp_path: Path) -> None:
         plugin_dir = tmp_path / "bad-meta"
         plugin_dir.mkdir()
-        code = '''
+        code = """
 from gilbert.interfaces.plugin import Plugin, PluginMeta, PluginContext
 
 class _P(Plugin):
@@ -323,7 +333,7 @@ class _P(Plugin):
     async def teardown(self): pass
 
 def create_plugin(): return _P()
-'''
+"""
         (plugin_dir / "plugin.py").write_text(code)
 
         loader = PluginLoader()

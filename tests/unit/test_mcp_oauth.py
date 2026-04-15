@@ -79,7 +79,9 @@ class TestEntityStorageTokenStorage:
         storage = FakeStorage()
         # Write a deliberately-malformed row directly
         await storage.put(
-            MCP_TOKENS_COLLECTION, "srv1", {"tokens": {"access_token": 123}},
+            MCP_TOKENS_COLLECTION,
+            "srv1",
+            {"tokens": {"access_token": 123}},
         )
         store = EntityStorageTokenStorage(storage, "srv1")
         assert await store.get_tokens() is None
@@ -187,7 +189,8 @@ class TestMCPServiceOAuthBranch:
 
     @pytest.mark.asyncio
     async def test_needs_oauth_surfaces_in_serialization(
-        self, register_fake_backend: type[FakeMCPBackend],  # noqa: F811
+        self,
+        register_fake_backend: type[FakeMCPBackend],  # noqa: F811
         alice,  # noqa: F811
     ) -> None:
         service = MCPService()
@@ -206,7 +209,8 @@ class TestMCPServiceOAuthBranch:
 
     @pytest.mark.asyncio
     async def test_delete_server_clears_tokens_and_pending(
-        self, register_fake_backend: type[FakeMCPBackend],  # noqa: F811
+        self,
+        register_fake_backend: type[FakeMCPBackend],  # noqa: F811
     ) -> None:
         service = MCPService()
         service._enabled = True

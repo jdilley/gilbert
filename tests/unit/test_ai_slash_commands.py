@@ -167,13 +167,19 @@ _NO_SLASH_TOOL = ToolDefinition(
 def test_slash_commands_for_user_filters_admin_only_from_non_admin() -> None:
     acl = _StubACL()
     svc = _make_service(acl)
-    provider = _CoreToolService([
-        _ECHO_TOOL, _ADMIN_ONLY_TOOL, _EVERYONE_TOOL,
-    ])
+    provider = _CoreToolService(
+        [
+            _ECHO_TOOL,
+            _ADMIN_ONLY_TOOL,
+            _EVERYONE_TOOL,
+        ]
+    )
     svc._resolver = _resolver_with([provider])
 
     user_ctx = UserContext(
-        user_id="u1", email="u1@example.com", display_name="User",
+        user_id="u1",
+        email="u1@example.com",
+        display_name="User",
         roles=frozenset({"user"}),
     )
     cmds = svc._slash_commands_for_user(user_ctx)
@@ -186,13 +192,19 @@ def test_slash_commands_for_user_filters_admin_only_from_non_admin() -> None:
 def test_slash_commands_for_user_includes_everything_for_admin() -> None:
     acl = _StubACL()
     svc = _make_service(acl)
-    provider = _CoreToolService([
-        _ECHO_TOOL, _ADMIN_ONLY_TOOL, _EVERYONE_TOOL,
-    ])
+    provider = _CoreToolService(
+        [
+            _ECHO_TOOL,
+            _ADMIN_ONLY_TOOL,
+            _EVERYONE_TOOL,
+        ]
+    )
     svc._resolver = _resolver_with([provider])
 
     admin_ctx = UserContext(
-        user_id="a1", email="a1@example.com", display_name="Admin",
+        user_id="a1",
+        email="a1@example.com",
+        display_name="Admin",
         roles=frozenset({"admin"}),
     )
     cmds = svc._slash_commands_for_user(admin_ctx)
@@ -210,7 +222,9 @@ def test_tools_without_slash_command_are_skipped() -> None:
     svc._resolver = _resolver_with([provider])
 
     user_ctx = UserContext(
-        user_id="u1", email="u1@example.com", display_name="User",
+        user_id="u1",
+        email="u1@example.com",
+        display_name="User",
         roles=frozenset({"user"}),
     )
     cmds = svc._slash_commands_for_user(user_ctx)
@@ -225,13 +239,19 @@ def test_everyone_user_only_sees_everyone_commands() -> None:
     should only see tools flagged ``required_role="everyone"``."""
     acl = _StubACL()
     svc = _make_service(acl)
-    provider = _CoreToolService([
-        _ECHO_TOOL, _ADMIN_ONLY_TOOL, _EVERYONE_TOOL,
-    ])
+    provider = _CoreToolService(
+        [
+            _ECHO_TOOL,
+            _ADMIN_ONLY_TOOL,
+            _EVERYONE_TOOL,
+        ]
+    )
     svc._resolver = _resolver_with([provider])
 
     guest_ctx = UserContext(
-        user_id="guest", email="", display_name="Guest",
+        user_id="guest",
+        email="",
+        display_name="Guest",
         roles=frozenset({"everyone"}),
     )
     cmds = svc._slash_commands_for_user(guest_ctx)
@@ -252,7 +272,9 @@ def test_core_services_get_no_namespace_prefix() -> None:
     svc._resolver = _resolver_with([provider])
 
     user_ctx = UserContext(
-        user_id="u1", email="u1@example.com", display_name="User",
+        user_id="u1",
+        email="u1@example.com",
+        display_name="User",
         roles=frozenset({"user"}),
     )
     cmds = svc._slash_commands_for_user(user_ctx)
@@ -268,7 +290,9 @@ def test_explicit_slash_namespace_overrides_auto_detect() -> None:
     svc._resolver = _resolver_with([provider])
 
     user_ctx = UserContext(
-        user_id="u1", email="u1@example.com", display_name="User",
+        user_id="u1",
+        email="u1@example.com",
+        display_name="User",
         roles=frozenset({"user"}),
     )
     cmds = svc._slash_commands_for_user(user_ctx)
@@ -289,14 +313,18 @@ def test_plugin_module_prefix_is_auto_detected(monkeypatch: pytest.MonkeyPatch) 
         pass
 
     monkeypatch.setattr(
-        _FakePluginService, "__module__", "gilbert_plugin_my_cool_plugin",
+        _FakePluginService,
+        "__module__",
+        "gilbert_plugin_my_cool_plugin",
     )
 
     provider = _FakePluginService([_ECHO_TOOL])
     svc._resolver = _resolver_with([provider])
 
     user_ctx = UserContext(
-        user_id="u1", email="u1@example.com", display_name="User",
+        user_id="u1",
+        email="u1@example.com",
+        display_name="User",
         roles=frozenset({"user"}),
     )
     cmds = svc._slash_commands_for_user(user_ctx)
@@ -334,13 +362,17 @@ def test_namespace_isolation_prevents_slash_collisions() -> None:
     class _Plugin2(_CoreToolService):
         slash_namespace = "plugin2"
 
-    svc._resolver = _resolver_with([
-        _Plugin1([tool_a]),
-        _Plugin2([tool_b]),
-    ])
+    svc._resolver = _resolver_with(
+        [
+            _Plugin1([tool_a]),
+            _Plugin2([tool_b]),
+        ]
+    )
 
     user_ctx = UserContext(
-        user_id="u1", email="u1@example.com", display_name="User",
+        user_id="u1",
+        email="u1@example.com",
+        display_name="User",
         roles=frozenset({"user"}),
     )
     cmds = svc._slash_commands_for_user(user_ctx)
@@ -395,7 +427,9 @@ def test_grouped_commands_are_keyed_by_full_form() -> None:
     svc._resolver = _resolver_with([provider])
 
     user_ctx = UserContext(
-        user_id="u1", email="u1@example.com", display_name="User",
+        user_id="u1",
+        email="u1@example.com",
+        display_name="User",
         roles=frozenset({"user"}),
     )
     cmds = svc._slash_commands_for_user(user_ctx)
@@ -416,18 +450,26 @@ def test_match_slash_command_prefers_grouped_form() -> None:
         "radio start": (object(), object()),  # type: ignore[dict-item]
     }
     # Dummy lookups — we only care about the key that gets returned
-    assert AIService._match_slash_command(
-        "/radio start chill", registry,
-    ) == "radio start"
+    assert (
+        AIService._match_slash_command(
+            "/radio start chill",
+            registry,
+        )
+        == "radio start"
+    )
 
 
 def test_match_slash_command_falls_back_to_bare_form() -> None:
     """When the second word isn't a known subcommand, the first-word
     match still wins."""
     registry = {"radio": (object(), object())}  # type: ignore[dict-item]
-    assert AIService._match_slash_command(
-        "/radio chill beats", registry,
-    ) == "radio"
+    assert (
+        AIService._match_slash_command(
+            "/radio chill beats",
+            registry,
+        )
+        == "radio"
+    )
 
 
 def test_match_slash_command_returns_none_for_unknown() -> None:
@@ -442,9 +484,13 @@ def test_match_slash_command_handles_namespaced_groups() -> None:
     registry = {
         "currev.sync status": (object(), object()),  # type: ignore[dict-item]
     }
-    assert AIService._match_slash_command(
-        "/currev.sync status", registry,
-    ) == "currev.sync status"
+    assert (
+        AIService._match_slash_command(
+            "/currev.sync status",
+            registry,
+        )
+        == "currev.sync status"
+    )
 
 
 def test_grouped_dispatch_with_namespace() -> None:
@@ -459,7 +505,9 @@ def test_grouped_dispatch_with_namespace() -> None:
     svc._resolver = _resolver_with([provider])
 
     user_ctx = UserContext(
-        user_id="u1", email="u1@example.com", display_name="User",
+        user_id="u1",
+        email="u1@example.com",
+        display_name="User",
         roles=frozenset({"user"}),
     )
     cmds = svc._slash_commands_for_user(user_ctx)
@@ -475,13 +523,19 @@ async def test_ws_slash_commands_list_returns_filtered_commands() -> None:
     with full namespaced command names and parameter metadata."""
     acl = _StubACL()
     svc = _make_service(acl)
-    provider = _CoreToolService([
-        _ECHO_TOOL, _ADMIN_ONLY_TOOL, _EVERYONE_TOOL,
-    ])
+    provider = _CoreToolService(
+        [
+            _ECHO_TOOL,
+            _ADMIN_ONLY_TOOL,
+            _EVERYONE_TOOL,
+        ]
+    )
     svc._resolver = _resolver_with([provider])
 
     user_ctx = UserContext(
-        user_id="u1", email="u1@example.com", display_name="User",
+        user_id="u1",
+        email="u1@example.com",
+        display_name="User",
         roles=frozenset({"user"}),
     )
     conn = _FakeWsConn(user_ctx)

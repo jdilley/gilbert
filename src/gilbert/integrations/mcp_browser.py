@@ -125,9 +125,7 @@ class BrowserMCPBackend(MCPBackend):
                     type=cast(Any, kind_raw),
                     text=str(item.get("text") or ""),
                     data=str(item.get("data") or ""),
-                    mime_type=str(
-                        item.get("mimeType") or item.get("mime_type") or ""
-                    ),
+                    mime_type=str(item.get("mimeType") or item.get("mime_type") or ""),
                     uri=str(item.get("uri") or ""),
                 )
             )

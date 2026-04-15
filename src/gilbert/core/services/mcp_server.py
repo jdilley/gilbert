@@ -109,8 +109,7 @@ class MCPServerService(Service):
             optional=frozenset({"access_control", "users"}),
             toggleable=True,
             toggle_description=(
-                "MCP server — let external MCP clients connect to "
-                "Gilbert and use its tools."
+                "MCP server — let external MCP clients connect to Gilbert and use its tools."
             ),
         )
 
@@ -127,6 +126,7 @@ class MCPServerService(Service):
         config_svc = resolver.get_capability("configuration")
         section: dict[str, Any] = {}
         from gilbert.interfaces.configuration import ConfigurationReader
+
         if isinstance(config_svc, ConfigurationReader):
             section = config_svc.get_section_safe(self.config_namespace)
         self._enabled = bool(section.get("enabled", False))
@@ -180,6 +180,7 @@ class MCPServerService(Service):
     def _get_hasher(self) -> Any:
         if self._hasher is None:
             from argon2 import PasswordHasher
+
             self._hasher = PasswordHasher()
         return self._hasher
 
@@ -204,7 +205,10 @@ class MCPServerService(Service):
     # ── Authentication lookup (called by HTTP middleware) ────────────
 
     async def authenticate(
-        self, token: str, *, client_ip: str = "",
+        self,
+        token: str,
+        *,
+        client_ip: str = "",
     ) -> tuple[MCPServerClient, UserContext] | None:
         """Resolve a bearer token to the owning ``MCPServerClient`` and
         ``UserContext``. Returns ``None`` if no active client matches.
@@ -238,7 +242,8 @@ class MCPServerService(Service):
                 if user_ctx is None:
                     logger.warning(
                         "MCP client %s references unknown owner %s",
-                        client.id, client.owner_user_id,
+                        client.id,
+                        client.owner_user_id,
                     )
                     return None
                 # Update last_used_at / last_ip without blocking the
@@ -247,13 +252,15 @@ class MCPServerService(Service):
                     await self._touch(client, client_ip=client_ip)
                 except Exception:  # pragma: no cover
                     logger.exception(
-                        "Failed to update last_used_at for %s", client.id,
+                        "Failed to update last_used_at for %s",
+                        client.id,
                     )
                 return client, user_ctx
         return None
 
     async def _resolve_owner(
-        self, client: MCPServerClient,
+        self,
+        client: MCPServerClient,
     ) -> UserContext | None:
         """Look up the owner user and build a ``UserContext``.
 
@@ -281,7 +288,10 @@ class MCPServerService(Service):
         )
 
     async def _touch(
-        self, client: MCPServerClient, *, client_ip: str,
+        self,
+        client: MCPServerClient,
+        *,
+        client_ip: str,
     ) -> None:
         assert self._storage is not None
         doc = await self._storage.get(MCP_CLIENTS_COLLECTION, client.id)
@@ -342,7 +352,9 @@ class MCPServerService(Service):
             updated_at=now,
         )
         await self._storage.put(
-            MCP_CLIENTS_COLLECTION, client.id, self._doc_from_client(client),
+            MCP_CLIENTS_COLLECTION,
+            client.id,
+            self._doc_from_client(client),
         )
         return client, plaintext
 
@@ -364,12 +376,8 @@ class MCPServerService(Service):
         updated = replace(
             existing,
             name=name.strip() if name is not None else existing.name,
-            description=(
-                description.strip() if description is not None else existing.description
-            ),
-            ai_profile=(
-                ai_profile.strip() if ai_profile is not None else existing.ai_profile
-            ),
+            description=(description.strip() if description is not None else existing.description),
+            ai_profile=(ai_profile.strip() if ai_profile is not None else existing.ai_profile),
             active=active if active is not None else existing.active,
             updated_at=datetime.now(UTC),
         )
@@ -378,7 +386,9 @@ class MCPServerService(Service):
         if not updated.ai_profile:
             raise ValueError("ai_profile is required")
         await self._storage.put(
-            MCP_CLIENTS_COLLECTION, client_id, self._doc_from_client(updated),
+            MCP_CLIENTS_COLLECTION,
+            client_id,
+            self._doc_from_client(updated),
         )
         return updated
 
@@ -399,7 +409,9 @@ class MCPServerService(Service):
             updated_at=datetime.now(UTC),
         )
         await self._storage.put(
-            MCP_CLIENTS_COLLECTION, client_id, self._doc_from_client(updated),
+            MCP_CLIENTS_COLLECTION,
+            client_id,
+            self._doc_from_client(updated),
         )
         return updated, plaintext
 
@@ -425,7 +437,9 @@ class MCPServerService(Service):
         }
 
     async def _ws_list(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         if not self._is_admin(conn.user_ctx):
             return _ws_error(frame, "Admin access required", code=403)
@@ -437,7 +451,9 @@ class MCPServerService(Service):
         }
 
     async def _ws_get(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         if not self._is_admin(conn.user_ctx):
             return _ws_error(frame, "Admin access required", code=403)
@@ -454,7 +470,9 @@ class MCPServerService(Service):
         }
 
     async def _ws_create(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         if not self._is_admin(conn.user_ctx):
             return _ws_error(frame, "Admin access required", code=403)
@@ -478,7 +496,9 @@ class MCPServerService(Service):
         }
 
     async def _ws_update(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         if not self._is_admin(conn.user_ctx):
             return _ws_error(frame, "Admin access required", code=403)
@@ -507,7 +527,9 @@ class MCPServerService(Service):
         }
 
     async def _ws_delete(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         if not self._is_admin(conn.user_ctx):
             return _ws_error(frame, "Admin access required", code=403)
@@ -522,7 +544,9 @@ class MCPServerService(Service):
         }
 
     async def _ws_rotate(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         if not self._is_admin(conn.user_ctx):
             return _ws_error(frame, "Admin access required", code=403)
@@ -541,7 +565,9 @@ class MCPServerService(Service):
         }
 
     async def _ws_preview_tools(
-        self, conn: WsConnectionBase, frame: dict[str, Any],
+        self,
+        conn: WsConnectionBase,
+        frame: dict[str, Any],
     ) -> dict[str, Any] | None:
         """Preview the tool surface a would-be client would see.
 
@@ -562,7 +588,9 @@ class MCPServerService(Service):
         user_ctx = await self._build_user_ctx(owner_user_id)
         if user_ctx is None:
             return _ws_error(
-                frame, f"Unknown owner user: {owner_user_id}", code=404,
+                frame,
+                f"Unknown owner user: {owner_user_id}",
+                code=404,
             )
 
         if self._resolver is None:
@@ -574,7 +602,8 @@ class MCPServerService(Service):
 
         try:
             discovered = discover(
-                user_ctx=user_ctx, profile_name=profile_name,
+                user_ctx=user_ctx,
+                profile_name=profile_name,
             )
         except Exception as exc:  # noqa: BLE001
             return _ws_error(frame, f"discover_tools failed: {exc}")
@@ -598,7 +627,8 @@ class MCPServerService(Service):
         }
 
     async def _build_user_ctx(
-        self, owner_user_id: str,
+        self,
+        owner_user_id: str,
     ) -> UserContext | None:
         """Shared helper between auth lookup and tool preview —
         resolves a user id into a ``UserContext``. Returns ``None``
@@ -645,15 +675,9 @@ class MCPServerService(Service):
             "ai_profile": client.ai_profile,
             "active": client.active,
             "token_prefix": client.token_prefix,
-            "created_at": (
-                client.created_at.isoformat() if client.created_at else None
-            ),
-            "updated_at": (
-                client.updated_at.isoformat() if client.updated_at else None
-            ),
-            "last_used_at": (
-                client.last_used_at.isoformat() if client.last_used_at else None
-            ),
+            "created_at": (client.created_at.isoformat() if client.created_at else None),
+            "updated_at": (client.updated_at.isoformat() if client.updated_at else None),
+            "last_used_at": (client.last_used_at.isoformat() if client.last_used_at else None),
             "last_ip": client.last_ip,
         }
 
@@ -668,15 +692,9 @@ class MCPServerService(Service):
             "active": client.active,
             "token_hash": client.token_hash,
             "token_prefix": client.token_prefix,
-            "created_at": (
-                client.created_at.isoformat() if client.created_at else None
-            ),
-            "updated_at": (
-                client.updated_at.isoformat() if client.updated_at else None
-            ),
-            "last_used_at": (
-                client.last_used_at.isoformat() if client.last_used_at else None
-            ),
+            "created_at": (client.created_at.isoformat() if client.created_at else None),
+            "updated_at": (client.updated_at.isoformat() if client.updated_at else None),
+            "last_used_at": (client.last_used_at.isoformat() if client.last_used_at else None),
             "last_ip": client.last_ip,
         }
 
@@ -710,7 +728,10 @@ def _parse_dt(value: Any) -> datetime | None:
 
 
 def _ws_error(
-    frame: dict[str, Any], error: str, *, code: int = 400,
+    frame: dict[str, Any],
+    error: str,
+    *,
+    code: int = 400,
 ) -> dict[str, Any]:
     return {
         "type": "gilbert.error",

@@ -23,7 +23,9 @@ ECHO_SERVER = Path(__file__).parent.parent / "fixtures" / "mcp_echo_server.py"
 
 
 def _make_record(
-    *, owner_id: str = "alice", scope: str = "private",
+    *,
+    owner_id: str = "alice",
+    scope: str = "private",
 ) -> MCPServerRecord:
     return MCPServerRecord(
         id="echo-server",
@@ -66,11 +68,15 @@ async def test_service_end_to_end_private_visibility() -> None:
     svc = MCPService()
     svc._enabled = True
     alice = UserContext(
-        user_id="alice", email="a@x", display_name="A",
+        user_id="alice",
+        email="a@x",
+        display_name="A",
         roles=frozenset({"user"}),
     )
     bob = UserContext(
-        user_id="bob", email="b@x", display_name="B",
+        user_id="bob",
+        email="b@x",
+        display_name="B",
         roles=frozenset({"user"}),
     )
 
@@ -177,7 +183,8 @@ async def test_stdio_backend_prompts_roundtrip() -> None:
         assert required == {"user_name"}
 
         result = await backend.get_prompt(
-            "friendly_intro", {"user_name": "Alice", "tone": "formal"},
+            "friendly_intro",
+            {"user_name": "Alice", "tone": "formal"},
         )
         assert len(result.messages) == 1
         msg = result.messages[0]

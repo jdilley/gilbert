@@ -146,7 +146,9 @@ class StdioMCPBackend(MCPBackend):
         return [_translate_prompt_spec(p) for p in result.prompts]
 
     async def get_prompt(
-        self, name: str, arguments: dict[str, str],
+        self,
+        name: str,
+        arguments: dict[str, str],
     ) -> MCPPromptResult:
         session = self._require_session()
         result = await session.get_prompt(name, arguments or None)
@@ -323,12 +325,18 @@ def _translate_resource_content(content: Any) -> MCPResourceContent:
     text = getattr(content, "text", None)
     if text is not None:
         return MCPResourceContent(
-            uri=uri, kind="text", mime_type=mime, text=str(text),
+            uri=uri,
+            kind="text",
+            mime_type=mime,
+            text=str(text),
         )
     blob = getattr(content, "blob", None)
     if blob is not None:
         return MCPResourceContent(
-            uri=uri, kind="blob", mime_type=mime, data=str(blob),
+            uri=uri,
+            kind="blob",
+            mime_type=mime,
+            data=str(blob),
         )
     # Neither shape matched — surface as empty text so the UI gets a
     # deterministic fallback rather than a crash.

@@ -106,19 +106,24 @@ class BackupService(Service):
     def config_params(self) -> list[ConfigParam]:
         return [
             ConfigParam(
-                key="retention_days", type=ToolParameterType.INTEGER,
+                key="retention_days",
+                type=ToolParameterType.INTEGER,
                 description="Number of days to retain backups.",
                 default=30,
             ),
             ConfigParam(
-                key="backup_hour", type=ToolParameterType.INTEGER,
+                key="backup_hour",
+                type=ToolParameterType.INTEGER,
                 description="Hour of day to run backup (0-23).",
-                default=3, restart_required=True,
+                default=3,
+                restart_required=True,
             ),
             ConfigParam(
-                key="backup_minute", type=ToolParameterType.INTEGER,
+                key="backup_minute",
+                type=ToolParameterType.INTEGER,
                 description="Minute of hour to run backup (0-59).",
-                default=0, restart_required=True,
+                default=0,
+                restart_required=True,
             ),
         ]
 

@@ -115,7 +115,7 @@ class _FakeGilbert:
 # ── Plugin source helpers ────────────────────────────────────────────
 
 
-PLUGIN_PY_TEMPLATE = '''
+PLUGIN_PY_TEMPLATE = """
 from gilbert.interfaces.plugin import Plugin, PluginMeta, PluginContext
 from gilbert.interfaces.service import Service, ServiceInfo
 
@@ -140,10 +140,10 @@ class _P(Plugin):
 
 def create_plugin() -> Plugin:
     return _P()
-'''
+"""
 
 
-PLUGIN_PY_BROKEN_SETUP = '''
+PLUGIN_PY_BROKEN_SETUP = """
 from gilbert.interfaces.plugin import Plugin, PluginMeta, PluginContext
 from gilbert.interfaces.service import Service, ServiceInfo
 
@@ -169,18 +169,22 @@ class _P(Plugin):
 
 def create_plugin() -> Plugin:
     return _P()
-'''
+"""
 
 
 def _build_plugin_source(parent: Path, name: str, version: str = "1.0.0") -> Path:
     """Build a real plugin directory we can hand the loader."""
     plugin_dir = parent / name
     plugin_dir.mkdir(parents=True)
-    (plugin_dir / "plugin.yaml").write_text(yaml.safe_dump({
-        "name": name,
-        "version": version,
-        "description": f"{name} for tests",
-    }))
+    (plugin_dir / "plugin.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "name": name,
+                "version": version,
+                "description": f"{name} for tests",
+            }
+        )
+    )
     svc_name = name.replace("-", "_") + "_svc"
     (plugin_dir / "plugin.py").write_text(
         PLUGIN_PY_TEMPLATE.format(name=name, version=version, svc_name=svc_name),
@@ -191,11 +195,15 @@ def _build_plugin_source(parent: Path, name: str, version: str = "1.0.0") -> Pat
 def _build_broken_plugin_source(parent: Path) -> Path:
     plugin_dir = parent / "broken-plugin"
     plugin_dir.mkdir(parents=True)
-    (plugin_dir / "plugin.yaml").write_text(yaml.safe_dump({
-        "name": "broken-plugin",
-        "version": "1.0.0",
-        "description": "intentionally broken",
-    }))
+    (plugin_dir / "plugin.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "broken-plugin",
+                "version": "1.0.0",
+                "description": "intentionally broken",
+            }
+        )
+    )
     (plugin_dir / "plugin.py").write_text(PLUGIN_PY_BROKEN_SETUP)
     return plugin_dir
 
@@ -206,6 +214,7 @@ def _patch_loader_to_use_local_source(svc: PluginManagerService, source: Path) -
 
     async def fake_fetch_to(url: str, stage_path: Path) -> Path:
         import shutil
+
         target = stage_path / "fetched"
         shutil.copytree(source, target)
         return target
@@ -385,11 +394,13 @@ class TestListInstalled:
             async def teardown(self) -> None:
                 pass
 
-        gilbert.add_loaded_plugin(LoadedPlugin(
-            plugin=_BootPlugin(),
-            install_path=plugin_path,
-            registered_services=[],
-        ))
+        gilbert.add_loaded_plugin(
+            LoadedPlugin(
+                plugin=_BootPlugin(),
+                install_path=plugin_path,
+                registered_services=[],
+            )
+        )
         gilbert.config.plugins.directories = [str(std_dir), str(svc._install_dir)]
 
         rows = svc.list_installed(gilbert)

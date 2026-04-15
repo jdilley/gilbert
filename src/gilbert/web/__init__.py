@@ -88,6 +88,7 @@ def create_app(gilbert: Gilbert) -> FastAPI:
     # response wrapping doesn't double-send after the streaming
     # session manager finishes.
     from starlette.routing import Route as _StarletteRoute
+
     app.router.routes.append(
         _StarletteRoute(
             "/api/mcp",
