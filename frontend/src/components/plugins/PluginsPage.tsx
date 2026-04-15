@@ -69,8 +69,7 @@ export function PluginsPage() {
 
   return (
     <div className="p-4 sm:p-6 space-y-4 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl sm:text-2xl font-semibold">Plugins</h1>
+      <div className="flex items-center justify-end">
         <span className="text-xs text-muted-foreground">
           {sorted.length} installed
         </span>
