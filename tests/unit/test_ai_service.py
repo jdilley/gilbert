@@ -15,6 +15,7 @@ from gilbert.interfaces.ai import (
     MessageRole,
     StopReason,
 )
+from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.storage import StorageBackend
 from gilbert.interfaces.tools import (
@@ -24,7 +25,6 @@ from gilbert.interfaces.tools import (
     ToolParameterType,
     ToolResult,
 )
-
 
 # --- Stubs ---
 
@@ -79,7 +79,7 @@ class StubToolProviderService(Service):
     def tool_provider_name(self) -> str:
         return "stub_tools"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         return list(self._tools)
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
@@ -103,7 +103,7 @@ class UIBlockToolProviderService(Service):
     def tool_provider_name(self) -> str:
         return "ui_tool"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         return [self._tool_def]
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> Any:
@@ -134,7 +134,7 @@ class ErrorToolProviderService(Service):
     def tool_provider_name(self) -> str:
         return "error_tools"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         return [ToolDefinition(name="fail_tool", description="Always fails")]
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:

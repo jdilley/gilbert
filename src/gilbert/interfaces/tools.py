@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from gilbert.interfaces.auth import UserContext
 
 
 class ToolParameterType(StrEnum):
@@ -105,8 +108,18 @@ class ToolProvider(Protocol):
         """Human-readable name for this tool provider."""
         ...
 
-    def get_tools(self) -> list[ToolDefinition]:
-        """Return the tool definitions this provider offers."""
+    def get_tools(
+        self, user_ctx: UserContext | None = None,
+    ) -> list[ToolDefinition]:
+        """Return the tool definitions this provider offers.
+
+        Providers that expose the same tools to every caller ignore
+        ``user_ctx``. Providers whose visible tool set depends on the
+        caller (e.g. MCP servers configured per-user or per-role) filter
+        their output using ``user_ctx`` so that the downstream AI profile
+        and RBAC filters see only tools the user is allowed to see. The
+        AI service passes ``user_ctx`` on every tool-discovery call.
+        """
         ...
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:

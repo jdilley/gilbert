@@ -34,6 +34,21 @@ def create_app(gilbert: Gilbert) -> FastAPI:
     async def _stop_ws_manager() -> None:
         ws_manager.shutdown()
 
+    @app.on_event("shutdown")
+    async def _stop_mcp_server_http() -> None:
+        """Tear down the lazily-constructed MCP HTTP app if it was
+        ever built. Without this its internal
+        ``StreamableHTTPSessionManager.run`` async generator gets
+        GC'd from a non-owning task on process exit, tripping
+        anyio's cross-task cancel-scope check and printing a noisy
+        ``BaseExceptionGroup`` to stderr."""
+        http_app = getattr(app.state, "mcp_http_app", None)
+        if http_app is not None:
+            try:
+                await http_app.stop()
+            except Exception:
+                pass
+
     # Auth middleware (works even when auth is disabled — falls through to SYSTEM)
     from gilbert.web.auth import AuthMiddleware
 
@@ -50,6 +65,7 @@ def create_app(gilbert: Gilbert) -> FastAPI:
     from gilbert.web.routes.chat import router as chat_router
     from gilbert.web.routes.documents import router as documents_router
     from gilbert.web.routes.inbox import router as inbox_router
+    from gilbert.web.routes.mcp import mcp_asgi_endpoint
     from gilbert.web.routes.screens import router as screens_router
     from gilbert.web.routes.websocket import router as ws_router
 
@@ -63,6 +79,23 @@ def create_app(gilbert: Gilbert) -> FastAPI:
     app.include_router(inbox_router)
     app.include_router(screens_router)
     app.include_router(ws_router)
+
+    # MCP server endpoint — raw ASGI, not a FastAPI route (see
+    # ``routes/mcp.py`` for why). Mounted at ``/api/mcp`` so it
+    # doesn't collide with the SPA route at ``/mcp/*``; external
+    # MCP clients configure this URL as their server endpoint.
+    # Registered via the underlying starlette router so FastAPI's
+    # response wrapping doesn't double-send after the streaming
+    # session manager finishes.
+    from starlette.routing import Route as _StarletteRoute
+    app.router.routes.append(
+        _StarletteRoute(
+            "/api/mcp",
+            endpoint=mcp_asgi_endpoint,
+            methods=["GET", "POST", "DELETE", "OPTIONS"],
+            include_in_schema=False,
+        ),
+    )
 
     # --- API routes (JSON only, for the SPA) ---
     from gilbert.web.routes.api import router as api_router

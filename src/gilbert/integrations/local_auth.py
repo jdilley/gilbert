@@ -90,11 +90,11 @@ class LocalAuthBackend(AuthBackend):
             from argon2 import PasswordHasher
 
             self._hasher = PasswordHasher()
-        return self._hasher.hash(password)
+        return str(self._hasher.hash(password))
 
     def _verify_password(self, stored_hash: str, password: str) -> bool:
         try:
-            return self._hasher.verify(stored_hash, password)
+            return bool(self._hasher.verify(stored_hash, password))
         except Exception:
             logger.debug("Password verification failed")
             return False

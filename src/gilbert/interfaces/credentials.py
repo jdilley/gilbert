@@ -1,7 +1,7 @@
 """Credential types — models for API keys, passwords, service accounts, etc."""
 
 from enum import StrEnum
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -36,6 +36,6 @@ class UsernamePasswordCredential(BaseModel):
 
 
 AnyCredential = Annotated[
-    Union[ApiKeyCredential, ApiKeyPairCredential, UsernamePasswordCredential],
+    ApiKeyCredential | ApiKeyPairCredential | UsernamePasswordCredential,
     Field(discriminator="type"),
 ]

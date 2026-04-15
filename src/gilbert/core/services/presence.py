@@ -9,12 +9,14 @@ Publishes events on the event bus:
 
 import json
 import logging
+from datetime import UTC
 from typing import Any
 
 from gilbert.core.services._backend_actions import (
     all_backend_actions,
     invoke_backend_action,
 )
+from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.configuration import (
     ConfigAction,
     ConfigActionResult,
@@ -313,9 +315,9 @@ class PresenceService(Service):
         if self._storage is None:
             return
         try:
-            from datetime import datetime, timezone
+            from datetime import datetime
 
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
 
             # Remove records for users who left
             for user_id in previously_here:
@@ -375,7 +377,7 @@ class PresenceService(Service):
     def tool_provider_name(self) -> str:
         return "presence"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         if not self._enabled:
             return []
         return [
@@ -463,8 +465,10 @@ class PresenceService(Service):
         if self._resolver is None:
             return None
 
+        from gilbert.interfaces.users import UserManagementProvider
+
         user_svc = self._resolver.get_capability("users")
-        if user_svc is None:
+        if not isinstance(user_svc, UserManagementProvider):
             return None
 
         try:

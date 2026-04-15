@@ -12,15 +12,24 @@ creating import cycles.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, Coroutine, Protocol, runtime_checkable
+from collections.abc import Callable, Coroutine
+from typing import Any, Protocol, runtime_checkable
 
 from gilbert.interfaces.auth import UserContext
 
-
 # ── Type aliases ──────────────────────────────────────────────────────
 
-RpcHandler = Callable[["WsConnectionBase", dict[str, Any]], Coroutine[Any, Any, dict[str, Any] | None]]
-"""Signature for a WS RPC frame handler."""
+RpcHandler = Callable[[Any, dict[str, Any]], Coroutine[Any, Any, dict[str, Any] | None]]
+"""Signature for a WS RPC frame handler.
+
+The connection parameter is typed as ``Any`` so handlers can declare
+their own narrower type (``WsConnection`` in ``web/ws_protocol.py``
+or the ``WsConnectionBase`` protocol). Python's type system doesn't
+let a function with a narrower parameter stand in for one with a
+wider parameter (contravariance), so using ``Any`` here is the only
+way to let both coexist in a single handler registry. Handlers
+still get static checking inside their own bodies via their
+parameter annotation."""
 
 
 @runtime_checkable
@@ -36,6 +45,12 @@ class WsConnectionBase(Protocol):
     user_level: int
     shared_conv_ids: set[str]
     queue: asyncio.Queue[dict[str, Any]]
+    manager: Any
+    """The WebSocket connection manager instance. Typed as ``Any``
+    to keep the interfaces layer free of ``web/`` imports — the
+    concrete type lives in ``web/ws_protocol.py`` and carries a
+    back-reference to the owning ``Gilbert`` app instance. Handlers
+    that need the app reach it as ``conn.manager.gilbert``."""
 
     @property
     def user_id(self) -> str: ...

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, AsyncIterator
+from typing import Any
 
 from gilbert.interfaces.configuration import ConfigParam
 
@@ -157,8 +158,17 @@ class SearchResponse:
 class DocumentBackend(ABC):
     """Abstract document backend. Each instance represents one source."""
 
-    _registry: dict[str, type["DocumentBackend"]] = {}
+    _registry: dict[str, type[DocumentBackend]] = {}
     backend_name: str = ""
+
+    def __init__(self, name: str = "") -> None:
+        """Construct with an admin-supplied display ``name``.
+
+        Concrete backends override ``source_id`` / ``display_name``
+        to expose the identifier and label to the UI; keeping the
+        name on the ABC's ``__init__`` lets ``KnowledgeService``
+        construct any registered backend with the same signature."""
+        self._name = name
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -166,7 +176,7 @@ class DocumentBackend(ABC):
             DocumentBackend._registry[cls.backend_name] = cls
 
     @classmethod
-    def registered_backends(cls) -> dict[str, type["DocumentBackend"]]:
+    def registered_backends(cls) -> dict[str, type[DocumentBackend]]:
         return dict(cls._registry)
 
     @classmethod
@@ -267,8 +277,17 @@ class DocumentBackend(ABC):
         ...
 
     @abstractmethod
-    async def stream_document(self, path: str) -> AsyncIterator[bytes]:
-        """Stream document content in chunks for web serving."""
+    def stream_document(self, path: str) -> AsyncIterator[bytes]:
+        """Stream document content in chunks for web serving.
+
+        Declared without ``async`` so subclasses can implement it
+        directly as an async generator (``async def`` + ``yield``).
+        An async generator's type is
+        ``Coroutine[..., AsyncIterator[bytes]]`` in the overload
+        sense if you declare the parent ``async def``, which would
+        reject the implementation at the subclass level. See
+        https://mypy.readthedocs.io/en/stable/more_types.html#asynchronous-iterators
+        """
         ...
 
     @property

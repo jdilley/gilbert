@@ -188,7 +188,7 @@ class TestGreetingService:
         greeting_service._cutoff_hour = 24
 
         # Mock presence service with people present
-        from gilbert.interfaces.presence import UserPresence, PresenceState
+        from gilbert.interfaces.presence import PresenceState, UserPresence
 
         mock_presence = AsyncMock()
         mock_presence.who_is_here = AsyncMock(return_value=[

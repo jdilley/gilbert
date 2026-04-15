@@ -201,7 +201,7 @@ class SQLiteStorage(StorageBackend):
 
         async with db.execute(sql, params) as cursor:
             row = await cursor.fetchone()
-            return row[0] if row else 0  # type: ignore[index]
+            return int(row[0]) if row else 0
 
     # --- Indexing ---
 

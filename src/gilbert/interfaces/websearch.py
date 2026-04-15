@@ -21,7 +21,7 @@ class WebSearchResult:
 class WebSearchBackend(ABC):
     """Abstract interface for web search providers."""
 
-    _registry: dict[str, type["WebSearchBackend"]] = {}
+    _registry: dict[str, type[WebSearchBackend]] = {}
     backend_name: str = ""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -30,7 +30,7 @@ class WebSearchBackend(ABC):
             WebSearchBackend._registry[cls.backend_name] = cls
 
     @classmethod
-    def registered_backends(cls) -> dict[str, type["WebSearchBackend"]]:
+    def registered_backends(cls) -> dict[str, type[WebSearchBackend]]:
         return dict(cls._registry)
 
     @classmethod

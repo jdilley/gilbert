@@ -4,7 +4,6 @@
 from gilbert.interfaces.storage import Filter, FilterOp, IndexDefinition, Query, SortField
 from gilbert.storage.sqlite import SQLiteStorage
 
-
 # --- Entity CRUD ---
 
 

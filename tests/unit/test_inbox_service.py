@@ -8,7 +8,7 @@ register one or more mailboxes directly, and then call the public API.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -28,7 +28,6 @@ from gilbert.interfaces.inbox import (
     determine_access,
 )
 from gilbert.interfaces.storage import FilterOp
-
 
 # ── Fakes ─────────────────────────────────────────────────────────
 
@@ -235,6 +234,12 @@ class FakeAclService:
     def resolve_rpc_level(self, frame_type: str) -> int:
         return 100
 
+    def check_collection_read(self, user_ctx: UserContext, collection: str) -> bool:
+        return True
+
+    def check_collection_write(self, user_ctx: UserContext, collection: str) -> bool:
+        return True
+
     def service_info(self) -> Any:
         from gilbert.interfaces.service import ServiceInfo
         return ServiceInfo(name="access_control", capabilities=frozenset({"access_control"}))
@@ -277,7 +282,7 @@ def _make_message(
         to=[EmailAddress(email="owner@example.com")],
         cc=[],
         body_text=body_text,
-        date=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+        date=datetime(2026, 4, 5, 12, 0, tzinfo=UTC),
     )
 
 

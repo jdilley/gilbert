@@ -826,7 +826,7 @@ class InboxService(Service):
                 r["snippet"] = body[:120] + ("..." if len(body) > 120 else "")
                 r.pop("body_text", None)
                 r.pop("body_html", None)
-        return results
+        return list(results)
 
     async def get_message(self, message_id: str) -> dict[str, Any] | None:
         user_ctx = get_current_user()
@@ -838,7 +838,7 @@ class InboxService(Service):
             mailbox = await self.get_mailbox(str(mailbox_id))
             if mailbox is not None:
                 self._require_access(mailbox, user_ctx)
-        return record
+        return dict(record)
 
     async def get_thread(
         self, thread_id: str, mailbox_id: str | None = None,
@@ -854,14 +854,14 @@ class InboxService(Service):
             if not mailbox_ids:
                 return []
 
-        return await self._storage.query(Query(
+        return list(await self._storage.query(Query(
             collection=_MESSAGES_COLLECTION,
             filters=[
                 Filter(field="mailbox_id", op=FilterOp.IN, value=mailbox_ids),
                 Filter(field="thread_id", op=FilterOp.EQ, value=thread_id),
             ],
             sort=[SortField(field="date", descending=False)],
-        ))
+        )))
 
     async def get_stats(
         self, mailbox_id: str | None = None,
@@ -1304,7 +1304,7 @@ class InboxService(Service):
     def tool_provider_name(self) -> str:
         return "inbox"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         if not self._enabled:
             return []
         return [

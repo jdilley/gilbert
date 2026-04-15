@@ -13,7 +13,6 @@ from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.service import Service, ServiceInfo
 from gilbert.interfaces.tools import ToolParameterType
 
-
 # --- Stubs ---
 
 

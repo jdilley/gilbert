@@ -14,6 +14,7 @@ import uuid
 from typing import Any
 
 from gilbert.core.output import cleanup_old_files, get_output_dir
+from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.speaker import SpeakerProvider
 from gilbert.interfaces.tools import (
@@ -69,7 +70,7 @@ class AudioOutputService(Service):
     def tool_provider_name(self) -> str:
         return "audio_output"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         return [
             ToolDefinition(
                 name="audio_output",

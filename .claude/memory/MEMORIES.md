@@ -28,3 +28,5 @@
 - [Web Search Service](memory-websearch-service.md) — web search AI tool with Tavily backend
 - [Slash Commands](memory-slash-commands.md) — direct tool invocation from chat via /command syntax, bypassing the AI
 - [Config Actions](memory-config-actions.md) — action buttons on service settings pages (test_connection, link flows), with two-phase followup support
+- [MCP (Model Context Protocol)](memory-mcp.md) — Gilbert as MCP client (external servers → AI pipeline) AND MCP server (`/api/mcp` bearer-token endpoint) with per-user RBAC
+- [Dashboard & Nav Structure](memory-dashboard-nav.md) — grouped nav RPC drives desktop dropdowns and mobile drawer, user-scoped query cache

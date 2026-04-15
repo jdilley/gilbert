@@ -12,8 +12,8 @@ from gilbert.core.services.storage import StorageService
 from gilbert.interfaces.service import ServiceResolver
 from gilbert.interfaces.speaker import (
     NowPlaying,
-    PlayRequest,
     PlaybackState,
+    PlayRequest,
     SpeakerBackend,
     SpeakerGroup,
     SpeakerInfo,

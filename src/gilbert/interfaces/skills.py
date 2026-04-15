@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -28,9 +29,6 @@ class SkillContent:
     catalog: SkillCatalogEntry
     instructions: str
     resources: list[str] = field(default_factory=list)
-
-
-from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable

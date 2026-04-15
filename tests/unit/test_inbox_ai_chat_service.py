@@ -13,7 +13,6 @@ from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.email import EmailAttachment
 from gilbert.interfaces.events import Event
 
-
 # ── Fakes ──────────────────────────────────────────────────────
 
 

@@ -25,7 +25,11 @@ def mock_event_bus() -> EventBus:
 
 @pytest.fixture
 def mock_speaker() -> MagicMock:
-    speaker = MagicMock()
+    from gilbert.interfaces.speaker import SpeakerProvider
+    # ``spec=SpeakerProvider`` makes ``isinstance(speaker, SpeakerProvider)``
+    # return True at runtime so the service's protocol narrowing
+    # doesn't silently skip the announce call.
+    speaker = MagicMock(spec=SpeakerProvider)
     speaker.announce = AsyncMock()
     return speaker
 

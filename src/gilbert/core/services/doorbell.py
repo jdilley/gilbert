@@ -6,7 +6,7 @@ publishes a ``doorbell.ring`` event on the event bus and announces over speakers
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from gilbert.core.services._backend_actions import (
@@ -257,8 +257,10 @@ class DoorbellService(Service):
         if self._resolver is None:
             return
 
+        from gilbert.interfaces.speaker import SpeakerProvider
+
         speaker_svc = self._resolver.get_capability("speaker_control")
-        if speaker_svc is None:
+        if not isinstance(speaker_svc, SpeakerProvider):
             logger.debug("No speaker service — doorbell not announced: %s", door_name)
             return
 
@@ -278,7 +280,7 @@ def _epoch_ms_to_iso(epoch_ms: int) -> str:
     if not epoch_ms:
         return ""
     try:
-        dt = datetime.fromtimestamp(epoch_ms / 1000.0, tz=timezone.utc)
+        dt = datetime.fromtimestamp(epoch_ms / 1000.0, tz=UTC)
         return dt.isoformat()
     except (ValueError, OSError):
         return ""

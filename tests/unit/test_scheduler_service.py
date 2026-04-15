@@ -12,6 +12,7 @@ from gilbert.core.services.scheduler import (
     SchedulerService,
     _AICallRateLimiter,
 )
+from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.scheduler import (
     ActionStep,
     JobState,
@@ -247,7 +248,7 @@ class _FakeTool:
     def tool_provider_name(self) -> str:
         return "fake_tool_provider"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         return [
             ToolDefinition(
                 name=self.tool_name,
@@ -302,6 +303,12 @@ class _FakeACL:
 
     def resolve_rpc_level(self, *args: Any, **kwargs: Any) -> int:
         return self._user_level
+
+    def check_collection_read(self, user_ctx: Any, collection: str) -> bool:
+        return True
+
+    def check_collection_write(self, user_ctx: Any, collection: str) -> bool:
+        return True
 
 
 def _resolver_with(

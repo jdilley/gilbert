@@ -3,6 +3,7 @@
 import json
 from typing import Any
 
+from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.events import Event, EventBus
 from gilbert.interfaces.service import Service, ServiceInfo
@@ -51,7 +52,7 @@ class EventBusService(Service):
     def tool_provider_name(self) -> str:
         return "event_bus"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         return [
             ToolDefinition(
                 name="publish_event",

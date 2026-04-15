@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -29,32 +29,54 @@ import {
   MonitorIcon,
   ClockIcon,
   PackageIcon,
+  PlugIcon,
+  PlugZapIcon,
   MenuIcon,
+  UsersIcon,
+  WrenchIcon,
+  SparklesIcon,
+  FolderLockIcon,
+  RadioIcon,
+  TerminalIcon,
+  ChevronDownIcon,
   type LucideIcon,
 } from "lucide-react";
+import type { NavGroup, NavItem } from "@/types/dashboard";
 
-/** Nav item config: label, icon component, and color class. */
-interface NavItemConfig {
-  label: string;
-  icon: LucideIcon;
-  color: string;
-}
-
-const NAV_CONFIG: Record<string, NavItemConfig> = {
-  "/chat": { label: "Chat", icon: MessageSquareIcon, color: "text-blue-500" },
-  "/documents": { label: "Documents", icon: FileTextIcon, color: "text-amber-500" },
-  "/inbox": { label: "Inbox", icon: InboxIcon, color: "text-green-500" },
-  "/roles": { label: "Roles", icon: ShieldIcon, color: "text-purple-500" },
-  "/scheduler": { label: "Scheduler", icon: ClockIcon, color: "text-teal-500" },
-  "/settings": { label: "Settings", icon: SlidersHorizontalIcon, color: "text-orange-500" },
-  "/plugins": { label: "Plugins", icon: PackageIcon, color: "text-indigo-500" },
-  "/system": { label: "System", icon: SettingsIcon, color: "text-slate-500" },
-  "/entities": { label: "Entities", icon: DatabaseIcon, color: "text-cyan-500" },
-  "/screens": { label: "Screens", icon: MonitorIcon, color: "text-rose-500" },
+/** Map of icon names returned by the backend to lucide components. */
+const ICONS: Record<string, LucideIcon> = {
+  "message-square": MessageSquareIcon,
+  "file-text": FileTextIcon,
+  "inbox": InboxIcon,
+  "shield": ShieldIcon,
+  "sliders": SlidersHorizontalIcon,
+  "settings": SettingsIcon,
+  "database": DatabaseIcon,
+  "monitor": MonitorIcon,
+  "clock": ClockIcon,
+  "package": PackageIcon,
+  "plug": PlugIcon,
+  "plug-zap": PlugZapIcon,
+  "users": UsersIcon,
+  "wrench": WrenchIcon,
+  "sparkles": SparklesIcon,
+  "folder-lock": FolderLockIcon,
+  "radio": RadioIcon,
+  "terminal": TerminalIcon,
 };
 
-/** URLs that should appear in the top nav (skip dashboard itself). */
-const NAV_URLS = new Set(Object.keys(NAV_CONFIG));
+/** Tailwind color for each top-level group's icon. */
+const GROUP_COLORS: Record<string, string> = {
+  chat: "text-blue-500",
+  inbox: "text-green-500",
+  mcp: "text-pink-500",
+  security: "text-purple-500",
+  system: "text-slate-500",
+};
+
+function iconFor(name: string): LucideIcon | undefined {
+  return ICONS[name];
+}
 
 export function NavBar() {
   const { user, logout } = useAuth();
@@ -63,13 +85,16 @@ export function NavBar() {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  // Key the dashboard query on the user id so a login / logout
+  // swap refetches automatically — otherwise the previous user's
+  // cached menu would stick until the tab is refreshed.
   const { data } = useQuery({
-    queryKey: ["dashboard"],
+    queryKey: ["dashboard", user?.user_id ?? "anon"],
     queryFn: api.getDashboard,
-    enabled: connected,
+    enabled: connected && !!user,
   });
 
-  const navItems = (data?.cards ?? []).filter((c) => NAV_URLS.has(c.url));
+  const groups: NavGroup[] = data?.nav ?? [];
 
   const initials =
     user?.display_name
@@ -78,6 +103,18 @@ export function NavBar() {
       .join("")
       .toUpperCase()
       .slice(0, 2) || "?";
+
+  const isGroupActive = (group: NavGroup): boolean => {
+    if (group.items.length === 0) {
+      return location.pathname === group.url ||
+        location.pathname.startsWith(group.url + "/");
+    }
+    return group.items.some(
+      (i) =>
+        location.pathname === i.url ||
+        location.pathname.startsWith(i.url + "/"),
+    );
+  };
 
   return (
     <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -99,23 +136,13 @@ export function NavBar() {
 
         {/* Desktop horizontal nav */}
         <nav className="hidden md:flex items-center gap-1 overflow-x-auto">
-          {navItems.map((card) => {
-            const cfg = NAV_CONFIG[card.url];
-            const Icon = cfg?.icon;
-            const active = location.pathname.startsWith(card.url);
-            return (
-              <Link key={card.url} to={card.url} title={cfg?.label ?? card.title}>
-                <Button
-                  variant={active ? "secondary" : "ghost"}
-                  size="sm"
-                  className="gap-1.5"
-                >
-                  {Icon && <Icon className={`h-4 w-4 ${cfg.color}`} />}
-                  <span className="hidden lg:inline">{cfg?.label ?? card.title}</span>
-                </Button>
-              </Link>
-            );
-          })}
+          {groups.map((group) => (
+            <DesktopNavGroup
+              key={group.key}
+              group={group}
+              active={isGroupActive(group)}
+            />
+          ))}
         </nav>
 
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
@@ -156,30 +183,160 @@ export function NavBar() {
           <SheetHeader>
             <SheetTitle>Gilbert</SheetTitle>
           </SheetHeader>
-          <nav className="flex flex-col px-2 pb-4">
-            {navItems.map((card) => {
-              const cfg = NAV_CONFIG[card.url];
-              const Icon = cfg?.icon;
-              const active = location.pathname.startsWith(card.url);
-              return (
-                <Link
-                  key={card.url}
-                  to={card.url}
-                  onClick={() => setMobileOpen(false)}
-                  className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors ${
-                    active
-                      ? "bg-secondary text-foreground"
-                      : "text-foreground/80 hover:bg-accent hover:text-foreground"
-                  }`}
-                >
-                  {Icon && <Icon className={`size-4 ${cfg.color}`} />}
-                  <span>{cfg?.label ?? card.title}</span>
-                </Link>
-              );
-            })}
+          <nav className="flex flex-col px-2 pb-4 overflow-y-auto">
+            {groups.map((group) => (
+              <MobileNavGroup
+                key={group.key}
+                group={group}
+                onNavigate={() => setMobileOpen(false)}
+                active={isGroupActive(group)}
+              />
+            ))}
           </nav>
         </SheetContent>
       </Sheet>
     </header>
+  );
+}
+
+// ── Desktop ───────────────────────────────────────────────────────────
+
+function DesktopNavGroup({
+  group,
+  active,
+}: {
+  group: NavGroup;
+  active: boolean;
+}) {
+  const color = GROUP_COLORS[group.key] ?? "text-muted-foreground";
+  const Icon = iconFor(group.icon);
+
+  // Leaf group — single button, no dropdown.
+  if (group.items.length === 0) {
+    return (
+      <Link to={group.url} title={group.description || group.label}>
+        <Button
+          variant={active ? "secondary" : "ghost"}
+          size="sm"
+          className="gap-1.5"
+        >
+          {Icon && <Icon className={`h-4 w-4 ${color}`} />}
+          <span className="hidden lg:inline">{group.label}</span>
+        </Button>
+      </Link>
+    );
+  }
+
+  // Group with children — dropdown.
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant={active ? "secondary" : "ghost"}
+            size="sm"
+            className="gap-1.5"
+            title={group.description || group.label}
+          />
+        }
+      >
+        {Icon && <Icon className={`h-4 w-4 ${color}`} />}
+        <span className="hidden lg:inline">{group.label}</span>
+        <ChevronDownIcon className="h-3 w-3 opacity-60" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-48">
+        {group.items.map((item) => (
+          <DropdownSubItem key={item.url} item={item} color={color} />
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function DropdownSubItem({
+  item,
+  color,
+}: {
+  item: NavItem;
+  color: string;
+}) {
+  const Icon = iconFor(item.icon);
+  const navigate = useNavigate();
+  return (
+    <DropdownMenuItem
+      onClick={() => navigate(item.url)}
+      className="cursor-pointer"
+    >
+      <div className="flex items-start gap-2">
+        {Icon && <Icon className={`size-4 mt-0.5 ${color}`} />}
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium">{item.label}</div>
+          {item.description && (
+            <div className="text-xs text-muted-foreground truncate">
+              {item.description}
+            </div>
+          )}
+        </div>
+      </div>
+    </DropdownMenuItem>
+  );
+}
+
+// ── Mobile ────────────────────────────────────────────────────────────
+
+function MobileNavGroup({
+  group,
+  onNavigate,
+  active,
+}: {
+  group: NavGroup;
+  onNavigate: () => void;
+  active: boolean;
+}) {
+  const color = GROUP_COLORS[group.key] ?? "text-muted-foreground";
+  const Icon = iconFor(group.icon);
+
+  // Leaf — single flat link.
+  if (group.items.length === 0) {
+    return (
+      <Link
+        to={group.url}
+        onClick={onNavigate}
+        className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors ${
+          active
+            ? "bg-secondary text-foreground"
+            : "text-foreground/80 hover:bg-accent hover:text-foreground"
+        }`}
+      >
+        {Icon && <Icon className={`size-4 ${color}`} />}
+        <span>{group.label}</span>
+      </Link>
+    );
+  }
+
+  // Group with children — section header + indented links.
+  return (
+    <div className="mt-3 first:mt-0">
+      <div className="px-3 py-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {Icon && <Icon className={`size-3.5 ${color}`} />}
+        <span>{group.label}</span>
+      </div>
+      <div className="flex flex-col">
+        {group.items.map((item) => {
+          const ItemIcon = iconFor(item.icon);
+          return (
+            <Link
+              key={item.url}
+              to={item.url}
+              onClick={onNavigate}
+              className="flex items-center gap-3 rounded-md px-3 py-2 pl-6 text-sm transition-colors text-foreground/80 hover:bg-accent hover:text-foreground"
+            >
+              {ItemIcon && <ItemIcon className={`size-4 ${color}`} />}
+              <span>{item.label}</span>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
   );
 }

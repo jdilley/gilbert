@@ -8,9 +8,10 @@ no preferences are known.
 import json
 import logging
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, cast
 
+from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.configuration import ConfigParam, ConfigurationReader
 from gilbert.interfaces.events import Event, EventBus, EventBusProvider
 from gilbert.interfaces.music import (
@@ -238,7 +239,7 @@ class RadioDJService(Service):
                 "active": self._active,
                 "current_genre": self._current_genre,
                 "genre_rotation_index": self._genre_rotation_index,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             })
         except Exception:
             logger.warning("Failed to persist radio DJ state", exc_info=True)
@@ -262,12 +263,12 @@ class RadioDJService(Service):
         doc = await self._storage.get(_PREFS_COLLECTION, f"prefs:{user_id}")
         if doc is None:
             return {"user_id": user_id, "likes": [], "vetoes": []}
-        return doc
+        return dict(doc)
 
     async def _save_preferences(self, user_id: str, prefs: dict[str, Any]) -> None:
         if self._storage is None:
             return
-        prefs["updated_at"] = datetime.now(timezone.utc).isoformat()
+        prefs["updated_at"] = datetime.now(UTC).isoformat()
         await self._storage.put(_PREFS_COLLECTION, f"prefs:{user_id}", prefs)
 
     async def _add_like(self, user_id: str, genre: str) -> None:
@@ -410,7 +411,7 @@ class RadioDJService(Service):
     def _can_switch_genre(self) -> bool:
         if self._last_genre_switch is None:
             return True
-        elapsed = (datetime.now(timezone.utc) - self._last_genre_switch).total_seconds()
+        elapsed = (datetime.now(UTC) - self._last_genre_switch).total_seconds()
         return elapsed >= self._min_switch_minutes * 60
 
     # --- Playback ---
@@ -450,7 +451,7 @@ class RadioDJService(Service):
 
             old_genre = self._current_genre
             self._current_genre = genre
-            self._last_genre_switch = datetime.now(timezone.utc)
+            self._last_genre_switch = datetime.now(UTC)
             await self._persist_state()
 
             if self._event_bus and old_genre != genre:
@@ -708,7 +709,7 @@ class RadioDJService(Service):
     def tool_provider_name(self) -> str:
         return "radio_dj"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         if not self._enabled:
             return []
         return [

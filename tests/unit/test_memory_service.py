@@ -7,7 +7,6 @@ import pytest
 from gilbert.core.services.ai import AIService, _MemoryHelper
 from gilbert.interfaces.auth import UserContext
 
-
 # ── Fake storage ────────────────────────────────────────────
 
 

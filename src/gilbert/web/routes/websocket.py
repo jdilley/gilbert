@@ -48,11 +48,13 @@ async def event_stream(websocket: WebSocket) -> None:
     ai_svc = gilbert.service_manager.get_by_capability("ai_chat")
     if ai_svc is not None:
         try:
-            convos = await ai_svc.list_shared_conversations(user_id=user_ctx.user_id, limit=200)
-            for c in convos:
-                cid = c.get("_id", "")
-                if cid and c.get("_is_member", False):
-                    conn.shared_conv_ids.add(cid)
+            list_shared = getattr(ai_svc, "list_shared_conversations", None)
+            if callable(list_shared):
+                convos = await list_shared(user_id=user_ctx.user_id, limit=200)
+                for c in convos:
+                    cid = c.get("_id", "")
+                    if cid and c.get("_is_member", False):
+                        conn.shared_conv_ids.add(cid)
         except Exception:
             logger.debug("Failed to seed shared memberships", exc_info=True)
 
@@ -98,9 +100,11 @@ async def _authenticate(websocket: WebSocket, gilbert: Gilbert) -> UserContext:
     if session_id:
         auth_svc = gilbert.service_manager.get_by_capability("authentication")
         if auth_svc is not None:
-            ctx = await auth_svc.validate_session(session_id)
-            if ctx is not None:
-                return ctx
+            validate = getattr(auth_svc, "validate_session", None)
+            if callable(validate):
+                ctx = await validate(session_id)
+                if isinstance(ctx, UserContext):
+                    return ctx
 
     return UserContext.GUEST
 

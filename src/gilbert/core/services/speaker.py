@@ -11,6 +11,7 @@ from gilbert.core.services._backend_actions import (
     all_backend_actions,
     invoke_backend_action,
 )
+from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.configuration import (
     ConfigAction,
     ConfigActionResult,
@@ -289,7 +290,8 @@ class SpeakerService(Service):
             filters=[Filter(field="alias", op=FilterOp.EQ, value=name.lower())],
         ))
         if results:
-            return results[0].get("speaker_id")
+            sid = results[0].get("speaker_id")
+            return str(sid) if sid is not None else None
 
         return None
 
@@ -331,7 +333,7 @@ class SpeakerService(Service):
             # No data is actually sent.
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
-                return s.getsockname()[0]
+                return str(s.getsockname()[0])
         except OSError:
             return "127.0.0.1"
 
@@ -594,7 +596,7 @@ class SpeakerService(Service):
     def tool_provider_name(self) -> str:
         return "speaker"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         if not self._enabled:
             return []
         tools = [

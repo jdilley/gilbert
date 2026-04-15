@@ -242,7 +242,7 @@ async def logout(
 
 
 @router.get("/me")
-async def me(user: UserContext = Depends(get_user_context)) -> dict:  # noqa: B008
+async def me(user: UserContext = Depends(get_user_context)) -> dict[str, Any]:  # noqa: B008
     return {
         "user_id": user.user_id,
         "email": user.email,
@@ -257,6 +257,7 @@ async def me(user: UserContext = Depends(get_user_context)) -> dict:  # noqa: B0
 
 def _build_auth_response(user_ctx: UserContext, is_form: bool) -> Response:
     """Build the response with session cookie for successful auth."""
+    resp: Response
     if is_form:
         resp = RedirectResponse(url="/", status_code=303)
     else:

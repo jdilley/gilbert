@@ -179,9 +179,14 @@ class RoastService(Service):
 
     async def _generate_roast(self, name: str) -> str:
         """Generate a roast via AI if available, otherwise use a template."""
+        from gilbert.interfaces.ai import AIProvider
+        from gilbert.interfaces.speaker import (
+            SpeakerProvider,  # noqa: F401 — used by _announce via check
+        )
+
         if self._resolver is not None:
             ai_svc = self._resolver.get_capability("ai_chat")
-            if ai_svc is not None:
+            if isinstance(ai_svc, AIProvider):
                 try:
                     from gilbert.interfaces.auth import UserContext
 
@@ -192,7 +197,7 @@ class RoastService(Service):
                         ai_call="roast",
                     )
                     if response and len(response) < 500:
-                        return response.strip()
+                        return str(response).strip()
                 except Exception:
                     logger.warning("AI roast generation failed, using template", exc_info=True)
 
@@ -202,11 +207,13 @@ class RoastService(Service):
 
     async def _announce(self, text: str) -> None:
         """Announce roast via speakers if available."""
+        from gilbert.interfaces.speaker import SpeakerProvider
+
         if self._resolver is None:
             return
 
         speaker_svc = self._resolver.get_capability("speaker_control")
-        if speaker_svc is None:
+        if not isinstance(speaker_svc, SpeakerProvider):
             logger.debug("No speaker service — roast not announced aloud: %s", text)
             return
 

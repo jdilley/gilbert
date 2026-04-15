@@ -65,6 +65,7 @@ class Gilbert:
         self.registry = ServiceRegistry()
         self.service_manager = ServiceManager()
         self._plugins: list[LoadedPlugin] = []
+        self._discovered_manifests: list[PluginManifest] = []
         # Set to True when a service (typically the plugin manager) has
         # asked the host to exit with the restart-requested exit code so
         # ``gilbert.sh``'s supervisor loop re-runs ``uv sync`` and
@@ -264,6 +265,20 @@ class Gilbert:
         plugin_mgr.bind_gilbert(self)
         self.service_manager.register(plugin_mgr)
 
+        # MCP client — federates tools from external MCP servers. Registered
+        # before AIService so it's visible via ``get_all("ai_tools")``.
+        from gilbert.core.services.mcp import MCPService
+
+        self.service_manager.register(MCPService())
+
+        # MCP server — exposes Gilbert's tools to external MCP clients.
+        # Register before AIService because the web layer's MCP endpoint
+        # resolves capabilities at request time and needs both services
+        # available.
+        from gilbert.core.services.mcp_server import MCPServerService
+
+        self.service_manager.register(MCPServerService())
+
         self.service_manager.register(AIService())
 
         # 8. Register factories for hot-swap support
@@ -273,9 +288,14 @@ class Gilbert:
         config_svc.register_factory("music", self._factory_music)
         config_svc.register_factory("presence", self._factory_presence)
 
-        # 9. Also register in old registry for backward compat
-        self.registry.register(StorageBackend, storage)
-        self.registry.register(EventBus, event_bus)
+        # 9. Also register in old registry for backward compat.
+        # ``StorageBackend`` and ``EventBus`` are ABCs so mypy would
+        # ordinarily reject them in ``register(type[T], impl)``; cast
+        # to ``type[...]`` via explicit type: ignore — the registry
+        # is an untyped service locator, it doesn't care that the
+        # key happens to be abstract.
+        self.registry.register(StorageBackend, storage)  # type: ignore[type-abstract]
+        self.registry.register(EventBus, event_bus)  # type: ignore[type-abstract]
         self.registry.register(ServiceManager, self.service_manager)
 
         # 10. Load plugins

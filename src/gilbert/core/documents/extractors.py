@@ -107,14 +107,14 @@ def _extract_pdf(
     try:
         import pymupdf
 
-        doc = pymupdf.open(stream=data, filetype="pdf")
+        doc: Any = pymupdf.open(stream=data, filetype="pdf")  # type: ignore[no-untyped-call]
         text_parts: list[str] = []
         total_chars = 0
         stats.pages = len(doc)
 
         for page_num in range(len(doc)):
             page = doc[page_num]
-            page_text = page.get_text()
+            page_text: str = page.get_text()
 
             # Check for images and sparse text
             page_images = page.get_images()
@@ -174,11 +174,11 @@ def _extract_pdf(
 
 def _run_ocr_sync(ocr: OCRService, pixmap: Any) -> str:
     """Run OCR on a PyMuPDF pixmap (synchronous — called from thread)."""
-    import pytesseract
+    import pytesseract  # type: ignore[import-untyped]
     from PIL import Image
 
-    img = Image.frombytes("RGB", [pixmap.width, pixmap.height], pixmap.samples)
-    return pytesseract.image_to_string(img).strip()
+    img = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+    return str(pytesseract.image_to_string(img)).strip()
 
 
 def _run_vision_sync(vision: VisionService, png_bytes: bytes) -> str:
@@ -268,7 +268,7 @@ def _run_ocr_on_bytes(ocr: OCRService, image_data: bytes) -> str:
     from PIL import Image
 
     img = Image.open(io.BytesIO(image_data))
-    return pytesseract.image_to_string(img).strip()
+    return str(pytesseract.image_to_string(img)).strip()
 
 
 def _extract_excel(data: bytes) -> str:

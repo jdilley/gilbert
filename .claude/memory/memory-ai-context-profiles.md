@@ -53,7 +53,7 @@ Profiles control *which* tools are available; RBAC controls *who* can use them. 
 
 ### Management
 - AI tools: `list_ai_profiles`, `set_ai_profile`, `delete_ai_profile`, `assign_ai_profile`, `clear_ai_assignment`
-- Web UI: `/roles/profiles` — profile CRUD + call assignment management
+- Web UI: `/security/profiles` — profile CRUD + call assignment management
 - Config: `ai.profiles` in gilbert.yaml for defaults seeded to storage on first run
 
 ### What It Replaced
@@ -65,6 +65,5 @@ Profiles control *which* tools are available; RBAC controls *who* can use them. 
 ## Related
 - `src/gilbert/core/services/ai.py` — AIContextProfile, profile loading/management, _discover_tools
 - `src/gilbert/interfaces/service.py` — ServiceInfo.ai_calls field
-- `src/gilbert/web/routes/roles.py` — /roles/profiles web UI
-- `src/gilbert/web/templates/ai_profiles.html` — profile management template
+- `frontend/src/components/roles/AIProfiles.tsx` — /security/profiles React page
 - `gilbert.yaml` — ai.profiles config section

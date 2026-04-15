@@ -7,7 +7,7 @@ separate services, now merged into AIService).
 import json as _json
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from gilbert.core.context import get_current_user
@@ -37,9 +37,15 @@ from gilbert.interfaces.configuration import (
     ConfigParam,
     ConfigurationReader,
 )
-
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
-from gilbert.interfaces.storage import Filter, FilterOp, IndexDefinition, Query, SortField, StorageBackend
+from gilbert.interfaces.storage import (
+    Filter,
+    FilterOp,
+    IndexDefinition,
+    Query,
+    SortField,
+    StorageBackend,
+)
 from gilbert.interfaces.tools import (
     ToolCall,
     ToolDefinition,
@@ -49,6 +55,7 @@ from gilbert.interfaces.tools import (
     ToolResult,
 )
 from gilbert.interfaces.ui import ToolOutput, UIBlock
+from gilbert.interfaces.ws import WsConnectionBase
 
 logger = logging.getLogger(__name__)
 ai_logger = logging.getLogger("gilbert.ai")
@@ -196,7 +203,7 @@ class _MemoryHelper:
             return "I need a summary to remember."
         if not content:
             content = summary
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         memory_id = f"memory_{uuid.uuid4().hex[:12]}"
         await self._storage.put(_MEMORY_COLLECTION, memory_id, {
             "memory_id": memory_id,
@@ -251,7 +258,7 @@ class _MemoryHelper:
             record["summary"] = summary
         if content:
             record["content"] = content
-        record["updated_at"] = datetime.now(timezone.utc).isoformat()
+        record["updated_at"] = datetime.now(UTC).isoformat()
         await self._storage.put(_MEMORY_COLLECTION, str(memory_id), record)
         logger.info("Memory updated for %s: %s", user_id, memory_id)
         return f"Memory {memory_id} updated."
@@ -298,6 +305,35 @@ _BUILTIN_PROFILES = [
     AIContextProfile(
         name="text_only",
         description="Text generation only, no tool access",
+        tool_mode="include",
+        tools=[],
+    ),
+    # Default profile for ``sampling/createMessage`` requests from
+    # remote MCP servers — no tools, so a compromised server can't
+    # use sampling as a back door into Gilbert's tool surface.
+    AIContextProfile(
+        name="mcp_sampling",
+        description="MCP server-initiated sampling — text only, no tools",
+        tool_mode="include",
+        tools=[],
+    ),
+    # Default profile for external MCP clients connecting TO Gilbert
+    # via the MCP server endpoint. **Safe-by-default**: ``include``
+    # mode with no tools, so a freshly-registered client can't reach
+    # anything until an admin explicitly whitelists tools on this
+    # profile (or points the client at a broader one like
+    # ``default``). The security posture is "grant nothing, loosen
+    # deliberately" — flipping this to ``all`` would be a foot-gun
+    # because MCP clients impersonate their owner user and would
+    # then have the owner's full tool surface.
+    AIContextProfile(
+        name="mcp_server_client",
+        description=(
+            "Safe-by-default profile for external MCP clients. "
+            "Starts empty — add tools here to grant them to every "
+            "client pointed at this profile, or create narrower "
+            "per-client profiles for untrusted integrations."
+        ),
         tool_mode="include",
         tools=[],
     ),
@@ -644,6 +680,59 @@ class AIService(Service):
         self._assignments.pop(call_name, None)
         logger.info("Call '%s' assignment cleared", call_name)
 
+    # --- One-shot completion (no persistence, no agentic loop) ---
+
+    async def complete_one_shot(
+        self,
+        *,
+        messages: list[Message],
+        system_prompt: str = "",
+        profile_name: str | None = None,
+        max_tokens: int | None = None,
+    ) -> AIResponse:
+        """Run a single round of the AI backend and return the raw response.
+
+        Unlike ``chat``, this method:
+
+        - Doesn't persist to a conversation.
+        - Doesn't loop on tool calls (callers pass a profile with no
+          tools if they want that guarantee — this method doesn't
+          enforce it).
+        - Doesn't take a ``user_ctx`` — ``profile_name`` is the only
+          authorization signal, and the caller is expected to have
+          already decided the call is safe to make.
+
+        Used by ``MCPService`` to service remote sampling requests.
+        Other non-conversational use cases (batch jobs, eval harnesses)
+        can adopt the same entry point rather than hand-rolling
+        ``AIBackend`` calls.
+        """
+        if self._backend is None:
+            raise RuntimeError("AI service is not enabled")
+        profile = self._profiles.get(profile_name) if profile_name else None
+        tools: list[ToolDefinition] = []
+        if profile is not None and profile.tool_mode != "include":
+            # Only ``include``-mode profiles intentionally mask all
+            # tools via an empty list. Other modes should get the
+            # full discovered set — matching ``chat`` semantics.
+            discovered = self._discover_tools(user_ctx=None, profile=profile)
+            tools = [td for _, td in discovered.values()]
+        request = AIRequest(
+            messages=list(messages),
+            system_prompt=system_prompt,
+            tools=tools,
+        )
+        response = await self._backend.generate(request)
+        if max_tokens is not None and response.usage is not None:
+            # The backend may have respected a different max_tokens;
+            # we don't second-guess it, but we surface the usage.
+            logger.debug(
+                "complete_one_shot used %s tokens (cap was %s)",
+                response.usage.input_tokens + response.usage.output_tokens,
+                max_tokens,
+            )
+        return response
+
     # --- Chat ---
 
     async def chat(
@@ -815,7 +904,9 @@ class AIService(Service):
             # Track tool usage for the response metadata. Arguments are
             # sanitized to drop injected ``_user_id`` / ``_room_members``
             # keys before the payload is sent to the frontend.
-            for tc, tr in zip(response.message.tool_calls, tool_results):
+            for tc, tr in zip(
+                response.message.tool_calls, tool_results, strict=False,
+            ):
                 tool_usage.append({
                     "tool_name": tc.tool_name,
                     "is_error": tr.is_error,
@@ -871,7 +962,7 @@ class AIService(Service):
 
             now = datetime.now(ZoneInfo("America/Los_Angeles"))
         except Exception:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
         today = now.strftime("%A, %B %d, %Y")
         time_str = now.strftime("%I:%M %p %Z")
         yesterday = (now - timedelta(days=1)).strftime("%A, %B %d, %Y")
@@ -970,6 +1061,33 @@ class AIService(Service):
 
     # --- Tool Discovery ---
 
+    def discover_tools(
+        self,
+        *,
+        user_ctx: UserContext,
+        profile_name: str | None = None,
+    ) -> dict[str, tuple[ToolProvider, ToolDefinition]]:
+        """Public entry point for non-chat callers that want a filtered
+        tool list (profile + RBAC applied).
+
+        Used by the MCP server endpoint in Part 4.2 — it builds the
+        tool set exposed to external MCP clients. Takes a profile
+        *name* rather than a profile object so the caller doesn't
+        need to resolve profiles itself. An unknown profile name is
+        treated as "no profile" (same as ``profile_name=None``),
+        matching how the ``ai_call`` parameter on ``chat`` handles
+        unassigned call names.
+        """
+        profile: AIContextProfile | None = None
+        if profile_name:
+            profile = self._profiles.get(profile_name)
+            if profile is None:
+                logger.warning(
+                    "discover_tools: unknown profile %r, falling back to all tools",
+                    profile_name,
+                )
+        return self._discover_tools(user_ctx=user_ctx, profile=profile)
+
     def _discover_tools(
         self,
         user_ctx: UserContext | None = None,
@@ -992,7 +1110,7 @@ class AIService(Service):
         for svc in self._resolver.get_all("ai_tools"):
             if not isinstance(svc, ToolProvider):
                 continue
-            for tool_def in svc.get_tools():
+            for tool_def in svc.get_tools(user_ctx):
                 if tool_def.name in tools_by_name:
                     logger.warning(
                         "Duplicate tool name %r from %s (already registered by %s)",
@@ -1480,7 +1598,7 @@ class AIService(Service):
         data: dict[str, Any] = {
             **existing,
             "messages": [self._serialize_message(m) for m in messages],
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
         if user_ctx is not None and user_ctx.user_id != "system":
             data["user_id"] = user_ctx.user_id
@@ -1695,7 +1813,8 @@ class AIService(Service):
         data = await self._storage.get(_COLLECTION, conv_id)
         if data is None:
             return {}
-        return data.get("state", {})
+        state = data.get("state", {})
+        return state if isinstance(state, dict) else {}
 
     @staticmethod
     def _format_state_for_context(state: dict[str, Any]) -> str:
@@ -1735,7 +1854,7 @@ class AIService(Service):
     def tool_provider_name(self) -> str:
         return "ai"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         if not self._enabled:
             return []
         tools = [
@@ -1778,7 +1897,7 @@ class AIService(Service):
                 required_role="admin",
                 # No slash_command: the nested ARRAY + OBJECT params
                 # (tools, tool_roles) don't translate cleanly to positional
-                # shell form. Manage profiles via /roles/profiles in the UI
+                # shell form. Manage profiles via /security/profiles in the UI
                 # or let the AI call this tool directly.
             ),
             ToolDefinition(
@@ -1846,7 +1965,7 @@ class AIService(Service):
                 required_role="admin",
                 # No slash_command: persona text is typically multi-line
                 # (paragraphs of behavioral instructions); inline shell
-                # quoting is impractical. Use /roles/persona in the UI.
+                # quoting is impractical. Edit persona from the chat sidebar in the UI.
             ),
             ToolDefinition(
                 name="reset_persona",
@@ -2133,8 +2252,6 @@ class AIService(Service):
         Drives chat-input autocomplete. Results are filtered by RBAC so
         users only see commands they're actually allowed to run.
         """
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
 
         slash_cmds = self._slash_commands_for_user(conn.user_ctx)
         commands: list[dict[str, Any]] = []
@@ -2171,9 +2288,7 @@ class AIService(Service):
             "commands": commands,
         }
 
-    async def _ws_chat_send(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
+    async def _ws_chat_send(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
 
         message = frame.get("message", "").strip()
         if not message:
@@ -2203,7 +2318,12 @@ class AIService(Service):
 
         try:
             if is_shared:
-                from gilbert.core.chat import mentions_gilbert, build_room_context, publish_event
+                from gilbert.core.chat import build_room_context, mentions_gilbert, publish_event
+
+                # ``is_shared`` was set from ``conv_data.get("shared")``
+                # so we know conv_data is a dict at this point.
+                assert conv_data is not None
+                assert conversation_id is not None
 
                 addressed = mentions_gilbert(message) or is_slash_command
                 tagged_message = f"[{conn.user_ctx.display_name}]: {message}"
@@ -2267,10 +2387,8 @@ class AIService(Service):
             "tool_usage": tool_usage,
         }
 
-    async def _ws_conversation_create(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_conversation_create(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
         """Create an empty named personal conversation."""
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
 
         title = (frame.get("title") or "").strip() or "New conversation"
 
@@ -2278,7 +2396,7 @@ class AIService(Service):
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
 
         conv_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         await self._storage.put(_COLLECTION, conv_id, {
             "title": title,
@@ -2295,9 +2413,7 @@ class AIService(Service):
             "title": title,
         }
 
-    async def _ws_form_submit(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
+    async def _ws_form_submit(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
 
         conversation_id = frame.get("conversation_id")
         block_id = frame.get("block_id")
@@ -2366,9 +2482,7 @@ class AIService(Service):
             "ui_blocks": self._filter_blocks_for_user(ui_blocks, conn.user_id),
         }
 
-    async def _ws_history_load(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
+    async def _ws_history_load(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
 
         conversation_id = frame.get("conversation_id")
         if not conversation_id:
@@ -2523,10 +2637,8 @@ class AIService(Service):
             ]
         return result
 
-    async def _ws_conversation_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_conversation_list(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
         from gilbert.core.chat import conv_summary
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
 
         personal = await self.list_conversations(user_id=conn.user_id, limit=30)
         shared = await self.list_shared_conversations(user_id=conn.user_id, limit=30)
@@ -2536,10 +2648,8 @@ class AIService(Service):
 
         return {"type": "chat.conversation.list.result", "ref": frame.get("id"), "conversations": conversations}
 
-    async def _ws_conversation_rename(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_conversation_rename(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
         from gilbert.core.chat import check_conversation_access, publish_event
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
 
         conversation_id = frame.get("conversation_id")
         title = (frame.get("title") or "").strip()
@@ -2566,9 +2676,7 @@ class AIService(Service):
 
         return {"type": "chat.conversation.rename.result", "ref": frame.get("id"), "status": "ok", "title": title}
 
-    async def _ws_conversation_delete(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
+    async def _ws_conversation_delete(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
 
         conversation_id = frame.get("conversation_id")
         if not conversation_id:
@@ -2589,10 +2697,8 @@ class AIService(Service):
         await self._storage.delete(_COLLECTION, conversation_id)
         return {"type": "chat.conversation.delete.result", "ref": frame.get("id"), "status": "ok"}
 
-    async def _ws_room_create(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_room_create(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
         from gilbert.core.chat import publish_event
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
 
         title = (frame.get("title") or "").strip()
         if not title:
@@ -2603,9 +2709,9 @@ class AIService(Service):
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Storage not available", "code": 503}
 
         import uuid as _uuid
-        from datetime import datetime, timezone as tz
+        from datetime import datetime
         conv_id = str(_uuid.uuid4())
-        now = datetime.now(tz.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         members = [{"user_id": conn.user_id, "display_name": conn.user_ctx.display_name, "role": "owner", "joined_at": now}]
         data = {
@@ -2633,10 +2739,8 @@ class AIService(Service):
             "members": [{"user_id": m["user_id"], "display_name": m["display_name"]} for m in members],
         }
 
-    async def _ws_room_join(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_room_join(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
         from gilbert.core.chat import publish_event
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
 
         conversation_id = frame.get("conversation_id")
         if not conversation_id:
@@ -2653,8 +2757,8 @@ class AIService(Service):
         if any(m.get("user_id") == conn.user_id for m in members):
             return {"type": "chat.room.join.result", "ref": frame.get("id"), "status": "already_member"}
 
-        from datetime import datetime, timezone as tz
-        members.append({"user_id": conn.user_id, "display_name": conn.user_ctx.display_name, "role": "member", "joined_at": datetime.now(tz.utc).isoformat()})
+        from datetime import datetime
+        members.append({"user_id": conn.user_id, "display_name": conn.user_ctx.display_name, "role": "member", "joined_at": datetime.now(UTC).isoformat()})
         data["members"] = members
         await self._storage.put(_COLLECTION, conversation_id, data)
 
@@ -2667,10 +2771,8 @@ class AIService(Service):
 
         return {"type": "chat.room.join.result", "ref": frame.get("id"), "status": "ok"}
 
-    async def _ws_room_leave(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_room_leave(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
         from gilbert.core.chat import publish_event
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
 
         conversation_id = frame.get("conversation_id")
         if not conversation_id:
@@ -2700,10 +2802,8 @@ class AIService(Service):
 
         return {"type": "chat.room.leave.result", "ref": frame.get("id"), "status": "ok"}
 
-    async def _ws_room_kick(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_room_kick(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
         from gilbert.core.chat import publish_event
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
 
         conversation_id = frame.get("conversation_id")
         target_user = frame.get("user_id")
@@ -2729,10 +2829,8 @@ class AIService(Service):
 
         return {"type": "chat.room.kick.result", "ref": frame.get("id"), "status": "ok"}
 
-    async def _ws_room_invite(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_room_invite(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
         from gilbert.core.chat import publish_event
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
 
         conversation_id = frame.get("conversation_id")
         user_ids = frame.get("user_ids", [])
@@ -2754,8 +2852,8 @@ class AIService(Service):
         member_ids = {m.get("user_id") for m in members}
         invite_ids = {inv.get("user_id") for inv in invites}
 
-        from datetime import datetime, timezone as tz
-        now = datetime.now(tz.utc).isoformat()
+        from datetime import datetime
+        now = datetime.now(UTC).isoformat()
         invited = []
 
         for entry in user_ids:
@@ -2789,9 +2887,7 @@ class AIService(Service):
 
         return {"type": "chat.room.invite.result", "ref": frame.get("id"), "status": "ok", "invited": invited}
 
-    async def _ws_room_invite_revoke(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
+    async def _ws_room_invite_revoke(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
 
         conversation_id = frame.get("conversation_id")
         target_user = frame.get("user_id")
@@ -2825,10 +2921,8 @@ class AIService(Service):
             "ref": frame.get("id"), "status": "ok",
         }
 
-    async def _ws_room_invite_respond(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_room_invite_respond(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
         from gilbert.core.chat import publish_event
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
 
         conversation_id = frame.get("conversation_id")
         action = frame.get("action")  # "accept" or "decline"
@@ -2853,13 +2947,13 @@ class AIService(Service):
         gilbert = conn.manager.gilbert
 
         if action == "accept":
-            from datetime import datetime, timezone as tz
+            from datetime import datetime
             members = data.get("members", [])
             members.append({
                 "user_id": conn.user_id,
                 "display_name": conn.user_ctx.display_name,
                 "role": "member",
-                "joined_at": datetime.now(tz.utc).isoformat(),
+                "joined_at": datetime.now(UTC).isoformat(),
             })
             data["members"] = members
             await self._storage.put(_COLLECTION, conversation_id, data)
@@ -2881,10 +2975,8 @@ class AIService(Service):
 
         return {"type": "chat.room.invite_respond.result", "ref": frame.get("id"), "status": "ok", "action": action}
 
-    async def _ws_chat_list_users(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
+    async def _ws_chat_list_users(self, conn: WsConnectionBase, frame: dict[str, Any]) -> dict[str, Any] | None:
         """List all users for invite modal."""
-        from gilbert.interfaces.ws import WsConnectionBase as WsConnection
-        conn: WsConnection = conn
 
         gilbert = conn.manager.gilbert
         if gilbert is None:

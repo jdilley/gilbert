@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.email import EmailAddress, EmailAttachment
@@ -56,17 +56,21 @@ class Mailbox:
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> Mailbox:
+        raw_backend_config = data.get("backend_config") or {}
+        raw_shared_users = data.get("shared_with_users") or []
+        raw_shared_roles = data.get("shared_with_roles") or []
+        raw_poll = data.get("poll_interval_sec", 60) or 60
         return cls(
             id=str(data.get("id") or data.get("_id") or ""),
             name=str(data.get("name", "")),
             email_address=str(data.get("email_address", "")),
             backend_name=str(data.get("backend_name", "")),
-            backend_config=dict(data.get("backend_config") or {}),  # type: ignore[arg-type]
+            backend_config=cast("dict[str, Any]", raw_backend_config),
             owner_user_id=str(data.get("owner_user_id", "")),
-            shared_with_users=list(data.get("shared_with_users") or []),  # type: ignore[arg-type]
-            shared_with_roles=list(data.get("shared_with_roles") or []),  # type: ignore[arg-type]
+            shared_with_users=cast("list[str]", raw_shared_users),
+            shared_with_roles=cast("list[str]", raw_shared_roles),
             poll_enabled=bool(data.get("poll_enabled", True)),
-            poll_interval_sec=int(data.get("poll_interval_sec", 60) or 60),  # type: ignore[arg-type]
+            poll_interval_sec=int(cast("int", raw_poll)),
             created_at=str(data.get("created_at", "")),
         )
 
@@ -216,7 +220,9 @@ class OutboxDraft:
             ),
             in_reply_to=str(data.get("in_reply_to", "")),
             thread_id=str(data.get("thread_id", "")),
-            attach_documents=list(data.get("attach_documents") or []),  # type: ignore[arg-type]
+            attach_documents=cast(
+                "list[str]", data.get("attach_documents") or [],
+            ),
             reply_to=_addr(raw_reply_to) if isinstance(raw_reply_to, dict) else None,
             from_name=str(data.get("from_name", "")),
         )

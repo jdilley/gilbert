@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { useWsApi } from "@/hooks/useWsApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { useAuth } from "@/hooks/useAuth";
 import {
   Card,
   CardDescription,
@@ -17,6 +18,7 @@ import {
   DatabaseIcon,
   MonitorIcon,
   LayoutDashboardIcon,
+  PlugIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -27,13 +29,14 @@ interface CardStyle {
 }
 
 const CARD_STYLES: Record<string, CardStyle> = {
-  "/chat": { icon: MessageSquareIcon, color: "text-blue-500", border: "border-blue-500/40" },
-  "/documents": { icon: FileTextIcon, color: "text-amber-500", border: "border-amber-500/40" },
-  "/inbox": { icon: InboxIcon, color: "text-green-500", border: "border-green-500/40" },
-  "/roles": { icon: ShieldIcon, color: "text-purple-500", border: "border-purple-500/40" },
-  "/system": { icon: SettingsIcon, color: "text-slate-500", border: "border-slate-500/40" },
-  "/entities": { icon: DatabaseIcon, color: "text-cyan-500", border: "border-cyan-500/40" },
-  "/screens": { icon: MonitorIcon, color: "text-rose-500", border: "border-rose-500/40" },
+  "message-square": { icon: MessageSquareIcon, color: "text-blue-500", border: "border-blue-500/40" },
+  "file-text": { icon: FileTextIcon, color: "text-amber-500", border: "border-amber-500/40" },
+  "inbox": { icon: InboxIcon, color: "text-green-500", border: "border-green-500/40" },
+  "shield": { icon: ShieldIcon, color: "text-purple-500", border: "border-purple-500/40" },
+  "settings": { icon: SettingsIcon, color: "text-slate-500", border: "border-slate-500/40" },
+  "database": { icon: DatabaseIcon, color: "text-cyan-500", border: "border-cyan-500/40" },
+  "monitor": { icon: MonitorIcon, color: "text-rose-500", border: "border-rose-500/40" },
+  "plug": { icon: PlugIcon, color: "text-pink-500", border: "border-pink-500/40" },
 };
 
 const DEFAULT_STYLE: CardStyle = {
@@ -45,10 +48,11 @@ const DEFAULT_STYLE: CardStyle = {
 export function DashboardPage() {
   const api = useWsApi();
   const { connected } = useWebSocket();
+  const { user } = useAuth();
   const { data, isLoading } = useQuery({
-    queryKey: ["dashboard"],
+    queryKey: ["dashboard", user?.user_id ?? "anon"],
     queryFn: api.getDashboard,
-    enabled: connected,
+    enabled: connected && !!user,
   });
 
   if (isLoading) {
@@ -62,7 +66,7 @@ export function DashboardPage() {
       <h1 className="text-xl sm:text-2xl font-semibold mb-4 sm:mb-6 text-center">Gilbert</h1>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
         {data?.cards.map((card) => {
-          const style = CARD_STYLES[card.url] ?? DEFAULT_STYLE;
+          const style = CARD_STYLES[card.icon] ?? DEFAULT_STYLE;
           const Icon = style.icon;
           return (
             <Link key={card.url} to={card.url}>

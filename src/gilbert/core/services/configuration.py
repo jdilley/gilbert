@@ -11,16 +11,18 @@ Subsequent starts read directly from entity storage.
 
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
 import yaml
 
 from gilbert.config import (
-    GilbertConfig,
     OVERRIDE_CONFIG_PATH,
     YAML_ONLY_SECTIONS,
+    GilbertConfig,
 )
+from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.configuration import (
     ConfigAction,
     ConfigActionProvider,
@@ -125,7 +127,7 @@ class ConfigurationService(Service):
         # Write sentinel
         await storage.put(_META_COLLECTION, _SCHEMA_ENTITY_ID, {
             "version": _SCHEMA_VERSION,
-            "migrated_at": datetime.now(timezone.utc).isoformat(),
+            "migrated_at": datetime.now(UTC).isoformat(),
             "source": "yaml",
         })
         logger.info("Config seeded to entity storage")
@@ -190,7 +192,8 @@ class ConfigurationService(Service):
         """
         section = self.get_section(namespace)
         try:
-            return json.loads(json.dumps(section, default=str))
+            result = json.loads(json.dumps(section, default=str))
+            return dict(result) if isinstance(result, dict) else {}
         except (TypeError, ValueError):
             return {}
 
@@ -408,7 +411,7 @@ class ConfigurationService(Service):
             elif values is not None and p.type.value == "array":
                 # Fallback: use currently stored values as choices so the UI
                 # can at least show what's selected (e.g., before backend starts)
-                current = values
+                current: Any = values
                 for part in p.key.split("."):
                     if isinstance(current, dict):
                         current = current.get(part)
@@ -537,7 +540,7 @@ class ConfigurationService(Service):
     @classmethod
     def _deep_mask(cls, d: dict[str, Any]) -> dict[str, Any]:
         """Recursively mask values whose keys match known sensitive names."""
-        result = {}
+        result: dict[str, Any] = {}
         for k, v in d.items():
             if k in cls._SENSITIVE_KEYS and isinstance(v, str) and v:
                 result[k] = cls._MASK
@@ -685,7 +688,7 @@ class ConfigurationService(Service):
     def tool_provider_name(self) -> str:
         return "configuration"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         return [
             ToolDefinition(
                 name="get_configuration",

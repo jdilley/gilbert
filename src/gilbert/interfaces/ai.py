@@ -5,10 +5,13 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.tools import ToolCall, ToolDefinition, ToolResult
+
+if TYPE_CHECKING:
+    from gilbert.interfaces.auth import UserContext
 
 
 class AIBackendError(RuntimeError):
@@ -111,7 +114,7 @@ class AIBackend(ABC):
     not here.
     """
 
-    _registry: dict[str, type["AIBackend"]] = {}
+    _registry: dict[str, type[AIBackend]] = {}
     backend_name: str = ""
     """Short identifier used in config (e.g., ``"anthropic"``)."""
 
@@ -121,7 +124,7 @@ class AIBackend(ABC):
             AIBackend._registry[cls.backend_name] = cls
 
     @classmethod
-    def registered_backends(cls) -> dict[str, type["AIBackend"]]:
+    def registered_backends(cls) -> dict[str, type[AIBackend]]:
         """Return ``{name: class}`` for all registered backends."""
         return dict(cls._registry)
 
@@ -147,4 +150,29 @@ class AIBackend(ABC):
     @abstractmethod
     async def generate(self, request: AIRequest) -> AIResponse:
         """Send a request and return the model's response (single round)."""
+        ...
+
+
+@runtime_checkable
+class AIProvider(Protocol):
+    """Protocol for services providing conversational AI capabilities.
+
+    Callers resolve this via ``resolver.get_capability("ai")`` and
+    ``isinstance(svc, AIProvider)`` to type-narrow before invoking
+    the ``chat`` entry point. Kept deliberately narrow — only the
+    fields the existing greeting/roast/etc callers actually use. If
+    a new caller needs another method, add it here rather than
+    casting or using ``getattr``.
+    """
+
+    async def chat(
+        self,
+        user_message: str,
+        conversation_id: str | None = None,
+        user_ctx: UserContext | None = None,
+        system_prompt: str | None = None,
+        ai_call: str | None = None,
+    ) -> tuple[str, str, list[dict[str, Any]], list[dict[str, Any]]]:
+        """Run a full AI chat turn. Returns
+        ``(response_text, conversation_id, ui_blocks, tool_usage)``."""
         ...

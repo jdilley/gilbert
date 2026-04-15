@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.plugin import Plugin
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.storage import Query, StorageBackend, StorageProvider
@@ -490,7 +491,7 @@ class PluginManagerService(Service, ToolProvider, WsHandlerProvider):
     def tool_provider_name(self) -> str:
         return "plugin_manager"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         return [
             ToolDefinition(
                 name="plugin_install",

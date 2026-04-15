@@ -10,11 +10,11 @@ from typing import Any
 
 import httpx
 
-
 from gilbert.core.services._backend_actions import (
     all_backend_actions,
     invoke_backend_action,
 )
+from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.configuration import (
     ConfigAction,
     ConfigActionResult,
@@ -203,7 +203,7 @@ class WebSearchService(Service, ToolProvider):
     def tool_provider_name(self) -> str:
         return "websearch"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         if not self._enabled:
             return []
         return [

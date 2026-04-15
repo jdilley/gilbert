@@ -5,9 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gilbert.core.services.roast import RoastService, _DEFAULT_ROASTS
-
-
+from gilbert.core.services.roast import _DEFAULT_ROASTS, RoastService
 from gilbert.core.services.scheduler import SchedulerService
 
 
@@ -282,7 +280,8 @@ class TestAnnounce:
     @pytest.mark.asyncio
     async def test_announce_with_speakers(self, roast_service: RoastService, resolver: FakeResolver) -> None:
         """Announces via speaker service when available."""
-        fake_speaker = MagicMock()
+        from gilbert.interfaces.speaker import SpeakerProvider
+        fake_speaker = MagicMock(spec=SpeakerProvider)
         fake_speaker.announce = AsyncMock()
         resolver.caps["speaker_control"] = fake_speaker
 

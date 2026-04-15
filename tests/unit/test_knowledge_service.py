@@ -19,7 +19,6 @@ from gilbert.interfaces.knowledge import (
     SearchResult,
 )
 
-
 # --- Document type and metadata ---
 
 

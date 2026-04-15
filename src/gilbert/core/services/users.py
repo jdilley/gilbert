@@ -7,6 +7,7 @@ import uuid
 from dataclasses import replace
 from typing import Any
 
+from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.configuration import (
     BackendActionProvider,
     ConfigAction,
@@ -517,6 +518,7 @@ class UserService(Service):
                 "error": "password is required", "code": 400,
             }
         password_hash = self._hash_password(password)
+        assert self._backend is not None
         await self._backend.update_user(user_id, {"password_hash": password_hash})
         return {"type": "users.user.reset_password.result", "ref": frame.get("id"), "status": "ok"}
 
@@ -526,7 +528,7 @@ class UserService(Service):
     def tool_provider_name(self) -> str:
         return "users"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         return [
             ToolDefinition(
                 name="list_users",

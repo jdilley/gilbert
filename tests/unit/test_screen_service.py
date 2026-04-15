@@ -13,7 +13,6 @@ from gilbert.core.services.screens import (
     _strip_screen_suffix,
 )
 
-
 # ── Helpers ──────────────────────────────────────────────────
 
 
@@ -245,8 +244,9 @@ class TestTempFiles:
         assert path.suffix == ".pdf"
 
     def test_extract_pages_out_of_range(self, started_service: ScreenService) -> None:
-        from pypdf import PdfWriter
         import io
+
+        from pypdf import PdfWriter
 
         writer = PdfWriter()
         writer.add_blank_page(width=612, height=792)
@@ -432,9 +432,10 @@ class TestToolDefinitions:
 
 def _make_test_pdf(page_texts: list[str]) -> bytes:
     """Create a minimal PDF with the given text on each page."""
+    import io as _io
+
     from reportlab.lib.pagesizes import letter
     from reportlab.pdfgen import canvas as rl_canvas
-    import io as _io
 
     buf = _io.BytesIO()
     c = rl_canvas.Canvas(buf, pagesize=letter)

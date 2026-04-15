@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import markdown
@@ -315,7 +315,7 @@ class InboxAIChatService(Service):
         """Check if we already replied to this message."""
         if self._storage is None:
             return False
-        return await self._storage.exists(self._REPLIED_COLLECTION, message_id)
+        return bool(await self._storage.exists(self._REPLIED_COLLECTION, message_id))
 
     async def _mark_replied(self, message_id: str, sender_email: str) -> None:
         """Record that we replied to a message."""
@@ -324,7 +324,7 @@ class InboxAIChatService(Service):
         await self._storage.put(self._REPLIED_COLLECTION, message_id, {
             "message_id": message_id,
             "sender_email": sender_email,
-            "replied_at": datetime.now(timezone.utc).isoformat(),
+            "replied_at": datetime.now(UTC).isoformat(),
         })
 
     # ── Allowlist ──────────────────────────────────────────────
@@ -337,10 +337,7 @@ class InboxAIChatService(Service):
             return True
 
         domain = email_lower.rsplit("@", 1)[-1] if "@" in email_lower else ""
-        if domain in self._allowed_domains:
-            return True
-
-        return False
+        return domain in self._allowed_domains
 
     # ── User resolution ────────────────────────────────────────
 
@@ -375,7 +372,7 @@ class InboxAIChatService(Service):
     def tool_provider_name(self) -> str:
         return "inbox_ai_chat"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         if not self._enabled:
             return []
         return [
@@ -447,7 +444,8 @@ class InboxAIChatService(Service):
         """Look up the AI conversation ID for an email thread."""
         record = await self._storage.get(_THREAD_COLLECTION, thread_id)
         if record:
-            return record.get("conversation_id")
+            cid = record.get("conversation_id")
+            return str(cid) if cid is not None else None
         return None
 
     async def _set_conversation_id(
@@ -458,7 +456,7 @@ class InboxAIChatService(Service):
             "thread_id": thread_id,
             "conversation_id": conversation_id,
             "sender_email": sender_email,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         })
 
 

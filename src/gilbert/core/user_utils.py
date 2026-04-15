@@ -32,7 +32,7 @@ async def resolve_display_name(
             try:
                 user = await user_svc.backend.get_user(user_id)
                 if user:
-                    name = user.get("display_name", "")
+                    name = str(user.get("display_name", ""))
                     if name:
                         return name.split()[0] if first_name_only else name
             except Exception:

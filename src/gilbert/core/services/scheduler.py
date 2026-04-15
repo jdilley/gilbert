@@ -249,7 +249,7 @@ class SchedulerService(Service):
                     asyncio.gather(*tasks, return_exceptions=True),
                     timeout=3.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning("Scheduler stop timed out — some jobs may still be running")
         self._jobs.clear()
         logger.info("Scheduler stopped")
@@ -993,7 +993,7 @@ class SchedulerService(Service):
     def tool_provider_name(self) -> str:
         return "scheduler"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         return [
             ToolDefinition(
                 name="list_timers",
@@ -1565,7 +1565,7 @@ class SchedulerService(Service):
         # Ownership check: non-admins can only cancel their own jobs.
         user = getattr(conn, "user_ctx", None)
         user_id = getattr(user, "user_id", "") if user else ""
-        roles = getattr(user, "roles", frozenset()) if user else frozenset()
+        roles: frozenset[str] = getattr(user, "roles", frozenset()) if user else frozenset()
         is_admin = "admin" in roles or getattr(conn, "user_level", 999) < 0
         requester_id = "" if is_admin else user_id
 

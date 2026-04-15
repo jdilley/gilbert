@@ -9,7 +9,6 @@ import yaml
 from gilbert.interfaces.plugin import Plugin, PluginContext, PluginMeta
 from gilbert.plugins.loader import PluginError, PluginLoader, PluginManifest
 
-
 # --- Helpers ---
 
 

@@ -1,7 +1,8 @@
 """Tests for ServiceManager — registration, dependency resolution, lifecycle."""
 
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
 
 from gilbert.core.service_manager import ServiceManager
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver

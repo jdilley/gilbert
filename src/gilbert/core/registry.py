@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar, cast
 
 T = TypeVar("T")
 
@@ -21,11 +22,11 @@ class ServiceRegistry:
     def get(self, interface: type[T]) -> T:
         """Retrieve the implementation for an interface type."""
         if interface in self._services:
-            return self._services[interface]  # type: ignore[return-value]
+            return cast(T, self._services[interface])
         if interface in self._factories:
             instance = self._factories[interface]()
             self._services[interface] = instance
-            return instance  # type: ignore[return-value]
+            return cast(T, instance)
         raise LookupError(f"No implementation registered for {interface.__name__}")
 
     def register_factory(self, interface: type[T], factory: Callable[..., T]) -> None:

@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from gilbert.core.services.ai import AIContextProfile, AIService
 from gilbert.core.services.access_control import AccessControlService
+from gilbert.core.services.ai import AIContextProfile, AIService
 from gilbert.core.services.storage import StorageService
 from gilbert.interfaces.ai import (
     AIBackend,
@@ -23,7 +23,6 @@ from gilbert.interfaces.tools import (
     ToolCall,
     ToolDefinition,
 )
-
 
 # --- Stubs ---
 
@@ -124,7 +123,7 @@ class StubToolProvider(Service):
     def tool_provider_name(self) -> str:
         return self._name
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         return list(self._tools)
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:

@@ -7,12 +7,12 @@ from typing import Any
 from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.storage import StorageBackend
-from gilbert.interfaces.users import UserManagementProvider
 from gilbert.interfaces.tools import (
     ToolDefinition,
     ToolParameter,
     ToolParameterType,
 )
+from gilbert.interfaces.users import UserManagementProvider
 
 logger = logging.getLogger(__name__)
 
@@ -356,7 +356,8 @@ class AccessControlService(Service):
         Checks overrides first, then falls back to the built-in defaults
         in ``ws_protocol``. Longest prefix match wins.
         """
-        from gilbert.interfaces.acl import DEFAULT_EVENT_VISIBILITY as _EVENT_VISIBILITY, DEFAULT_VISIBILITY_LEVEL as _DEFAULT_VISIBILITY_LEVEL
+        from gilbert.interfaces.acl import DEFAULT_EVENT_VISIBILITY as _EVENT_VISIBILITY
+        from gilbert.interfaces.acl import DEFAULT_VISIBILITY_LEVEL as _DEFAULT_VISIBILITY_LEVEL
 
         # Check overrides (longest prefix match)
         best = ""
@@ -460,7 +461,7 @@ class AccessControlService(Service):
     def tool_provider_name(self) -> str:
         return "access_control"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         return [
             ToolDefinition(
                 name="list_roles",

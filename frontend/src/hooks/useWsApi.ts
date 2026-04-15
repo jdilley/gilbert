@@ -11,7 +11,7 @@ import { useWebSocket } from "./useWebSocket";
 import type { ConversationSummary, ConversationDetail, ChatResponse, ConversationMember } from "@/types/chat";
 import type { Role, ToolPermission, AIProfile, UserRoleAssignment, CollectionACL } from "@/types/roles";
 import type { DocumentNode, SearchResult } from "@/types/documents";
-import type { DashboardCard } from "@/types/dashboard";
+import type { DashboardResponse } from "@/types/dashboard";
 import type { ServiceInfo } from "@/types/system";
 import type { CollectionGroup, CollectionData, EntityData } from "@/types/entities";
 import type {
@@ -34,6 +34,15 @@ import type {
 import type { Job } from "@/types/scheduler";
 import type { SlashCommand } from "@/types/slash";
 import type { InstalledPlugin, InstallPluginResponse } from "@/types/plugins";
+import type {
+  McpResourceContent,
+  McpResourceSpec,
+  McpServer,
+  McpServerClient,
+  McpServerClientDraft,
+  McpServerDraft,
+  McpToolSpec,
+} from "@/types/mcp";
 
 export function useWsApi() {
   const { rpc } = useWebSocket();
@@ -300,7 +309,7 @@ export function useWsApi() {
     // ── Dashboard ─────────────────────────────────────────────────
 
     getDashboard: () =>
-      rpc<{ cards: DashboardCard[] }>({ type: "dashboard.get" }),
+      rpc<DashboardResponse>({ type: "dashboard.get" }),
 
     // ── System ────────────────────────────────────────────────────
 
@@ -413,6 +422,174 @@ export function useWsApi() {
 
     runJobNow: (name: string) =>
       rpc<{ status: string; name: string }>({ type: "scheduler.job.run_now", name }),
+
+    // ── MCP (Model Context Protocol) ──────────────────────────────
+
+    listMcpServers: () =>
+      rpc<{ servers: McpServer[] }>({ type: "mcp.servers.list" })
+        .then((r) => r.servers),
+
+    createMcpServer: (draft: McpServerDraft) =>
+      rpc<{ server: McpServer }>({ type: "mcp.servers.create", server: draft })
+        .then((r) => r.server),
+
+    updateMcpServer: (draft: McpServerDraft) =>
+      rpc<{ server: McpServer }>({ type: "mcp.servers.update", server: draft })
+        .then((r) => r.server),
+
+    deleteMcpServer: (server_id: string) =>
+      rpc<{ server_id: string }>({ type: "mcp.servers.delete", server_id }),
+
+    startMcpServer: (server_id: string) =>
+      rpc<{ server_id: string; connected: boolean; last_error: string | null }>({
+        type: "mcp.servers.start",
+        server_id,
+      }),
+
+    stopMcpServer: (server_id: string) =>
+      rpc<{ server_id: string }>({ type: "mcp.servers.stop", server_id }),
+
+    testMcpServer: (draft: McpServerDraft) =>
+      rpc<{ tools: McpToolSpec[] }>({ type: "mcp.servers.test", server: draft })
+        .then((r) => r.tools),
+
+    listMcpServerTools: (server_id: string) =>
+      rpc<{
+        server_id: string;
+        connected: boolean;
+        last_error: string | null;
+        tools: McpToolSpec[];
+      }>({ type: "mcp.servers.tools", server_id }),
+
+    startMcpOAuth: (server_id: string) =>
+      rpc<{
+        server_id: string;
+        authorization_url: string;
+        state: string;
+      }>({ type: "mcp.servers.oauth_start", server_id }),
+
+    cancelMcpOAuth: (server_id: string) =>
+      rpc<{ server_id: string }>({ type: "mcp.servers.oauth_cancel", server_id }),
+
+    listMcpResources: (server_id: string) =>
+      rpc<{ server_id: string; resources: McpResourceSpec[] }>({
+        type: "mcp.servers.resources.list",
+        server_id,
+      }).then((r) => r.resources),
+
+    readMcpResource: (server_id: string, uri: string) =>
+      rpc<{
+        server_id: string;
+        uri: string;
+        contents: McpResourceContent[];
+      }>({ type: "mcp.servers.resources.read", server_id, uri }).then(
+        (r) => r.contents,
+      ),
+
+    listMcpPrompts: (server_id: string) =>
+      rpc<{
+        server_id: string;
+        prompts: {
+          name: string;
+          title: string;
+          description: string;
+          arguments: {
+            name: string;
+            description: string;
+            required: boolean;
+          }[];
+        }[];
+      }>({ type: "mcp.servers.prompts.list", server_id }).then(
+        (r) => r.prompts,
+      ),
+
+    renderMcpPrompt: (
+      server_id: string,
+      name: string,
+      args: Record<string, string>,
+    ) =>
+      rpc<{
+        server_id: string;
+        name: string;
+        description: string;
+        messages: {
+          role: "user" | "assistant" | "system";
+          content: {
+            type: string;
+            text: string;
+            mime_type: string;
+            uri: string;
+            data: string;
+          };
+        }[];
+      }>({
+        type: "mcp.servers.prompts.get",
+        server_id,
+        name,
+        arguments: args,
+      }).then((r) => ({
+        description: r.description,
+        messages: r.messages,
+      })),
+
+    // ── MCP server (Gilbert-as-MCP client registrations) ──────────
+
+    listMcpClients: () =>
+      rpc<{ clients: McpServerClient[] }>({ type: "mcp.clients.list" })
+        .then((r) => r.clients),
+
+    getMcpClient: (client_id: string) =>
+      rpc<{ client: McpServerClient }>({
+        type: "mcp.clients.get",
+        client_id,
+      }).then((r) => r.client),
+
+    createMcpClient: (draft: McpServerClientDraft) =>
+      rpc<{ client: McpServerClient; token: string }>({
+        type: "mcp.clients.create",
+        client: draft,
+      }),
+
+    updateMcpClient: (
+      client_id: string,
+      patch: Partial<McpServerClientDraft> & { active?: boolean },
+    ) =>
+      rpc<{ client: McpServerClient }>({
+        type: "mcp.clients.update",
+        client_id,
+        client: patch,
+      }).then((r) => r.client),
+
+    deleteMcpClient: (client_id: string) =>
+      rpc<{ client_id: string }>({
+        type: "mcp.clients.delete",
+        client_id,
+      }),
+
+    rotateMcpClientToken: (client_id: string) =>
+      rpc<{ client: McpServerClient; token: string }>({
+        type: "mcp.clients.rotate_token",
+        client_id,
+      }),
+
+    previewMcpClientTools: (
+      owner_user_id: string,
+      profile_name: string,
+    ) =>
+      rpc<{
+        owner_user_id: string;
+        profile_name: string;
+        tool_count: number;
+        tools: {
+          name: string;
+          description: string;
+          required_role: string;
+        }[];
+      }>({
+        type: "mcp.clients.preview_tools",
+        owner_user_id,
+        profile_name,
+      }),
 
   }), [rpc]);
 }

@@ -44,7 +44,7 @@ class _CoreToolService(Service):
     def tool_provider_name(self) -> str:
         return "core_tools"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         return list(self._tools)
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
@@ -91,6 +91,12 @@ class _StubACL:
 
     def resolve_rpc_level(self, frame_type: str) -> int:
         return 100
+
+    def check_collection_read(self, user_ctx: UserContext, collection: str) -> bool:
+        return True
+
+    def check_collection_write(self, user_ctx: UserContext, collection: str) -> bool:
+        return True
 
 
 def _resolver_with(services: list[Service]) -> ServiceResolver:

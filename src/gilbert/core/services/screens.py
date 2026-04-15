@@ -17,10 +17,11 @@ import logging
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.events import Event
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
@@ -64,7 +65,7 @@ class ConnectedScreen:
     name: str
     key: str  # normalized lowercase key
     default_url: str | None = None
-    connected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    connected_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     queue: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
 
 
@@ -74,7 +75,7 @@ class TempFile:
 
     token: str
     path: Path
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 def _normalize(name: str) -> str:
@@ -97,9 +98,7 @@ def _strip_screen_suffix(name: str) -> str:
     while words and words[-1] in _SCREEN_SUFFIXES:
         words.pop()
     result = " ".join(words)
-    if result.endswith("\u2019s"):
-        result = result[:-2]
-    elif result.endswith("'s"):
+    if result.endswith("\u2019s") or result.endswith("'s"):
         result = result[:-2]
     return result.strip()
 
@@ -163,9 +162,8 @@ class ScreenService(Service):
 
         # Register periodic cleanup with scheduler
         scheduler = resolver.get_capability("scheduler")
-        if scheduler is not None:
-            from gilbert.interfaces.scheduler import Schedule
-
+        from gilbert.interfaces.scheduler import Schedule, SchedulerProvider
+        if isinstance(scheduler, SchedulerProvider):
             scheduler.add_job(
                 "screen-tmp-cleanup",
                 Schedule.every(self._cleanup_interval),
@@ -285,7 +283,7 @@ class ScreenService(Service):
                     if msg == _SENTINEL:
                         return
                     yield msg
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": keepalive\n\n"
         finally:
             self.disconnect(screen.key, screen)
@@ -423,7 +421,7 @@ class ScreenService(Service):
         entry = self._files.get(token)
         if not entry:
             return None
-        age = (datetime.now(timezone.utc) - entry.created_at).total_seconds()
+        age = (datetime.now(UTC) - entry.created_at).total_seconds()
         if age > self._ttl:
             self._remove_file(token)
             return None
@@ -442,7 +440,7 @@ class ScreenService(Service):
 
     async def _cleanup_expired(self) -> None:
         """Remove expired temp files."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expired = [
             token
             for token, entry in self._files.items()
@@ -684,7 +682,7 @@ class ScreenService(Service):
     def tool_provider_name(self) -> str:
         return "screens"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         if not self._enabled:
             return []
         return [

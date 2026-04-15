@@ -264,10 +264,14 @@ class NamespacedStorageBackend(StorageBackend):
 
     # --- Entity operations ---
 
-    async def put(self, collection: str, entity_id: str, data: dict) -> None:
+    async def put(
+        self, collection: str, entity_id: str, data: dict[str, Any],
+    ) -> None:
         await self._inner.put(self._ns(collection), entity_id, data)
 
-    async def get(self, collection: str, entity_id: str) -> dict | None:
+    async def get(
+        self, collection: str, entity_id: str,
+    ) -> dict[str, Any] | None:
         return await self._inner.get(self._ns(collection), entity_id)
 
     async def delete(self, collection: str, entity_id: str) -> None:
@@ -278,7 +282,7 @@ class NamespacedStorageBackend(StorageBackend):
 
     # --- Query operations ---
 
-    async def query(self, query: Query) -> list[dict]:
+    async def query(self, query: Query) -> list[dict[str, Any]]:
         return await self._inner.query(self._ns_query(query))
 
     async def count(self, query: Query) -> int:

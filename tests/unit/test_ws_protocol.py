@@ -2,7 +2,6 @@
 
 from unittest.mock import MagicMock
 
-
 from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.events import Event
 from gilbert.web.ws_protocol import (
@@ -12,7 +11,6 @@ from gilbert.web.ws_protocol import (
     dispatch_frame,
     get_event_visibility_level,
 )
-
 
 # --- Event visibility ---
 

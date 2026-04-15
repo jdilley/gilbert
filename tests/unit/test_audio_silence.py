@@ -7,7 +7,6 @@ from gilbert.interfaces.tts import (
     generate_pcm_silence,
 )
 
-
 # --- PCM silence ---
 
 

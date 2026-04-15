@@ -12,7 +12,6 @@ from gilbert.core.services.websearch import WebSearchService
 from gilbert.interfaces.service import ServiceResolver
 from gilbert.interfaces.websearch import WebSearchBackend, WebSearchResult
 
-
 # --- Stubs ---
 
 

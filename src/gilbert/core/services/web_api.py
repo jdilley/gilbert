@@ -51,36 +51,252 @@ class WebApiService(Service):
     async def _ws_dashboard_get(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
         gilbert = conn.manager.gilbert
         if gilbert is None:
-            return {"type": "dashboard.get.result", "ref": frame.get("id"), "cards": []}
+            return {
+                "type": "dashboard.get.result",
+                "ref": frame.get("id"),
+                "cards": [],
+                "nav": [],
+            }
 
-        _DASHBOARD_CARDS = [
-            {"title": "Chat", "description": "Talk with Gilbert", "url": "/chat", "icon": "message-square", "required_role": "everyone"},
-            {"title": "Documents", "description": "Knowledge base", "url": "/documents", "icon": "file-text", "required_role": "user", "requires_capability": "knowledge"},
-            {"title": "Inbox", "description": "Email management", "url": "/inbox", "icon": "inbox", "required_role": "admin", "requires_capability": "email"},
-            {"title": "Roles", "description": "Roles & access control", "url": "/roles", "icon": "shield", "required_role": "admin"},
-            {"title": "Scheduler", "description": "Timers & alarms", "url": "/scheduler", "icon": "clock", "required_role": "user"},
-            {"title": "Entities", "description": "Entity browser", "url": "/entities", "icon": "database", "required_role": "admin"},
-            {"title": "Settings", "description": "Service configuration", "url": "/settings", "icon": "sliders", "required_role": "admin"},
-            {"title": "Plugins", "description": "Install & manage plugins", "url": "/plugins", "icon": "package", "required_role": "admin"},
-            {"title": "System", "description": "Service inspector", "url": "/system", "icon": "settings", "required_role": "admin"},
+        # Menu structure: each top-level entry is either a leaf (no
+        # ``items``) or a group with child items. The group's ``url``
+        # is the default destination when the group label is clicked;
+        # typically this points at the first child. Each item
+        # declares ``required_role`` and an optional
+        # ``requires_capability`` — filtered below against the
+        # current user's role level and whether the capability's
+        # service is actually enabled. A group whose every child is
+        # filtered out disappears entirely. See
+        # ``frontend/src/components/layout/NavBar.tsx`` for how the
+        # frontend consumes this.
+        nav_groups: list[dict[str, Any]] = [
+            {
+                "key": "chat",
+                "label": "Chat",
+                "description": "Talk with Gilbert",
+                "url": "/chat",
+                "icon": "message-square",
+                "required_role": "everyone",
+                "items": [],
+            },
+            {
+                "key": "inbox",
+                "label": "Inbox",
+                "description": "Email management",
+                "url": "/inbox",
+                "icon": "inbox",
+                "required_role": "admin",
+                "requires_capability": "email",
+                "items": [],
+            },
+            {
+                "key": "mcp",
+                "label": "MCP",
+                "description": "Model Context Protocol",
+                "url": "/mcp/servers",
+                "icon": "plug",
+                "required_role": "user",
+                "items": [
+                    {
+                        "label": "Servers",
+                        "description": "MCP servers Gilbert connects to",
+                        "url": "/mcp/servers",
+                        "icon": "plug",
+                        "required_role": "user",
+                        "requires_capability": "mcp",
+                    },
+                    {
+                        "label": "Clients",
+                        "description": "Bearer tokens for external MCP clients",
+                        "url": "/mcp/clients",
+                        "icon": "plug-zap",
+                        "required_role": "admin",
+                        "requires_capability": "mcp_server",
+                    },
+                ],
+            },
+            {
+                "key": "security",
+                "label": "Security",
+                "description": "Users, roles & access control",
+                "url": "/security/users",
+                "icon": "shield",
+                "required_role": "admin",
+                "items": [
+                    {
+                        "label": "Users",
+                        "description": "User accounts & role assignments",
+                        "url": "/security/users",
+                        "icon": "users",
+                        "required_role": "admin",
+                    },
+                    {
+                        "label": "Roles",
+                        "description": "Role definitions & hierarchy",
+                        "url": "/security/roles",
+                        "icon": "shield",
+                        "required_role": "admin",
+                    },
+                    {
+                        "label": "Tools",
+                        "description": "Per-tool role requirements",
+                        "url": "/security/tools",
+                        "icon": "wrench",
+                        "required_role": "admin",
+                    },
+                    {
+                        "label": "AI Profiles",
+                        "description": "Named AI tool allowlists",
+                        "url": "/security/profiles",
+                        "icon": "sparkles",
+                        "required_role": "admin",
+                    },
+                    {
+                        "label": "Collections",
+                        "description": "Per-collection ACLs",
+                        "url": "/security/collections",
+                        "icon": "folder-lock",
+                        "required_role": "admin",
+                    },
+                    {
+                        "label": "Events",
+                        "description": "Per-event visibility",
+                        "url": "/security/events",
+                        "icon": "radio",
+                        "required_role": "admin",
+                    },
+                    {
+                        "label": "RPC",
+                        "description": "Per-RPC-method permissions",
+                        "url": "/security/rpc",
+                        "icon": "terminal",
+                        "required_role": "admin",
+                    },
+                ],
+            },
+            {
+                "key": "system",
+                "label": "System",
+                "description": "Configuration & operations",
+                "url": "/settings",
+                "icon": "settings",
+                "required_role": "admin",
+                "items": [
+                    {
+                        "label": "Settings",
+                        "description": "Service configuration",
+                        "url": "/settings",
+                        "icon": "sliders",
+                        "required_role": "admin",
+                    },
+                    {
+                        "label": "Scheduler",
+                        "description": "Timers & scheduled jobs",
+                        "url": "/scheduler",
+                        "icon": "clock",
+                        "required_role": "user",
+                    },
+                    {
+                        "label": "Entities",
+                        "description": "Raw entity storage browser",
+                        "url": "/entities",
+                        "icon": "database",
+                        "required_role": "admin",
+                    },
+                    {
+                        "label": "Plugins",
+                        "description": "Install & manage plugins",
+                        "url": "/plugins",
+                        "icon": "package",
+                        "required_role": "admin",
+                    },
+                    {
+                        "label": "Browser",
+                        "description": "Service inspector",
+                        "url": "/system",
+                        "icon": "monitor",
+                        "required_role": "admin",
+                    },
+                ],
+            },
         ]
 
         acl = gilbert.service_manager.get_by_capability("access_control")
-        cards = []
-        for card in _DASHBOARD_CARDS:
-            # Skip cards whose required service is not running or disabled
-            cap = card.get("requires_capability")
-            if cap:
-                svc = gilbert.service_manager.get_by_capability(cap)
-                if svc is None or not svc.enabled:
-                    continue
-            if acl is not None:
-                required_level = acl.get_role_level(card["required_role"])
-                if conn.user_level > required_level:
-                    continue
-            cards.append({k: v for k, v in card.items() if k != "requires_capability"})
+        sm = gilbert.service_manager
 
-        return {"type": "dashboard.get.result", "ref": frame.get("id"), "cards": cards}
+        def _visible(entry: dict[str, Any]) -> bool:
+            cap = entry.get("requires_capability")
+            if cap:
+                svc = sm.get_by_capability(cap)
+                if svc is None or not svc.enabled:
+                    return False
+            if acl is not None:
+                required_level = acl.get_role_level(
+                    entry.get("required_role", "admin"),
+                )
+                if conn.user_level > required_level:
+                    return False
+            return True
+
+        visible_nav: list[dict[str, Any]] = []
+        for group in nav_groups:
+            raw_items = group.get("items") or []
+            visible_items = [
+                {k: v for k, v in it.items() if k != "requires_capability"}
+                for it in raw_items
+                if _visible(it)
+            ]
+            if raw_items:
+                # Group: hide if every child was filtered out.
+                if not visible_items:
+                    continue
+                # Fall back to the first visible child's URL when the
+                # hard-coded default is unreachable for this user.
+                default_url = group["url"]
+                if default_url not in {i["url"] for i in visible_items}:
+                    default_url = visible_items[0]["url"]
+                visible_nav.append({
+                    "key": group["key"],
+                    "label": group["label"],
+                    "description": group.get("description", ""),
+                    "url": default_url,
+                    "icon": group.get("icon", ""),
+                    "items": visible_items,
+                })
+            else:
+                # Leaf: filter by its own role/capability.
+                if not _visible(group):
+                    continue
+                visible_nav.append({
+                    "key": group["key"],
+                    "label": group["label"],
+                    "description": group.get("description", ""),
+                    "url": group["url"],
+                    "icon": group.get("icon", ""),
+                    "items": [],
+                })
+
+        # Flat ``cards`` list preserved for the dashboard view.
+        # Dashboard shows one card per top-level entry (leaves and
+        # groups both) — clicking a group card lands on its default
+        # URL.
+        cards = [
+            {
+                "title": g["label"],
+                "description": g["description"],
+                "url": g["url"],
+                "icon": g["icon"],
+                "required_role": "everyone",
+            }
+            for g in visible_nav
+        ]
+
+        return {
+            "type": "dashboard.get.result",
+            "ref": frame.get("id"),
+            "cards": cards,
+            "nav": visible_nav,
+        }
 
     async def _ws_system_list(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
 
@@ -88,8 +304,7 @@ class WebApiService(Service):
         if gilbert is None:
             return {"type": "system.services.list.result", "ref": frame.get("id"), "services": []}
 
-        from gilbert.interfaces.configuration import ConfigurationReader
-        from gilbert.interfaces.configuration import Configurable
+        from gilbert.interfaces.configuration import Configurable, ConfigurationReader
         from gilbert.interfaces.tools import ToolProvider
 
         sm = gilbert.service_manager
@@ -258,7 +473,7 @@ class WebApiService(Service):
         if entity is None:
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": "Entity not found", "code": 404}
 
-        fk_map = {}
+        fk_map: dict[str, Any] = {}
         if hasattr(storage_svc.backend, "get_foreign_keys"):
             fk_map = await storage_svc.backend.get_foreign_keys(collection) or {}
 

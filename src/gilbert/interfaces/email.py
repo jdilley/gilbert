@@ -65,7 +65,7 @@ class EmailBackend(ABC):
     All reads/searches/state changes after sync go through entity storage.
     """
 
-    _registry: dict[str, type["EmailBackend"]] = {}
+    _registry: dict[str, type[EmailBackend]] = {}
     backend_name: str = ""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -74,7 +74,7 @@ class EmailBackend(ABC):
             EmailBackend._registry[cls.backend_name] = cls
 
     @classmethod
-    def registered_backends(cls) -> dict[str, type["EmailBackend"]]:
+    def registered_backends(cls) -> dict[str, type[EmailBackend]]:
         return dict(cls._registry)
 
     @classmethod

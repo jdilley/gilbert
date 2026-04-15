@@ -82,6 +82,16 @@ DEFAULT_RPC_PERMISSIONS: dict[str, int] = {
     # Inbox RPCs are user-level; handlers enforce per-mailbox access
     # via can_access_mailbox / can_admin_mailbox on top of the level.
     "inbox.": 100,
+    # MCP client: list/get/start/stop/test are user-level (handlers enforce
+    # per-record visibility + ownership). Creating/updating ``shared`` or
+    # ``public`` servers, or changing any record's scope/allowed_roles/
+    # allowed_users, is admin-only — the handler layer upgrades the check
+    # based on the payload, since the frame type alone can't express it.
+    "mcp.servers.": 100,
+    # MCP server (Gilbert-as-MCP): managing client registrations is
+    # admin-only because creating a client grants an external
+    # process permission to impersonate a Gilbert user's identity.
+    "mcp.clients.": 0,
     # admin (0)
     "config.": 0,
     "roles.": 0,

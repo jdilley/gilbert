@@ -3,12 +3,15 @@
 import hashlib
 import json
 import logging
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
 from gilbert.core.documents.chunking import chunk_text
 from gilbert.core.documents.extractors import extract_text
 from gilbert.core.output import get_output_dir
+from gilbert.interfaces.auth import UserContext
+from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.events import Event, EventBus, EventBusProvider
 from gilbert.interfaces.knowledge import (
     DocumentBackend,
@@ -17,7 +20,6 @@ from gilbert.interfaces.knowledge import (
     SearchResponse,
     SearchResult,
 )
-from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.tools import (
     ToolDefinition,
@@ -168,7 +170,7 @@ class KnowledgeService(Service):
                 continue
 
             try:
-                backend = backend_cls(name=backend_label)
+                backend = backend_cls(name=str(backend_label or ""))
                 await backend.initialize(dict(cfg))
                 self._backends[backend.source_id] = backend
                 logger.info("Registered knowledge backend: %s", backend.source_id)
@@ -223,12 +225,11 @@ class KnowledgeService(Service):
         return "Intelligence"
 
     def config_params(self) -> list[ConfigParam]:
-        from gilbert.interfaces.knowledge import DocumentBackend
-
         # Ensure the bundled local backend is imported so it registers.
         # Additional document backends (e.g., Google Drive) register
         # themselves via plugins.
         import gilbert.integrations.local_documents  # noqa: F401
+        from gilbert.interfaces.knowledge import DocumentBackend
 
         params = [
             ConfigParam(
@@ -427,7 +428,8 @@ class KnowledgeService(Service):
         try:
             record = await self._storage.get("knowledge_text", document_id)
             if record:
-                return record.get("text")
+                text = record.get("text")
+                return str(text) if text is not None else None
         except Exception:
             pass
         return None
@@ -560,9 +562,9 @@ class KnowledgeService(Service):
         """Store/update document tracking info in the entity store."""
         if self._storage is None:
             return
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         doc_id = meta.document_id
 
         # Get existing record to preserve added_at
@@ -615,7 +617,7 @@ class KnowledgeService(Service):
         if prefix:
             docs = [d for d in docs if d.get("path", "").startswith(prefix)]
 
-        return docs
+        return list(docs)
 
     # --- Events ---
 
@@ -782,7 +784,7 @@ class KnowledgeService(Service):
     def tool_provider_name(self) -> str:
         return "knowledge"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         if not self._enabled:
             return []
         return [
@@ -1057,7 +1059,7 @@ class KnowledgeService(Service):
             })
 
         try:
-            import fitz  # PyMuPDF
+            import fitz  # type: ignore[import-untyped]  # PyMuPDF
         except ImportError:
             return json.dumps({"error": "PyMuPDF is not installed"})
 

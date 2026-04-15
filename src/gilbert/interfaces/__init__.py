@@ -10,25 +10,25 @@ from gilbert.interfaces.ai import (
     TokenUsage,
 )
 from gilbert.interfaces.auth import (
-    AuthInfo,
     AuthBackend,
+    AuthInfo,
     UserContext,
 )
 from gilbert.interfaces.configuration import (
     ConfigParam,
     Configurable,
 )
-from gilbert.interfaces.email import (
-    EmailAddress,
-    EmailAttachment,
-    EmailBackend,
-    EmailMessage,
-)
 from gilbert.interfaces.credentials import (
     AnyCredential,
     ApiKeyCredential,
     CredentialType,
     UsernamePasswordCredential,
+)
+from gilbert.interfaces.email import (
+    EmailAddress,
+    EmailAttachment,
+    EmailBackend,
+    EmailMessage,
 )
 from gilbert.interfaces.events import Event, EventBus, EventHandler
 from gilbert.interfaces.plugin import Plugin, PluginMeta

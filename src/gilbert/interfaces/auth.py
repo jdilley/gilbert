@@ -73,7 +73,7 @@ class AuthBackend(ABC):
     aggregated by the AuthService.
     """
 
-    _registry: dict[str, type["AuthBackend"]] = {}
+    _registry: dict[str, type[AuthBackend]] = {}
     backend_name: str = ""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -82,7 +82,7 @@ class AuthBackend(ABC):
             AuthBackend._registry[cls.backend_name] = cls
 
     @classmethod
-    def registered_backends(cls) -> dict[str, type["AuthBackend"]]:
+    def registered_backends(cls) -> dict[str, type[AuthBackend]]:
         return dict(cls._registry)
 
     @classmethod
@@ -121,6 +121,21 @@ class AuthBackend(ABC):
     async def get_role_mappings(self) -> dict[str, str]:
         """Map external groups/roles to Gilbert roles. Default: empty."""
         return {}
+
+    def get_login_method(self) -> LoginMethod:
+        """Return the login method this backend advertises to the UI.
+
+        Concrete backends override this with their own
+        ``provider_type``, display name, form action, etc. The base
+        implementation provides a generic fallback so the codebase
+        can typecheck against ``AuthBackend`` instead of narrowing to
+        concrete classes at every call site.
+        """
+        return LoginMethod(
+            provider_type=getattr(self, "provider_type", "unknown"),
+            display_name=getattr(self, "backend_name", "unknown"),
+            method="form",
+        )
 
 
 @runtime_checkable
@@ -221,4 +236,12 @@ class AccessControlProvider(Protocol):
 
     def resolve_rpc_level(self, frame_type: str) -> int:
         """Resolve the required role level for an RPC frame type."""
+        ...
+
+    def check_collection_read(self, user_ctx: UserContext, collection: str) -> bool:
+        """Return True if the user can read from the entity collection."""
+        ...
+
+    def check_collection_write(self, user_ctx: UserContext, collection: str) -> bool:
+        """Return True if the user can write to the entity collection."""
         ...

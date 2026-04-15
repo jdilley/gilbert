@@ -1,8 +1,96 @@
 # Gilbert
 
-An AI-powered assistant for home and business automation. Gilbert combines a modular, interface-driven architecture with an agentic AI core — giving it the ability to control speakers, greet people at the door, manage email, spin up a radio DJ, and much more, all orchestrated through natural conversation or automated event-driven workflows.
+An AI-powered assistant for home and business automation. Gilbert combines a modular, interface-driven architecture with an agentic AI core — giving it the ability to control speakers, greet people at the door, manage email, spin up a radio DJ, expose its tools over MCP, and much more, all orchestrated through natural conversation or automated event-driven workflows.
 
 Everything in Gilbert is an abstraction. Swap your AI provider, your speaker system, your presence detector, or your storage backend without touching a single line of business logic. The core ships with only vendor-free backends (local auth, local documents); every third-party integration — Anthropic, Sonos, Google, UniFi, ElevenLabs, Tavily, Slack, ngrok, Tesseract — is a **plugin**. Plugins live in a separate [gilbert-plugins](https://github.com/briandilley/gilbert-plugins) repo that's included as a git submodule at `std-plugins/`, and new plugins can be added at runtime from any GitHub URL.
+
+Gilbert is a **multi-user system from the ground up** — every piece of state (mailboxes, chat history, documents, MCP servers, scheduled jobs) is owned by a specific user, shared via roles and per-collection ACLs, and gated by a role-based access control layer that consistently applies across the web UI, chat, tools, events, and the MCP endpoint.
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) (Python package and project manager)
+- Git (with submodule support — any recent version)
+- Node.js + npm (only if you want to rebuild the frontend; prebuilt assets ship under `src/gilbert/web/spa/`)
+
+Some plugins have additional OS-level prerequisites — e.g. the `tesseract` plugin needs the Tesseract binary (`apt install tesseract-ocr` or `brew install tesseract`). Check [`std-plugins/README.md`](std-plugins/README.md) for per-plugin requirements.
+
+### Clone and Install
+
+```bash
+git clone https://github.com/briandilley/gilbert.git
+cd gilbert
+
+# Either let gilbert.sh init the submodule for you...
+./gilbert.sh start
+
+# ...or do it manually:
+git submodule update --init --recursive
+uv sync
+```
+
+`uv sync` resolves the entire workspace — Gilbert core plus every plugin's third-party deps — into a single venv. If you add or update a plugin later, re-running `uv sync` picks up the changes.
+
+### Configure
+
+Gilbert ships with sensible bootstrap defaults in `gilbert.yaml`. Only a small handful of settings live in YAML — storage, logging, web server binding, and the plugin directory list — because those are needed before entity storage is available. **Everything else is configured at runtime through the Settings UI** under the **System → Settings** menu at `http://localhost:8000/settings`.
+
+On first run, non-bootstrap sections from `gilbert.yaml` (AI config, plugin config, etc.) are seeded into the entity store. After that, the Settings UI is the source of truth — changes there persist to `.gilbert/gilbert.db` and take effect immediately (or on restart for params marked `restart_required`).
+
+If you need to override bootstrap values for this specific installation, create a local override file:
+
+```bash
+mkdir -p .gilbert
+cat > .gilbert/config.yaml <<'EOF'
+# Only include values you're changing. Deep-merged on top of gilbert.yaml.
+web:
+  port: 9000
+EOF
+```
+
+The `.gilbert/` directory is gitignored — your API keys, database, and logs stay local. Runtime config (AI backend selection, TTS API keys, plugin settings, etc.) is managed through the Settings UI, not this file.
+
+At minimum, before Gilbert is useful, open the Settings UI and configure:
+
+- **AI** → select the `anthropic` backend and enter your API key (`sk-ant-…`).
+- **Whatever plugins you care about** — e.g. Sonos speakers (discovery is automatic), Google Workspace (OAuth flow), UniFi presence (host + credentials), and so on. Each plugin's settings page has a **Test connection** button to verify credentials before you commit to them.
+
+### Run
+
+```bash
+# Start Gilbert (auto-inits the std-plugins submodule if empty, then uv sync, then launches)
+./gilbert.sh start
+
+# Dev mode (same as start, with verbose logging suitable for iteration)
+./gilbert.sh dev
+
+# Stop Gilbert (sends SIGTERM to the running PID)
+./gilbert.sh stop
+```
+
+`gilbert.sh start` runs Gilbert under a supervisor loop that distinguishes normal stops from "please restart me" exits — when a runtime-installed plugin needs `uv sync` to pick up new Python deps, it sets an internal flag, Gilbert exits with code `75` (`EX_TEMPFAIL`), and the supervisor loop re-syncs and relaunches automatically. Ctrl+C and `./gilbert.sh stop` propagate cleanly and do **not** trigger a restart.
+
+On first run, Gilbert creates the `.gilbert/` directory and initializes the SQLite database, log files, and default AI profiles. The web UI is available at `http://localhost:8000` — log in with the local admin account (bootstrapped automatically on first boot) and head to **Security → Users** to add more accounts.
+
+## Multi-User & Access Control
+
+Gilbert is designed for households and small teams, not a single desktop user. Every request — whether from the web UI, a Slack DM, a chat with the AI, or an external MCP client — is attributed to a specific user and passed through a consistent authorization layer.
+
+- **Users.** Local accounts (`LocalAuth` in core) or external identity providers (`GoogleAuthBackend` in the `google` plugin). Users are managed under **Security → Users** in the web UI; an admin can create accounts, assign roles, and configure per-user mailbox access. External directory backends like Google Workspace can auto-sync user lists.
+- **Roles.** The built-in role hierarchy is `admin > user > everyone`. Every tool, RPC method, event, and entity collection declares a `required_role` that the caller's effective role level has to meet or exceed. Custom roles can be added on top. Managed under **Security → Roles**.
+- **Per-capability ACLs.** RBAC isn't a single boolean — it's layered:
+  - **Security → Tools** — per-tool role requirements (e.g. the `delete_document` tool requires `admin`, the `play_music` tool accepts `user`).
+  - **Security → AI Profiles** — named tool allowlists that the AI service picks from when an `ai_call` is resolved. One profile may expose everything; another may only see `sales_lead`. Profiles control *which* tools are available; RBAC controls *who* can invoke them. Both always apply.
+  - **Security → Collections** — per-entity-collection read/write ACLs for the generic storage layer, so e.g. `inbox.mailboxes` can be read by `user` but only written by the mailbox owner.
+  - **Security → Events** — per-event-type visibility so sensitive event types (e.g. presence updates, doorbell events) don't leak to clients who shouldn't see them.
+  - **Security → RPC** — per-WebSocket-method permissions for direct RPC frames outside the tool pipeline.
+- **Ownership.** Mailboxes, knowledge sources, MCP servers, and scheduled jobs are *owned* by a user and can be shared with individual users or roles. Shared items respect the owner's access chain — an admin sharing their mailbox with a `user` grants read/send but not ownership transfer.
+- **MCP multi-user support.**
+  - **Client side (Gilbert → external servers):** each MCP server record has a `scope` (`private` / `shared` / `public`) and an optional `allowed_users` list. The rule is "if you can see it, you can use it" — discovery and invocation are gated by the same visibility check.
+  - **Server side (external clients → Gilbert):** Gilbert exposes its own tools as an MCP server at `/api/mcp`. Admins register external clients under **MCP → Clients**, pick an owner user and an AI profile, and hand the client a one-time bearer token. Every tool call from that client runs under the owner's `UserContext` with the profile's tool allowlist applied, so external agents can't see or call anything their owner couldn't.
+- **Consistent across surfaces.** The same authorization layer filters the web UI nav (items you can't access simply don't appear), the tool set the AI sees in chat, the commands available in slash-command autocomplete, the events streamed over WebSocket, and the tool list returned to an MCP client's `tools/list` call.
 
 ## What Can It Do?
 
@@ -19,6 +107,7 @@ Out of the box — once the `std-plugins` submodule is initialized — Gilbert p
 - **OCR** — the `tesseract` plugin extracts text from images locally (no network, no API key) for document indexing and vision workflows.
 - **Public tunnel** — the `ngrok` plugin provides a public HTTPS URL so OAuth callbacks (Google login, Slack Socket Mode) work behind NAT.
 - **Slack bridge** — the `slack` plugin connects a Socket Mode bot so users can chat with Gilbert from Slack DMs and mentions, with the same tool access as the web UI.
+- **MCP (Model Context Protocol)** — Gilbert is both an **MCP client** (connect to external MCP servers, per-server RBAC, OAuth 2.1 support, stdio + streamable HTTP + SSE transports, with the external tools merged into Gilbert's own AI pipeline) and an **MCP server** (expose Gilbert's own tools to external agents like Claude Desktop or Cursor over a bearer-authenticated endpoint at `/api/mcp`, with per-client owner identity and AI profile filtering).
 - **Remote screens** — push content (PDFs, images, HTML) to browser-based displays via SSE (core).
 - **Personalized greetings, Radio DJ, roasts, scheduled jobs, RBAC, interactive tool forms** — all core services.
 - **Plugin system** — add runtime integrations from any GitHub URL via `/plugin install`, with automatic dependency resolution through the uv workspace. Plugins that need new Python packages trigger a supervised restart; plugins without extra deps hot-load immediately.
@@ -46,6 +135,7 @@ UserProviderBackend  →  google plugin → GoogleDirectoryBackend
 WebSearchBackend     →  tavily plugin → TavilySearch
 OCRBackend           →  tesseract plugin → TesseractOCR
 TunnelBackend        →  ngrok plugin → NgrokTunnel
+MCPBackend           →  core (stdio, http, sse — consume external MCP servers)
 StorageBackend       →  core → SQLiteStorage
 ```
 
@@ -85,11 +175,20 @@ This decoupled design means new services can react to existing events without mo
 
 Gilbert's AI service runs an agentic tool-use loop. Services that implement the `ToolProvider` protocol automatically expose their capabilities as AI-callable tools. The AI can chain multiple tools in a single conversation turn — search for a song, play it on a specific speaker group, and announce it over TTS, all from one natural language request.
 
-**AI context profiles** control which tools are available for different interaction types. A sales agent profile might only see the `sales_lead` tool, while a human chat profile sees everything except sales tools. Profiles are managed at runtime through the web UI or AI tools themselves.
+**AI context profiles** control which tools are available for different interaction types. A sales agent profile might only see the `sales_lead` tool, while a human chat profile sees everything except sales tools. Profiles are managed at runtime under **Security → AI Profiles** or via AI tools themselves.
 
 Tools are filtered through two layers:
 1. **Profile filtering** — which tools are available for this type of interaction
 2. **RBAC filtering** — which tools this user's role is allowed to invoke
+
+### MCP (Model Context Protocol)
+
+Gilbert sits on both sides of MCP:
+
+- **As an MCP client**, Gilbert connects out to external MCP servers (stdio subprocesses, HTTP streamable, or SSE) and merges their tools into its own agentic pipeline. Servers are configured per-user with a `scope` (private / shared / public) plus an optional `allowed_users` list; a supervisor loop reconnects with exponential backoff; OAuth 2.1 with dynamic client registration handles authenticated servers; each external server can optionally be allowed to request *sampling* (completions from Gilbert's AI) under a named profile with a token budget cap.
+- **As an MCP server**, Gilbert exposes its own tools at `/api/mcp` for external agents (Claude Desktop, Cursor, etc.). Admins register client tokens under **MCP → Clients**, each bound to an owner user and an AI profile. Tool discovery and invocation run under the owner's `UserContext` through the exact same profile + RBAC pipeline as chat, so an external agent never sees more than what its owner could. The default `mcp_server_client` profile ships empty (include-mode with zero tools) — new clients can authenticate but call nothing until an admin adds tools to the profile, so the fail-safe for untrusted integrations is "no access."
+
+Both sides honour the same "if you can see it, you can use it" principle and the same multi-user ownership model.
 
 ### Interactive Tool Forms
 
@@ -111,7 +210,7 @@ gilbert.sub.remove   — unsubscribe from patterns
 gilbert.ping/pong    — heartbeat (30s interval)
 gilbert.peer.publish — peer instances publish events to the local bus
 chat.message.send    — send a chat message (RPC with .result response)
-chat.form.submit     — submit a UI form
+chat.form.submit    — submit a UI form
 chat.history.load    — load conversation messages
 ```
 
@@ -141,7 +240,7 @@ Every third-party integration is a plugin in the [gilbert-plugins](https://githu
 | **tesseract** | Local OCR (offline, no API key) for document indexing |
 | **unifi** | UniFi Network + Protect + Access aggregated into presence and doorbell backends |
 
-Configuration for every plugin is done through the Gilbert Settings UI at `/settings` — no file editing needed. The Settings UI reads each plugin's `config_params()`, renders type-appropriate inputs (with sensitive values masked), and persists changes to entity storage. See [`std-plugins/README.md`](std-plugins/README.md) for each plugin's configuration keys.
+Configuration for every plugin is done through the Gilbert Settings UI at **System → Settings** (`/settings`) — no file editing needed. The Settings UI reads each plugin's `config_params()`, renders type-appropriate inputs (with sensitive values masked), and persists changes to entity storage. See [`std-plugins/README.md`](std-plugins/README.md) for each plugin's configuration keys.
 
 ### ChromaDB
 
@@ -189,77 +288,11 @@ Admins can install plugins at runtime from any GitHub URL via the `/plugin insta
 
 Uninstall with `/plugin uninstall <name>`; list with `/plugin list`.
 
-## Getting Started
-
-### Prerequisites
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (Python package and project manager)
-- Git (with submodule support — any recent version)
-- Node.js + npm (only if you want to rebuild the frontend; prebuilt assets ship under `src/gilbert/web/spa/`)
-
-Some plugins have additional OS-level prerequisites — e.g. the `tesseract` plugin needs the Tesseract binary (`apt install tesseract-ocr` or `brew install tesseract`). Check [`std-plugins/README.md`](std-plugins/README.md) for per-plugin requirements.
-
-### Clone and Install
-
-```bash
-git clone https://github.com/briandilley/gilbert.git
-cd gilbert
-
-# Either let gilbert.sh init the submodule for you...
-./gilbert.sh start
-
-# ...or do it manually:
-git submodule update --init --recursive
-uv sync
-```
-
-`uv sync` resolves the entire workspace — Gilbert core plus every plugin's third-party deps — into a single venv. If you add or update a plugin later, re-running `uv sync` picks up the changes.
-
-### Configure
-
-Gilbert ships with sensible bootstrap defaults in `gilbert.yaml`. Only a small handful of settings live in YAML — storage, logging, web server binding, and the plugin directory list — because those are needed before entity storage is available. **Everything else is configured at runtime through the Settings UI** at `http://localhost:8000/settings`.
-
-On first run, non-bootstrap sections from `gilbert.yaml` (AI config, plugin config, etc.) are seeded into the entity store. After that, the Settings UI is the source of truth — changes there persist to `.gilbert/gilbert.db` and take effect immediately (or on restart for params marked `restart_required`).
-
-If you need to override bootstrap values for this specific installation, create a local override file:
-
-```bash
-mkdir -p .gilbert
-cat > .gilbert/config.yaml <<'EOF'
-# Only include values you're changing. Deep-merged on top of gilbert.yaml.
-web:
-  port: 9000
-EOF
-```
-
-The `.gilbert/` directory is gitignored — your API keys, database, and logs stay local. Runtime config (AI backend selection, TTS API keys, plugin settings, etc.) is managed through the Settings UI, not this file.
-
-At minimum, before Gilbert is useful, open the Settings UI and configure:
-
-- **AI** → select the `anthropic` backend and enter your API key (`sk-ant-…`).
-- **Whatever plugins you care about** — e.g. Sonos speakers (discovery is automatic), Google Workspace (OAuth flow), UniFi presence (host + credentials), and so on. Each plugin's settings page has a **Test connection** button to verify credentials before you commit to them.
-
-### Run
-
-```bash
-# Start Gilbert (auto-inits the std-plugins submodule if empty, then uv sync, then launches)
-./gilbert.sh start
-
-# Dev mode (same as start, with verbose logging suitable for iteration)
-./gilbert.sh dev
-
-# Stop Gilbert (sends SIGTERM to the running PID)
-./gilbert.sh stop
-```
-
-`gilbert.sh start` runs Gilbert under a supervisor loop that distinguishes normal stops from "please restart me" exits — when a runtime-installed plugin needs `uv sync` to pick up new Python deps, it sets an internal flag, Gilbert exits with code `75` (`EX_TEMPFAIL`), and the supervisor loop re-syncs and relaunches automatically. Ctrl+C and `./gilbert.sh stop` propagate cleanly and do **not** trigger a restart.
-
-On first run, Gilbert creates the `.gilbert/` directory and initializes the SQLite database, log files, and default AI profiles. The web UI is available at `http://localhost:8000`.
-
 ## Web UI
 
-Gilbert includes a React SPA with pages for chat, documents, inbox, screens, system, entities, and roles. **All data operations use the WebSocket protocol** — the only HTTP endpoints are authentication (OAuth callbacks, login) and static file serving. The SPA connects to `/ws/events` on load and communicates exclusively via typed RPC frames.
+Gilbert includes a React SPA with pages for chat, inbox, MCP administration, security (users / roles / tool permissions / AI profiles / collection ACLs / event visibility / RPC permissions), and system operations (settings / scheduler / entity browser / plugins / service inspector). **All data operations use the WebSocket protocol** — the only HTTP endpoints are authentication (OAuth callbacks, login), the raw ASGI MCP endpoint (`/api/mcp`), and static file serving. The SPA connects to `/ws/events` on load and communicates exclusively via typed RPC frames.
+
+Top-level navigation is organized into dropdown groups (Chat · Inbox · MCP · Security · System) that render as a horizontal nav on desktop and a drawer on mobile. Menu items are filtered per-user by the `dashboard.get` RPC so users only see what they can actually access — e.g. non-admins don't see Security or System at all, and users without the `mcp_server` capability enabled don't see **MCP → Clients**. Clicking a parent group lands on its default child (Users for Security, Settings for System, Servers for MCP).
 
 ## Development
 

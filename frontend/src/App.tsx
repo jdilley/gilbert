@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { LoginPage } from "@/components/auth/LoginPage";
@@ -15,6 +15,8 @@ import { SystemPage } from "@/components/system/SystemPage";
 import { ScreensPage } from "@/components/screens/ScreensPage";
 import { SchedulerPage } from "@/components/scheduler/SchedulerPage";
 import { PluginsPage } from "@/components/plugins/PluginsPage";
+import { McpPage } from "@/components/mcp/McpPage";
+import { McpClientsPage } from "@/components/mcp/McpClientsPage";
 
 export default function App() {
   return (
@@ -32,8 +34,12 @@ export default function App() {
             element={<EntityDetail />}
           />
           <Route path="/inbox" element={<InboxPage />} />
-          <Route path="/roles/*" element={<RolesPage />} />
+          <Route path="/security" element={<Navigate to="/security/users" replace />} />
+          <Route path="/security/*" element={<RolesPage />} />
           <Route path="/scheduler" element={<SchedulerPage />} />
+          <Route path="/mcp" element={<Navigate to="/mcp/servers" replace />} />
+          <Route path="/mcp/servers" element={<McpPage />} />
+          <Route path="/mcp/clients" element={<McpClientsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/plugins" element={<PluginsPage />} />
           <Route path="/system" element={<SystemPage />} />

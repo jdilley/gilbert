@@ -59,8 +59,10 @@ async def main() -> None:
     )
     server = uvicorn.Server(uv_config)
 
-    # Disable uvicorn's own signal handling — we manage it ourselves
-    server.install_signal_handlers = lambda: None
+    # Disable uvicorn's own signal handling — we manage it ourselves.
+    # ``install_signal_handlers`` is a private-ish uvicorn API that
+    # exists on ``Server`` at runtime but isn't in the type stubs.
+    server.install_signal_handlers = lambda: None  # type: ignore[attr-defined]
 
     # Wire the shutdown hook so ``Gilbert.request_restart()`` can
     # actually stop the server. Setting ``should_exit`` is the same

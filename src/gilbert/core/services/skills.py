@@ -13,22 +13,14 @@ import shutil
 import subprocess
 import tarfile
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
 import yaml
 
-
-async def _to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
-    """Run a blocking function in the default thread pool executor."""
-    loop = asyncio.get_running_loop()
-    if kwargs:
-        return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
-    return await loop.run_in_executor(None, func, *args)
-
-from gilbert.interfaces.auth import AccessControlProvider
+from gilbert.interfaces.auth import AccessControlProvider, UserContext
 from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.service import Service, ServiceInfo, ServiceResolver
 from gilbert.interfaces.skills import SkillCatalogEntry, SkillContent
@@ -40,6 +32,15 @@ from gilbert.interfaces.tools import (
     ToolProvider,
 )
 from gilbert.interfaces.ws import WsHandlerProvider
+
+
+async def _to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
+    """Run a blocking function in the default thread pool executor."""
+    loop = asyncio.get_running_loop()
+    if kwargs:
+        return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+    return await loop.run_in_executor(None, func, *args)
+
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +163,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
     def tool_provider_name(self) -> str:
         return "skills"
 
-    def get_tools(self) -> list[ToolDefinition]:
+    def get_tools(self, user_ctx: UserContext | None = None) -> list[ToolDefinition]:
         if not self._enabled:
             return []
         return [
@@ -830,7 +831,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         if frontmatter is None:
             return None
 
-        name = frontmatter.get("name", source.name)
+        name = str(frontmatter.get("name", source.name))
         target = dest_parent / name
 
         if target.exists():
@@ -846,7 +847,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
     def _uninstall_skill(self, catalog_key: str, user_id: str) -> bool:
         """Remove an installed skill. Users can only remove their own."""
         entry = self._catalog.get(catalog_key)
-        if entry is None:
+        if entry is None or entry.location is None:
             return False
 
         # Users can only uninstall their own user-scoped skills
@@ -954,7 +955,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                     "path": str(f.relative_to(workspace)),
                     "size": stat.st_size,
                     "modified": datetime.fromtimestamp(
-                        stat.st_mtime, tz=timezone.utc,
+                        stat.st_mtime, tz=UTC,
                     ).isoformat(),
                 })
         return files
@@ -1053,7 +1054,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                 if catalog_key not in self._catalog:
                     catalog_key = name
                 entry = self._catalog.get(catalog_key)
-                if entry is None:
+                if entry is None or entry.location is None:
                     return json.dumps({"error": f"Skill '{name}' not found"})
                 self._catalog.pop(catalog_key, None)
                 self._content_cache.pop(catalog_key, None)
@@ -1139,7 +1140,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         if self._storage is None:
             return json.dumps({"error": "Entity storage not available"})
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # Check for existing entity-stored skill with same name (update case)
         doc_id = None
@@ -1213,7 +1214,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         user_id = arguments.get("_user_id", "system")
 
         entry = self._resolve_skill_entry(skill_name, user_id)
-        if entry is None:
+        if entry is None or entry.location is None:
             return json.dumps({"error": f"Skill '{skill_name}' not found"})
 
         skill_dir = entry.location.parent
@@ -1228,7 +1229,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
             return json.dumps({"error": f"File not found: {rel_path}"})
 
         try:
-            content = await _to_thread(target.read_text, "utf-8")
+            content = str(await _to_thread(target.read_text, "utf-8"))
             if len(content) > 50_000:
                 content = content[:50_000] + "\n\n[... truncated at 50,000 characters]"
             return content
@@ -1242,15 +1243,15 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         user_id = arguments.get("_user_id", "system")
 
         entry = self._resolve_skill_entry(skill_name, user_id)
-        if entry is None:
+        if entry is None or entry.location is None:
             return json.dumps({"error": f"Skill '{skill_name}' not found"})
 
         skill_dir = entry.location.parent
         workspace = self._get_workspace(user_id, skill_name)
 
-        return await _to_thread(
+        return str(await _to_thread(
             self._do_run_script, skill_dir, script_path, script_args, workspace,
-        )
+        ))
 
     async def _tool_browse_workspace(self, arguments: dict[str, Any]) -> str:
         skill_name = arguments.get("skill_name", "")
@@ -1277,7 +1278,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
             return json.dumps({"error": f"File not found: {rel_path}"})
 
         try:
-            content = await _to_thread(target.read_text, "utf-8")
+            content = str(await _to_thread(target.read_text, "utf-8"))
             if len(content) > 50_000:
                 content = content[:50_000] + "\n\n[... truncated at 50,000 characters]"
             return content

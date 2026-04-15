@@ -1,15 +1,13 @@
 """Tests for BackupService — daily rolling backups of .gilbert/ directory."""
 
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
-import time
 
 import pytest
 
 from gilbert.core.services.backup import BackupService
-
-
 from gilbert.core.services.scheduler import SchedulerService
 
 

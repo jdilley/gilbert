@@ -1,6 +1,6 @@
 """Tests for RadioDJService — context-aware music DJ."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -9,7 +9,6 @@ import pytest
 from gilbert.core.services.radio_dj import RadioDJService
 from gilbert.interfaces.events import Event
 from gilbert.interfaces.music import MusicItem, MusicItemKind, Playable
-
 
 # --- Fakes ---
 
@@ -419,11 +418,11 @@ class TestThrottle:
         assert dj._can_switch_genre() is True
 
     def test_cannot_switch_too_soon(self, dj: RadioDJService) -> None:
-        dj._last_genre_switch = datetime.now(timezone.utc)
+        dj._last_genre_switch = datetime.now(UTC)
         assert dj._can_switch_genre() is False
 
     def test_can_switch_after_interval(self, dj: RadioDJService) -> None:
-        dj._last_genre_switch = datetime.now(timezone.utc) - timedelta(minutes=20)
+        dj._last_genre_switch = datetime.now(UTC) - timedelta(minutes=20)
         assert dj._can_switch_genre() is True
 
 

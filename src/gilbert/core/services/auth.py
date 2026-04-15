@@ -320,11 +320,11 @@ class AuthService(Service):
         backend = self._user_service.backend
 
         # 1. Try provider link lookup.
-        user = await backend.get_user_by_provider_link(
+        user: dict[str, Any] | None = await backend.get_user_by_provider_link(
             auth_info.provider_type, auth_info.provider_user_id
         )
         if user is not None:
-            return user
+            return dict(user)
 
         # 2. Try email lookup (link if found).
         user = await backend.get_user_by_email(auth_info.email)
@@ -333,7 +333,7 @@ class AuthService(Service):
                 await self._user_service.add_provider_link(
                     user["_id"], auth_info.provider_type, auth_info.provider_user_id
                 )
-            return user
+            return dict(user)
 
         # 3. Create new local user.
         import uuid
@@ -357,7 +357,7 @@ class AuthService(Service):
             user_id,
             auth_info.provider_type,
         )
-        return user
+        return dict(user) if user is not None else None
 
     # ---- Session management ----
 

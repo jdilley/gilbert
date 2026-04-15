@@ -6,7 +6,6 @@ import pytest
 
 from gilbert.interfaces.ui import ToolOutput, UIBlock, UIElement, UIOption
 
-
 # --- Serialization round-trip ---
 
 
@@ -283,7 +282,8 @@ class TestToolOutputInAgenticLoop:
             text="another", ui_blocks=[UIBlock(block_id="b2", title="F2")],
         ))
 
-        td = lambda name: ToolDefinition(name=name, description="test", parameters=[])
+        def td(name: str) -> ToolDefinition:
+            return ToolDefinition(name=name, description="test", parameters=[])
 
         calls = [
             ToolCall(tool_call_id="c1", tool_name="a", arguments={}),

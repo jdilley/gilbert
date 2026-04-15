@@ -2,9 +2,9 @@
 
 import logging
 import mimetypes
-from datetime import datetime, timezone
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import AsyncIterator
 
 from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.knowledge import (
@@ -83,7 +83,7 @@ class LocalDocumentBackend(DocumentBackend):
         """Build metadata for a file."""
         stat = file_path.stat()
         rel = file_path.relative_to(self._base_path.resolve())
-        modified = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+        modified = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat()
         return DocumentMeta(
             source_id=self.source_id,
             path=str(rel),

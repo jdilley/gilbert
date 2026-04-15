@@ -11,7 +11,8 @@ import asyncio
 import fnmatch
 import logging
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from gilbert.interfaces.acl import (
     resolve_default_event_level,
@@ -19,6 +20,7 @@ from gilbert.interfaces.acl import (
 )
 from gilbert.interfaces.auth import AccessControlProvider, UserContext
 from gilbert.interfaces.events import Event, EventBusProvider
+from gilbert.interfaces.service import Service
 from gilbert.interfaces.ws import RpcHandler
 
 logger = logging.getLogger(__name__)
@@ -203,7 +205,12 @@ class WsConnectionManager:
         # Discover service-provided handlers
         from gilbert.interfaces.ws import WsHandlerProvider
         for svc in gilbert.service_manager.get_all_by_capability("ws_handlers"):
-            if isinstance(svc, WsHandlerProvider):
+            # Services exposing ws_handlers always inherit from
+            # ``Service`` *and* implement the ``WsHandlerProvider``
+            # protocol. Double-narrowing lets mypy see both sides
+            # without making the protocol itself extend ``Service``
+            # (which would create an import cycle across layers).
+            if isinstance(svc, WsHandlerProvider) and isinstance(svc, Service):
                 service_handlers = svc.get_ws_handlers()
                 for frame_type, handler in service_handlers.items():
                     if frame_type in self._handlers:
