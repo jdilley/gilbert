@@ -101,9 +101,16 @@ class InboxService(Service):
         self._storage: Any = None  # StorageBackend
         self._event_bus: Any = None  # EventBus
         self._knowledge: Any = None  # KnowledgeService (optional)
-        self._skills: Any = None  # SkillService (optional, for workspace attachments)
         self._scheduler: Any = None  # SchedulerProvider
         self._access_control: AccessControlProvider | None = None
+        # Resolver is cached so capability lookups can happen lazily at
+        # call time. Some optional capabilities (skills, knowledge)
+        # might not be started yet when InboxService.start() runs —
+        # the topological sort only orders by ``requires``, so cross-
+        # dependencies on ``optional`` capabilities aren't guaranteed
+        # to be ready at start time. Looking them up at use time
+        # sidesteps the ordering problem entirely.
+        self._resolver: ServiceResolver | None = None
 
         self._runtimes: dict[str, _MailboxRuntime] = {}
         self._cached_mailboxes: list[Mailbox] = []
@@ -207,7 +214,8 @@ class InboxService(Service):
             self._event_bus = event_bus_svc.bus
 
         self._knowledge = resolver.get_capability("knowledge")
-        self._skills = resolver.get_capability("skills")
+        # ``skills`` is looked up lazily — see ``_get_skills_service``.
+        self._resolver = resolver
 
         acl_svc = resolver.get_capability("access_control")
         if isinstance(acl_svc, AccessControlProvider):
@@ -1497,13 +1505,27 @@ class InboxService(Service):
             None,
         )
 
+    def _get_skills_service(self) -> Any:
+        """Resolve the ``skills`` capability lazily.
+
+        InboxService can start before SkillService since the topological
+        sort only orders by ``requires``, not ``optional``. Looking up
+        the skills capability at use time (after all services have
+        finished starting) avoids the start-order race that would
+        otherwise leave ``self._skills`` stuck at None forever.
+        """
+        if self._resolver is None:
+            return None
+        return self._resolver.get_capability("skills")
+
     async def _resolve_workspace_attachment(
         self,
         doc_id: str,
     ) -> tuple[EmailAttachment | None, str | None]:
         """Look up a ``workspace:<user>/<conv>/<skill>/<path>`` ref and
         read the file's bytes off disk via ``SkillService``."""
-        if self._skills is None:
+        skills = self._get_skills_service()
+        if skills is None:
             return None, f"{doc_id}: skills service not available"
         # Strip the scheme.
         body = doc_id[len("workspace:") :]
@@ -1523,7 +1545,7 @@ class InboxService(Service):
 
         # Resolve via SkillService — handles conv-scoped + legacy
         # fallback + path traversal check.
-        target, err = self._skills._resolve_workspace_file(
+        target, err = skills._resolve_workspace_file(
             user_id=user_id,
             skill_name=skill_name,
             rel_path=rel_path,

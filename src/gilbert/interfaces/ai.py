@@ -97,6 +97,11 @@ class Message:
     author_name: str = ""
     visible_to: list[str] | None = None
     attachments: list[FileAttachment] = field(default_factory=list)
+    # True when the user cancelled this turn mid-flight via
+    # ``chat.message.cancel``. Only meaningful on ASSISTANT rows — the
+    # frontend surfaces it as a subtle icon on the turn bubble so it's
+    # clear the turn was stopped on purpose, not that it errored.
+    interrupted: bool = False
 
 
 @dataclass(frozen=True)
@@ -324,6 +329,11 @@ class ChatTurnResult(NamedTuple):
       included here — it's the ``response_text`` + ``attachments`` fields
       above. May be empty for turns that answered in a single round with
       no tool use.
+    - ``interrupted``: True when the user stopped the turn mid-flight
+      via ``chat.message.cancel``. Partial state (completed rounds,
+      the user message, and anything persisted so far) is preserved;
+      the frontend renders a subtle "interrupted" indicator on the
+      turn bubble so it's clear the answer didn't finish organically.
     """
 
     response_text: str
@@ -332,6 +342,7 @@ class ChatTurnResult(NamedTuple):
     tool_usage: list[dict[str, Any]]
     attachments: list[FileAttachment]
     rounds: list[dict[str, Any]]
+    interrupted: bool = False
 
 
 @runtime_checkable

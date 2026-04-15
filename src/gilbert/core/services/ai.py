@@ -4,6 +4,7 @@ Also includes internal helpers for persona and user memory (previously
 separate services, now merged into AIService).
 """
 
+import asyncio
 import json as _json
 import logging
 import uuid
@@ -75,6 +76,44 @@ _MAX_IMAGE_BYTES = 5 * 1024 * 1024
 _MAX_DOCUMENT_BYTES = 32 * 1024 * 1024  # Anthropic's documented PDF cap.
 _MAX_TEXT_BYTES = 512 * 1024  # decoded UTF-8.
 _MAX_TOTAL_ATTACHMENT_BYTES = 40 * 1024 * 1024
+
+# Sentinel appended to the content of an assistant row when the user
+# interrupts a turn via ``chat.message.cancel``. Two jobs at once:
+#
+# 1. AI context: on the NEXT turn, the model sees this exact text in
+#    the history and understands the previous response was stopped on
+#    purpose and must not be resumed unless the user explicitly asks.
+#    Without this sentinel, an empty interrupted assistant row reads as
+#    "my unfinished work" and the model happily picks back up.
+#
+# 2. UI filter: ``_group_persisted_messages_into_turns`` and the live
+#    return path both strip any content at or after this marker before
+#    setting ``final_content`` on a turn so the directive never leaks
+#    into the visible chat bubble. The marker stays in the persisted
+#    row (which the AI sees) but not in the rendered one.
+_INTERRUPT_MARKER = (
+    "[INTERRUPTED BY USER — this response was stopped mid-flight via "
+    "the stop button and was NOT completed. Do NOT attempt to continue "
+    "or resume this work on the next turn. Treat the user's next "
+    "message as a new, standalone request; only revisit this task if "
+    "they explicitly ask you to.]"
+)
+
+
+def _strip_interrupt_marker(content: str) -> str:
+    """Remove the interrupt sentinel from a content string for display.
+
+    The marker is appended (with a leading blank line) to preserve any
+    partial reply text the AI had already streamed before the stop.
+    This helper returns just the pre-marker text so the visible chat
+    bubble doesn't carry the AI-facing directive.
+    """
+    if not content:
+        return ""
+    idx = content.find(_INTERRUPT_MARKER)
+    if idx < 0:
+        return content
+    return content[:idx].rstrip()
 _ALLOWED_IMAGE_MEDIA_TYPES = frozenset(
     {
         "image/png",
@@ -661,6 +700,13 @@ class AIService(Service):
         self._persona: _PersonaHelper | None = None
         self._memory: _MemoryHelper | None = None
         self._memory_enabled: bool = True
+        # Registry of in-flight chat RPC tasks keyed by WS RPC ref.
+        # Populated by _ws_chat_send on entry, removed in its finally
+        # block. The chat.message.cancel handler looks up entries here
+        # to interrupt a running turn. Each value also carries the
+        # originating user_id so cancel can enforce "only the originator
+        # can interrupt".
+        self._in_flight_chats: dict[str, tuple[asyncio.Task[Any], str]] = {}
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
@@ -1237,6 +1283,11 @@ class AIService(Service):
         response: AIResponse | None = None
         all_ui_blocks: list[UIBlock] = []
         tool_usage: list[dict[str, Any]] = []
+        # Set True when the user interrupted this turn mid-flight via
+        # ``chat.message.cancel``. The except handler below flips this,
+        # marks the trailing assistant row, and then falls through to
+        # the shared post-processing (serialize UI blocks, persist, …).
+        was_interrupted = False
         # Structured per-round breakdown used by the frontend's turn
         # bubble UI. Each entry represents one AI round that went through
         # tool execution, with the reasoning text the assistant produced
@@ -1260,256 +1311,325 @@ class AIService(Service):
         continuation_indices: set[int] = set()
         continuation_count = 0
 
-        for round_num in range(self._max_tool_rounds):
-            truncated = self._truncate_history(messages)
+        # Re-assert backend presence and capture a locally-typed
+        # handle. The nested closure below doesn't retain the
+        # ``self._backend is not None`` narrowing from the guard at
+        # the top of ``chat()``, so mypy would otherwise complain.
+        assert self._backend is not None
+        backend: AIBackend = self._backend
 
-            # Dynamically append conversation state each round so tool-call
-            # mutations are visible to subsequent AI rounds.
-            conv_state = await self._load_conversation_state(conversation_id)
-            if conv_state:
-                round_prompt = f"{effective_prompt}\n\n{self._format_state_for_context(conv_state)}"
-            else:
-                round_prompt = effective_prompt
+        async def _run_agentic_loop() -> None:
+            """Execute the agentic for-loop as a cancellable unit.
 
-            request = AIRequest(
-                messages=truncated,
-                system_prompt=round_prompt,
-                tools=tool_defs if tool_defs else [],
-            )
+            Extracted into a nested ``async def`` so the entire loop body
+            can be wrapped in a single ``try/except asyncio.CancelledError``
+            at the call site without having to re-indent ~250 lines of
+            loop logic. The closure captures all outer locals by reference;
+            only the two that get rebound (``response`` and
+            ``continuation_count``) are declared ``nonlocal``.
+            """
+            nonlocal response, continuation_count
+            for round_num in range(self._max_tool_rounds):
+                truncated = self._truncate_history(messages)
 
-            # Drive the backend via ``generate_stream``. For backends that
-            # implement true streaming (like AnthropicAI), each TEXT_DELTA
-            # chunk gets forwarded onto the event bus as a
-            # ``chat.stream.text_delta`` event so the frontend can type
-            # out the response live. The MESSAGE_COMPLETE event carries
-            # the fully-assembled response that the rest of the agentic
-            # loop uses for stop_reason + tool_call handling — identical
-            # to the old non-streaming ``await self._backend.generate()``
-            # return value.
-            #
-            # Backends that don't implement streaming inherit the default
-            # fallback on the ABC which calls ``generate()`` and yields
-            # exactly one MESSAGE_COMPLETE, so this path is free of cost
-            # for them.
-            response = None
-            async for stream_ev in self._backend.generate_stream(request):
-                if stream_ev.type == StreamEventType.TEXT_DELTA:
-                    if stream_ev.text:
-                        await self._publish_event(
-                            "chat.stream.text_delta",
-                            {
-                                "conversation_id": conversation_id,
-                                "text": stream_ev.text,
-                                "visible_to": stream_visible_to,
-                            },
-                        )
-                elif stream_ev.type == StreamEventType.MESSAGE_COMPLETE:
-                    response = stream_ev.response
-                # TOOL_CALL_START / TOOL_CALL_DELTA / TOOL_CALL_END are
-                # redundant with the chat.tool.started / chat.tool.completed
-                # events that _execute_tool_calls already fires with full
-                # arguments + results. Skip here to avoid double-accounting.
+                # Dynamically append conversation state each round so tool-call
+                # mutations are visible to subsequent AI rounds.
+                conv_state = await self._load_conversation_state(conversation_id)
+                if conv_state:
+                    round_prompt = f"{effective_prompt}\n\n{self._format_state_for_context(conv_state)}"
+                else:
+                    round_prompt = effective_prompt
 
-            if response is None:
-                raise RuntimeError(
-                    "AI backend stream ended without MESSAGE_COMPLETE — "
-                    "this is a backend bug, not a recoverable condition"
-                )
-            self._log_api_call(request, response, round_num)
-
-            # Tell listeners the incremental text for this round is done
-            # so they can commit their buffer and prepare for the next
-            # round (tool execution, another AI round, or turn end).
-            if self._backend.capabilities().streaming:
-                await self._publish_event(
-                    "chat.stream.round_complete",
-                    {
-                        "conversation_id": conversation_id,
-                        "visible_to": stream_visible_to,
-                    },
+                request = AIRequest(
+                    messages=truncated,
+                    system_prompt=round_prompt,
+                    tools=tool_defs if tool_defs else [],
                 )
 
-            # Append assistant message to history
-            messages.append(response.message)
+                # Drive the backend via ``generate_stream``. For backends that
+                # implement true streaming (like AnthropicAI), each TEXT_DELTA
+                # chunk gets forwarded onto the event bus as a
+                # ``chat.stream.text_delta`` event so the frontend can type
+                # out the response live. The MESSAGE_COMPLETE event carries
+                # the fully-assembled response that the rest of the agentic
+                # loop uses for stop_reason + tool_call handling — identical
+                # to the old non-streaming ``await self._backend.generate()``
+                # return value.
+                #
+                # Backends that don't implement streaming inherit the default
+                # fallback on the ABC which calls ``generate()`` and yields
+                # exactly one MESSAGE_COMPLETE, so this path is free of cost
+                # for them.
+                response = None
+                async for stream_ev in backend.generate_stream(request):
+                    if stream_ev.type == StreamEventType.TEXT_DELTA:
+                        if stream_ev.text:
+                            await self._publish_event(
+                                "chat.stream.text_delta",
+                                {
+                                    "conversation_id": conversation_id,
+                                    "text": stream_ev.text,
+                                    "visible_to": stream_visible_to,
+                                },
+                            )
+                    elif stream_ev.type == StreamEventType.MESSAGE_COMPLETE:
+                        response = stream_ev.response
+                    # TOOL_CALL_START / TOOL_CALL_DELTA / TOOL_CALL_END are
+                    # redundant with the chat.tool.started / chat.tool.completed
+                    # events that _execute_tool_calls already fires with full
+                    # arguments + results. Skip here to avoid double-accounting.
 
-            stop = response.stop_reason
+                if response is None:
+                    raise RuntimeError(
+                        "AI backend stream ended without MESSAGE_COMPLETE — "
+                        "this is a backend bug, not a recoverable condition"
+                    )
+                self._log_api_call(request, response, round_num)
 
-            # Normal tool-use path.
-            if stop == StopReason.TOOL_USE and response.message.tool_calls:
-                tool_results, round_ui_blocks = await self._execute_tool_calls(
-                    response.message.tool_calls,
-                    tools_by_name,
-                    user_ctx=user_ctx,
-                    profile=profile,
-                )
-                all_ui_blocks.extend(round_ui_blocks)
-                messages.append(Message(role=MessageRole.TOOL_RESULT, tool_results=tool_results))
-
-                # Collect any files produced by tool calls — these will
-                # ride back on the final assistant ``Message`` at the end
-                # of the turn.
-                for tr in tool_results:
-                    if tr.attachments:
-                        turn_attachments.extend(tr.attachments)
-
-                # Track tool usage for the response metadata. Arguments are
-                # sanitized to drop injected ``_user_id`` / ``_room_members``
-                # keys before the payload is sent to the frontend.
-                # The assistant may have emitted a reasoning preamble
-                # alongside its tool_use blocks ("Let me check the
-                # workspace first..."). Attach it to every tool_usage
-                # entry from this round so the frontend's "tools used"
-                # panel can render the reasoning as a caption next to
-                # each call. Persisted with the conversation so a reload
-                # reconstructs the same display.
-                round_reasoning = response.message.content or ""
-                round_tools: list[dict[str, Any]] = []
-                for tc, tr in zip(
-                    response.message.tool_calls,
-                    tool_results,
-                    strict=False,
-                ):
-                    entry = {
-                        "tool_call_id": tc.tool_call_id,
-                        "tool_name": tc.tool_name,
-                        "is_error": tr.is_error,
-                        "arguments": self._sanitize_tool_args(tc.arguments),
-                        "result": tr.content,
-                    }
-                    # Flat tool_usage retains per-entry reasoning so any
-                    # legacy frontend code still works; the new turn UI
-                    # reads reasoning off the round instead.
-                    tool_usage.append({**entry, "reasoning": round_reasoning})
-                    round_tools.append(entry)
-                turn_rounds.append(
-                    {
-                        "reasoning": round_reasoning,
-                        "tools": round_tools,
-                    }
-                )
-                continue
-
-            # Max-tokens recovery. The backend ran up against its output-token
-            # cap before finishing this round. There are two sub-cases:
-            #
-            # 1. The response carries ``tool_calls`` — we can't tell whether
-            #    the tool's JSON input is complete or was cut off mid-field,
-            #    and either way executing a partially-specified tool is
-            #    unsafe. Strip the tool calls, annotate the message, and
-            #    break with an error entry in tool_usage so the frontend can
-            #    surface it. Raising ``ai.settings.max_tokens`` is the user-
-            #    facing fix, so the annotation tells them that.
-            #
-            # 2. Text-only — the model ran out of tokens while writing prose.
-            #    Inject a synthetic user message asking it to continue, loop
-            #    again, and keep doing that up to ``_max_continuation_rounds``
-            #    times. The synthetic messages are tracked in
-            #    ``continuation_indices`` so they can be stripped before
-            #    persistence, and adjacent assistant rows are merged so the
-            #    saved history reads as a single coherent reply.
-            if stop == StopReason.MAX_TOKENS:
-                if response.message.tool_calls:
-                    truncated_names = [tc.tool_name for tc in response.message.tool_calls]
-                    logger.warning(
-                        "max_tokens truncated a tool call mid-input "
-                        "(conversation=%s, tools=%s) — raising "
-                        "ai.settings.max_tokens may help",
-                        conversation_id,
-                        truncated_names,
-                    )
-                    note = (
-                        f"(My previous response was cut off mid tool call "
-                        f"({', '.join(truncated_names)}) because it exceeded "
-                        f"the model's max_tokens limit. Raise the AI service's "
-                        f"max_tokens setting or retry with a smaller request.)"
-                    )
-                    existing_text = response.message.content or ""
-                    combined = (
-                        f"{existing_text}\n\n{note}" if existing_text else note
-                    )
-                    # Rewrite the just-appended assistant row so we don't
-                    # persist a broken tool_call input that would make the
-                    # next turn's request invalid.
-                    messages[-1] = Message(
-                        role=MessageRole.ASSISTANT,
-                        content=combined,
-                        tool_calls=[],
-                        author_id=response.message.author_id,
-                        author_name=response.message.author_name,
-                        visible_to=response.message.visible_to,
-                        attachments=list(response.message.attachments),
-                    )
-                    response = AIResponse(
-                        message=messages[-1],
-                        model=response.model,
-                        stop_reason=StopReason.MAX_TOKENS,
-                        usage=response.usage,
-                    )
-                    tool_usage.append(
+                # Tell listeners the incremental text for this round is done
+                # so they can commit their buffer and prepare for the next
+                # round (tool execution, another AI round, or turn end).
+                if backend.capabilities().streaming:
+                    await self._publish_event(
+                        "chat.stream.round_complete",
                         {
-                            "tool_name": "<max_tokens_truncation>",
-                            "is_error": True,
-                            "arguments": {},
-                            "result": f"Truncated mid tool_use: {', '.join(truncated_names)}",
+                            "conversation_id": conversation_id,
+                            "visible_to": stream_visible_to,
+                        },
+                    )
+
+                # Append assistant message to history
+                messages.append(response.message)
+
+                stop = response.stop_reason
+
+                # Normal tool-use path.
+                if stop == StopReason.TOOL_USE and response.message.tool_calls:
+                    tool_results, round_ui_blocks = await self._execute_tool_calls(
+                        response.message.tool_calls,
+                        tools_by_name,
+                        user_ctx=user_ctx,
+                        profile=profile,
+                    )
+                    all_ui_blocks.extend(round_ui_blocks)
+                    messages.append(Message(role=MessageRole.TOOL_RESULT, tool_results=tool_results))
+
+                    # Collect any files produced by tool calls — these will
+                    # ride back on the final assistant ``Message`` at the end
+                    # of the turn.
+                    for tr in tool_results:
+                        if tr.attachments:
+                            turn_attachments.extend(tr.attachments)
+
+                    # Track tool usage for the response metadata. Arguments are
+                    # sanitized to drop injected ``_user_id`` / ``_room_members``
+                    # keys before the payload is sent to the frontend.
+                    # The assistant may have emitted a reasoning preamble
+                    # alongside its tool_use blocks ("Let me check the
+                    # workspace first..."). Attach it to every tool_usage
+                    # entry from this round so the frontend's "tools used"
+                    # panel can render the reasoning as a caption next to
+                    # each call. Persisted with the conversation so a reload
+                    # reconstructs the same display.
+                    round_reasoning = response.message.content or ""
+                    round_tools: list[dict[str, Any]] = []
+                    for tc, tr in zip(
+                        response.message.tool_calls,
+                        tool_results,
+                        strict=False,
+                    ):
+                        entry = {
+                            "tool_call_id": tc.tool_call_id,
+                            "tool_name": tc.tool_name,
+                            "is_error": tr.is_error,
+                            "arguments": self._sanitize_tool_args(tc.arguments),
+                            "result": tr.content,
+                        }
+                        # Flat tool_usage retains per-entry reasoning so any
+                        # legacy frontend code still works; the new turn UI
+                        # reads reasoning off the round instead.
+                        tool_usage.append({**entry, "reasoning": round_reasoning})
+                        round_tools.append(entry)
+                    turn_rounds.append(
+                        {
+                            "reasoning": round_reasoning,
+                            "tools": round_tools,
                         }
                     )
-                    break
+                    continue
 
-                # Text-only truncation — bounded continuation.
-                if continuation_count >= self._max_continuation_rounds:
-                    logger.warning(
-                        "max_tokens recovery exhausted after %d continuations "
-                        "(conversation=%s)",
-                        continuation_count,
-                        conversation_id,
-                    )
-                    existing_text = response.message.content or ""
-                    annotated = (
-                        existing_text
-                        + "\n\n(Note: response still truncated after "
-                        f"{continuation_count} continuation attempts. Raise "
-                        "the AI service's max_tokens and retry for a "
-                        "complete reply.)"
-                    )
-                    messages[-1] = Message(
-                        role=MessageRole.ASSISTANT,
-                        content=annotated,
-                        author_id=response.message.author_id,
-                        author_name=response.message.author_name,
-                        visible_to=response.message.visible_to,
-                        attachments=list(response.message.attachments),
-                    )
-                    response = AIResponse(
-                        message=messages[-1],
-                        model=response.model,
-                        stop_reason=StopReason.MAX_TOKENS,
-                        usage=response.usage,
-                    )
-                    break
+                # Max-tokens recovery. The backend ran up against its output-token
+                # cap before finishing this round. There are two sub-cases:
+                #
+                # 1. The response carries ``tool_calls`` — we can't tell whether
+                #    the tool's JSON input is complete or was cut off mid-field,
+                #    and either way executing a partially-specified tool is
+                #    unsafe. Strip the tool calls, annotate the message, and
+                #    break with an error entry in tool_usage so the frontend can
+                #    surface it. Raising ``ai.settings.max_tokens`` is the user-
+                #    facing fix, so the annotation tells them that.
+                #
+                # 2. Text-only — the model ran out of tokens while writing prose.
+                #    Inject a synthetic user message asking it to continue, loop
+                #    again, and keep doing that up to ``_max_continuation_rounds``
+                #    times. The synthetic messages are tracked in
+                #    ``continuation_indices`` so they can be stripped before
+                #    persistence, and adjacent assistant rows are merged so the
+                #    saved history reads as a single coherent reply.
+                if stop == StopReason.MAX_TOKENS:
+                    if response.message.tool_calls:
+                        truncated_names = [tc.tool_name for tc in response.message.tool_calls]
+                        logger.warning(
+                            "max_tokens truncated a tool call mid-input "
+                            "(conversation=%s, tools=%s) — raising "
+                            "ai.settings.max_tokens may help",
+                            conversation_id,
+                            truncated_names,
+                        )
+                        note = (
+                            f"(My previous response was cut off mid tool call "
+                            f"({', '.join(truncated_names)}) because it exceeded "
+                            f"the model's max_tokens limit. Raise the AI service's "
+                            f"max_tokens setting or retry with a smaller request.)"
+                        )
+                        existing_text = response.message.content or ""
+                        combined = (
+                            f"{existing_text}\n\n{note}" if existing_text else note
+                        )
+                        # Rewrite the just-appended assistant row so we don't
+                        # persist a broken tool_call input that would make the
+                        # next turn's request invalid.
+                        messages[-1] = Message(
+                            role=MessageRole.ASSISTANT,
+                            content=combined,
+                            tool_calls=[],
+                            author_id=response.message.author_id,
+                            author_name=response.message.author_name,
+                            visible_to=response.message.visible_to,
+                            attachments=list(response.message.attachments),
+                        )
+                        response = AIResponse(
+                            message=messages[-1],
+                            model=response.model,
+                            stop_reason=StopReason.MAX_TOKENS,
+                            usage=response.usage,
+                        )
+                        tool_usage.append(
+                            {
+                                "tool_name": "<max_tokens_truncation>",
+                                "is_error": True,
+                                "arguments": {},
+                                "result": f"Truncated mid tool_use: {', '.join(truncated_names)}",
+                            }
+                        )
+                        break
 
-                continuation_count += 1
-                continuation_indices.add(len(messages))
+                    # Text-only truncation — bounded continuation.
+                    if continuation_count >= self._max_continuation_rounds:
+                        logger.warning(
+                            "max_tokens recovery exhausted after %d continuations "
+                            "(conversation=%s)",
+                            continuation_count,
+                            conversation_id,
+                        )
+                        existing_text = response.message.content or ""
+                        annotated = (
+                            existing_text
+                            + "\n\n(Note: response still truncated after "
+                            f"{continuation_count} continuation attempts. Raise "
+                            "the AI service's max_tokens and retry for a "
+                            "complete reply.)"
+                        )
+                        messages[-1] = Message(
+                            role=MessageRole.ASSISTANT,
+                            content=annotated,
+                            author_id=response.message.author_id,
+                            author_name=response.message.author_name,
+                            visible_to=response.message.visible_to,
+                            attachments=list(response.message.attachments),
+                        )
+                        response = AIResponse(
+                            message=messages[-1],
+                            model=response.model,
+                            stop_reason=StopReason.MAX_TOKENS,
+                            usage=response.usage,
+                        )
+                        break
+
+                    continuation_count += 1
+                    continuation_indices.add(len(messages))
+                    messages.append(
+                        Message(
+                            role=MessageRole.USER,
+                            content=(
+                                "Please continue your previous response — it was "
+                                "cut off by a response size limit. Pick up "
+                                "exactly where you left off; do not repeat "
+                                "anything you've already said."
+                            ),
+                        )
+                    )
+                    continue
+
+                # END_TURN or any other terminal stop — normal completion.
+                break
+            else:
+                logger.warning(
+                    "Agentic loop hit max rounds (%d) for conversation %s",
+                    self._max_tool_rounds,
+                    conversation_id,
+                )
+
+        try:
+            await _run_agentic_loop()
+        except asyncio.CancelledError:
+            # User hit the stop button (``chat.message.cancel`` RPC).
+            # Cancellation propagates through the running stream / tool
+            # await, unwinding here with whatever state the loop had
+            # accumulated so far: completed rounds in ``turn_rounds``,
+            # completed tool results in ``messages``, partial reasoning
+            # on the last assistant row (if any). Mark the trailing
+            # assistant row as interrupted so the frontend can render
+            # the subtle stop indicator, then fall through to the
+            # shared post-processing which persists what we've got.
+            #
+            # IMPORTANT: we also set a clear directive on the content
+            # field of the interrupted assistant row. Without this, on
+            # the next turn the AI sees an empty (or partial) assistant
+            # row and interprets it as "my unfinished work — let me
+            # resume that" even when the user's new message is a fresh
+            # ask. The explicit "do not resume" sentence stops that
+            # behavior cold and is visible to the AI on every
+            # subsequent turn's history replay.
+            was_interrupted = True
+            logger.info(
+                "Chat turn interrupted by user for conversation %s "
+                "after %d round(s)",
+                conversation_id,
+                len(turn_rounds),
+            )
+            if messages and messages[-1].role == MessageRole.ASSISTANT:
+                existing = messages[-1].content or ""
+                messages[-1].interrupted = True
+                messages[-1].content = (
+                    f"{existing}\n\n{_INTERRUPT_MARKER}"
+                    if existing
+                    else _INTERRUPT_MARKER
+                )
+            else:
+                # No trailing assistant row (e.g. cancelled during the
+                # very first stream read before MESSAGE_COMPLETE). Add
+                # a placeholder so the turn has a detectable stopping
+                # point and ``finalize_current_turn`` in turn grouping
+                # doesn't mis-flag it. The content carries the explicit
+                # directive for the AI.
                 messages.append(
                     Message(
-                        role=MessageRole.USER,
-                        content=(
-                            "Please continue your previous response — it was "
-                            "cut off by a response size limit. Pick up "
-                            "exactly where you left off; do not repeat "
-                            "anything you've already said."
-                        ),
+                        role=MessageRole.ASSISTANT,
+                        content=_INTERRUPT_MARKER,
+                        interrupted=True,
                     )
                 )
-                continue
-
-            # END_TURN or any other terminal stop — normal completion.
-            break
-        else:
-            logger.warning(
-                "Agentic loop hit max rounds (%d) for conversation %s",
-                self._max_tool_rounds,
-                conversation_id,
-            )
 
         # Collapse any max_tokens continuations: drop the synthetic
         # continuation user rows and merge adjacent assistant text rows so
@@ -1550,16 +1670,23 @@ class AIService(Service):
                         )
                     break
 
-        # Count *visible* assistant messages to determine response_index
-        # for UI blocks. The agentic loop appends one assistant row per
-        # round — intermediate rounds carry tool_calls but no content and
-        # are collapsed into the final answer by ``_ws_history_load``
-        # (and never shown in the live frontend state). Counting them
-        # here would push response_index past the frontend's index space
-        # and leave blocks unanchored. Match the history loader by
-        # counting only non-empty assistant rows.
-        assistant_count = sum(1 for m in messages if m.role == MessageRole.ASSISTANT and m.content)
-        response_index = max(0, assistant_count - 1)
+        # ``response_index`` anchors UI blocks to the turn they were
+        # produced in. The frontend renders one ``TurnBubble`` per
+        # user→assistant exchange (one turn per user message), so we
+        # count user rows in the persisted history and use that as the
+        # turn index. This matches ``MessageList``'s
+        # ``assistantToTurnIndex`` map exactly — both sides agree on
+        # "the Nth turn is the Nth user message."
+        #
+        # Counting visible-content assistant rows (the old approach)
+        # broke for any turn that had multiple intermediate rounds
+        # with reasoning text — every round counted as its own
+        # "visible assistant" on the backend, but the frontend's
+        # turn-grouped view collapsed all those rounds into one turn.
+        # The indices drifted apart and UI blocks fell through to the
+        # unanchored bucket at the bottom of the chat.
+        user_count = sum(1 for m in messages if m.role == MessageRole.USER)
+        response_index = max(0, user_count - 1)
 
         # Serialize UI blocks with position and submission state
         ui_block_dicts: list[dict[str, Any]] = []
@@ -1570,16 +1697,32 @@ class AIService(Service):
             d["submission"] = None
             ui_block_dicts.append(d)
 
-        # Persist conversation with user ownership and UI blocks
-        await self._save_conversation(
+        # Persist conversation with user ownership and UI blocks.
+        # When the turn was interrupted, shield the save so a
+        # subsequent ``task.cancel()`` from the caller (or any stray
+        # cancellation already queued on the event loop) can't abort
+        # persistence and lose the partial state we just captured.
+        save_coro = self._save_conversation(
             conversation_id,
             messages,
             user_ctx,
             ui_blocks=ui_block_dicts,
         )
+        if was_interrupted:
+            await asyncio.shield(save_coro)
+        else:
+            await save_coro
 
-        # Return final text response
-        final_text = response.message.content if response else ""
+        # Return final text response. When the turn was interrupted
+        # the trailing assistant row's content carries the AI-facing
+        # ``_INTERRUPT_MARKER`` sentinel; strip it before handing the
+        # text back to the frontend so the visible bubble shows only
+        # whatever partial reply the user actually saw stream in
+        # (which may be empty).
+        if was_interrupted and messages and messages[-1].role == MessageRole.ASSISTANT:
+            final_text = _strip_interrupt_marker(messages[-1].content or "")
+        else:
+            final_text = response.message.content if response else ""
 
         # Signal end-of-turn to streaming listeners so they can drop
         # any in-flight streaming buffers and fall back to the
@@ -1601,6 +1744,7 @@ class AIService(Service):
             tool_usage=tool_usage,
             attachments=list(turn_attachments),
             rounds=turn_rounds,
+            interrupted=was_interrupted,
         )
 
     # --- System Prompt ---
@@ -2345,10 +2489,21 @@ class AIService(Service):
 
         # Store the assistant turn with ToolCall/ToolResult metadata so
         # the frontend renders it identically to an AI-driven tool use.
+        #
+        # If the tool produced UI blocks or attachments, those ARE the
+        # user-visible output — showing the raw ``result_text`` (which
+        # is often a JSON payload intended for the AI) as a chat bubble
+        # just pollutes the transcript. Drop it from Message.content in
+        # that case but keep it in ToolResult.content so later AI turns
+        # can still read what happened.
+        if ui_blocks or slash_attachments:
+            bubble_content = ""
+        else:
+            bubble_content = result_text
         messages.append(
             Message(
                 role=MessageRole.ASSISTANT,
-                content=result_text,
+                content=bubble_content,
                 tool_calls=[
                     ToolCall(
                         tool_call_id=tool_call_id,
@@ -2370,12 +2525,15 @@ class AIService(Service):
 
         # Serialize UI blocks with position + submission state, matching
         # the chat() agentic loop so downstream rendering is uniform.
-        # Count only visible assistant rows (non-empty content) so the
-        # index aligns with what the frontend and history loader show;
-        # intermediate tool-use rounds are invisible and would offset
-        # the anchor otherwise.
-        assistant_count = sum(1 for m in messages if m.role == MessageRole.ASSISTANT and m.content)
-        response_index = max(0, assistant_count - 1)
+        # ``response_index`` anchors UI blocks to the turn they were
+        # produced in. The frontend renders one ``TurnBubble`` per
+        # user→assistant exchange (one turn per user message), so we
+        # count user rows in the persisted history and use that as the
+        # turn index. This matches ``MessageList``'s
+        # ``assistantToTurnIndex`` map exactly — both sides agree on
+        # "the Nth turn is the Nth user message."
+        user_count = sum(1 for m in messages if m.role == MessageRole.USER)
+        response_index = max(0, user_count - 1)
         ui_block_dicts: list[dict[str, Any]] = []
         for block in ui_blocks:
             d = block.to_dict()
@@ -2399,18 +2557,37 @@ class AIService(Service):
                 "result": result_text,
             }
         ]
-        # Slash commands are modeled as a zero-round turn: the tool runs
-        # directly and its result is the turn's "final" content. No AI
-        # round preceded it, so ``rounds`` is empty — the frontend's turn
-        # bubble renders the tool inline alongside the final text via a
-        # simpler layout path.
+        # Slash commands are modeled as a single-round turn so the
+        # frontend's TurnBubble shows the "thinking" card with the tool
+        # call + result inside it — mirroring what refreshing the page
+        # would reconstruct from persisted history. If the tool produced
+        # UI blocks or attachments, those are the visible output and the
+        # bubble's final text is left empty (matches
+        # ``bubble_content`` above). Otherwise, ``result_text`` is the
+        # user-facing answer.
+        synthetic_round = {
+            "reasoning": "",
+            "tools": [
+                {
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_def.name,
+                    "is_error": is_error,
+                    "arguments": sanitized_args,
+                    "result": result_text,
+                }
+            ],
+        }
+        if ui_blocks or slash_attachments:
+            live_response_text = ""
+        else:
+            live_response_text = result_text
         return ChatTurnResult(
-            response_text=result_text,
+            response_text=live_response_text,
             conversation_id=conversation_id,
             ui_blocks=ui_block_dicts,
             tool_usage=tool_usage,
             attachments=list(slash_attachments),
-            rounds=[],
+            rounds=[synthetic_round],
         )
 
     # --- Tool Event Publishing ---
@@ -2637,6 +2814,8 @@ class AIService(Service):
                     entry["workspace_conv"] = att.workspace_conv
                 serialized_attachments.append(entry)
             d["attachments"] = serialized_attachments
+        if msg.interrupted:
+            d["interrupted"] = True
         return d
 
     @staticmethod
@@ -2698,6 +2877,7 @@ class AIService(Service):
             author_name=data.get("author_name", ""),
             visible_to=data.get("visible_to"),
             attachments=attachments,
+            interrupted=bool(data.get("interrupted", False)),
         )
 
     # --- Conversation State ---
@@ -3244,6 +3424,7 @@ class AIService(Service):
     def get_ws_handlers(self) -> dict[str, Any]:
         return {
             "chat.message.send": self._ws_chat_send,
+            "chat.message.cancel": self._ws_chat_cancel,
             "chat.form.submit": self._ws_form_submit,
             "chat.history.load": self._ws_history_load,
             "chat.conversation.list": self._ws_conversation_list,
@@ -3332,6 +3513,21 @@ class AIService(Service):
                 "code": 400,
             }
 
+        # Register this RPC task in the in-flight registry keyed by the
+        # WS frame id so ``chat.message.cancel`` can look it up and
+        # interrupt the running turn. The registry entry also records
+        # the originating user_id so cancel can enforce "only the
+        # originator can interrupt." Removed in the finally block
+        # below whether the turn finishes, errors, or is cancelled.
+        rpc_ref = str(frame.get("id") or "")
+        cancel_key = rpc_ref
+        current_task = asyncio.current_task()
+        if cancel_key and current_task is not None:
+            self._in_flight_chats[cancel_key] = (
+                current_task,
+                conn.user_ctx.user_id,
+            )
+
         conversation_id = frame.get("conversation_id") or None
 
         # Check if this is a shared room
@@ -3352,6 +3548,7 @@ class AIService(Service):
             slash_cmds = self._slash_commands_for_user(conn.user_ctx)
             is_slash_command = self._match_slash_command(message, slash_cmds) is not None
 
+        interrupted = False
         try:
             if is_shared:
                 from gilbert.core.chat import build_room_context, mentions_gilbert, publish_event
@@ -3389,6 +3586,7 @@ class AIService(Service):
                     tool_usage = turn_result.tool_usage
                     reply_attachments = turn_result.attachments
                     reply_rounds = turn_result.rounds
+                    interrupted = turn_result.interrupted
                 else:
                     # Store message without invoking AI
                     conv_id = conversation_id
@@ -3435,9 +3633,15 @@ class AIService(Service):
                 tool_usage = turn_result.tool_usage
                 reply_attachments = turn_result.attachments
                 reply_rounds = turn_result.rounds
+                interrupted = turn_result.interrupted
         except Exception as exc:
             logger.warning("chat.message.send failed", exc_info=True)
             return {"type": "gilbert.error", "ref": frame.get("id"), "error": str(exc), "code": 500}
+        finally:
+            # Always unregister, even on error. Cancel RPCs that arrive
+            # after this won't find a matching task and will no-op.
+            if cancel_key:
+                self._in_flight_chats.pop(cancel_key, None)
 
         return {
             "type": "chat.message.send.result",
@@ -3448,6 +3652,73 @@ class AIService(Service):
             "tool_usage": tool_usage,
             "attachments": _serialize_attachments_for_wire(reply_attachments),
             "rounds": reply_rounds,
+            "interrupted": interrupted,
+        }
+
+    async def _ws_chat_cancel(
+        self, conn: WsConnectionBase, frame: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Interrupt a running chat turn by its originating RPC ref.
+
+        Frontend calls this when the user clicks the stop button while
+        Gilbert is working. The frame carries the ``ref`` of the
+        in-flight ``chat.message.send`` RPC; we look up the registered
+        task in ``self._in_flight_chats`` and call ``.cancel()`` on it.
+        ``AIService.chat()`` catches the resulting ``CancelledError``
+        inside its agentic loop, marks the trailing assistant row as
+        interrupted, shields the partial-state save from the
+        cancellation, and returns a normal ``ChatTurnResult`` with
+        ``interrupted=True``. The original ``chat.message.send`` RPC
+        then resolves with an interrupted result frame — this cancel
+        RPC just ACKs the request.
+
+        Only the originator of the turn can cancel it. Anyone else who
+        tries gets a 403. This matches the product decision: in a
+        shared room, a user can't stop another user's in-flight turn.
+
+        Cancels that arrive after the turn has already completed are
+        treated as no-ops (``cancelled=False`` in the ack).
+        """
+        target_ref = str(frame.get("ref") or "")
+        if not target_ref:
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "ref is required",
+                "code": 400,
+            }
+
+        entry = self._in_flight_chats.get(target_ref)
+        if entry is None:
+            return {
+                "type": "chat.message.cancel.result",
+                "ref": frame.get("id"),
+                "cancelled": False,
+                "reason": "not_found",
+            }
+
+        task, originator_id = entry
+        if originator_id != conn.user_ctx.user_id:
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": "Only the originator can cancel this turn.",
+                "code": 403,
+            }
+
+        if task.done():
+            return {
+                "type": "chat.message.cancel.result",
+                "ref": frame.get("id"),
+                "cancelled": False,
+                "reason": "already_done",
+            }
+
+        task.cancel()
+        return {
+            "type": "chat.message.cancel.result",
+            "ref": frame.get("id"),
+            "cancelled": True,
         }
 
     async def _ws_conversation_create(
@@ -3710,6 +3981,7 @@ class AIService(Service):
                 "final_content": "",
                 "final_attachments": [],
                 "incomplete": False,
+                "interrupted": False,
             }
             if include_author:
                 current["final_author_id"] = ""
@@ -3725,7 +3997,14 @@ class AIService(Service):
             # didn't reach a clean stopping point — usually because the
             # agentic loop hit max_tool_rounds or the AI errored. Mark it
             # so the frontend can render an "incomplete" indicator.
-            if not current["final_content"] and not current["final_attachments"]:
+            # Slash commands that close the turn inline are always
+            # considered complete regardless of final_content.
+            slash_closed = bool(current.pop("_slash_closed", False))
+            if (
+                not slash_closed
+                and not current["final_content"]
+                and not current["final_attachments"]
+            ):
                 if current["rounds"]:
                     current["incomplete"] = True
             turns.append(current)
@@ -3786,7 +4065,17 @@ class AIService(Service):
                 if round_reasoning or round_tools:
                     finalize_round()
 
-                round_reasoning = content
+                # Strip the interrupt sentinel from round reasoning too
+                # — if the user cancelled right between the assistant
+                # row being appended and the tool executing, the row
+                # carries both tool_calls and the marker. The marker
+                # is for the AI, not the UI.
+                row_interrupted = bool(row.get("interrupted"))
+                round_reasoning = (
+                    _strip_interrupt_marker(content) if row_interrupted else content
+                )
+                if row_interrupted:
+                    current["interrupted"] = True
                 for tc in tool_calls:
                     call_id = tc.get("tool_call_id", "")
                     entry = {
@@ -3824,6 +4113,12 @@ class AIService(Service):
                     current["final_attachments"] = self._serialize_persisted_attachments(
                         row.get("attachments")
                     )
+                    # Slash-closing row — the turn is complete even if
+                    # ``content`` is empty (e.g. the tool produced only
+                    # UI blocks and we deliberately skipped persisting a
+                    # JSON bubble). Without this flag the downstream
+                    # incomplete-check would flag the turn incorrectly.
+                    current["_slash_closed"] = True
                     if include_author:
                         current["final_author_id"] = row.get("author_id", "")
                         current["final_author_name"] = row.get("author_name", "")
@@ -3833,10 +4128,22 @@ class AIService(Service):
             # answer for the current turn. Capture content + attachments
             # and finalize.
             finalize_round()
-            current["final_content"] = content
+            # Strip the AI-facing interrupt sentinel from content before
+            # setting final_content so the visible bubble only shows
+            # whatever partial reply the user actually saw.
+            display_content = (
+                _strip_interrupt_marker(content) if row.get("interrupted") else content
+            )
+            current["final_content"] = display_content
             current["final_attachments"] = self._serialize_persisted_attachments(
                 row.get("attachments")
             )
+            # Propagate the persisted interrupted marker: set on the
+            # trailing assistant row by ``chat()`` when the user hit
+            # stop mid-flight. Drives the subtle stop icon on the
+            # frontend's TurnBubble.
+            if row.get("interrupted"):
+                current["interrupted"] = True
             if include_author:
                 current["final_author_id"] = row.get("author_id", "")
                 current["final_author_name"] = row.get("author_name", "")

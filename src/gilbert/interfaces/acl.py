@@ -57,6 +57,7 @@ DEFAULT_RPC_PERMISSIONS: dict[str, int] = {
     "chat.conversation.create": 200,
     "chat.history.load": 200,
     "chat.message.send": 200,
+    "chat.message.cancel": 200,
     "chat.form.submit": 200,
     "chat.user.list": 200,
     # Slash-command discovery — response is already RBAC-filtered per

@@ -26,10 +26,11 @@ export function MessageList({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [turns, uiBlocks]);
 
-  // UI blocks are anchored by ``response_index`` which is the count of
-  // visible (non-empty) assistant rows in the conversation. Map each
-  // index onto a turn — turns without a final answer never get a
-  // visible assistant row, so they don't consume a response_index.
+  // UI blocks are anchored by ``response_index`` which the backend
+  // sets to the 0-based turn index (== count of user messages minus
+  // one at the time the block was produced). Since we render one
+  // ``TurnBubble`` per turn, response_index maps 1:1 onto the turn
+  // array index — no extra bookkeeping required.
   const visibleBlocks = uiBlocks.filter(
     (block) =>
       (!block.for_user || block.for_user === currentUserId) &&
@@ -39,26 +40,17 @@ export function MessageList({
   const blocksByTurnIndex = new Map<number, UIBlock[]>();
   const unanchored: UIBlock[] = [];
 
-  // Walk turns in order, advancing a "visible assistant" counter for
-  // every turn that has a final answer (== a visible bubble).
-  let visibleAssistantIndex = 0;
-  const assistantToTurnIndex = new Map<number, number>();
-  for (let i = 0; i < turns.length; i++) {
-    if (turns[i].final_content) {
-      assistantToTurnIndex.set(visibleAssistantIndex, i);
-      visibleAssistantIndex++;
-    }
-  }
-
   for (const block of visibleBlocks) {
-    if (block.response_index != null) {
-      const turnIdx = assistantToTurnIndex.get(block.response_index);
-      if (turnIdx != null) {
-        const list = blocksByTurnIndex.get(turnIdx) ?? [];
-        list.push(block);
-        blocksByTurnIndex.set(turnIdx, list);
-        continue;
-      }
+    if (
+      block.response_index != null &&
+      block.response_index >= 0 &&
+      block.response_index < turns.length
+    ) {
+      const turnIdx = block.response_index;
+      const list = blocksByTurnIndex.get(turnIdx) ?? [];
+      list.push(block);
+      blocksByTurnIndex.set(turnIdx, list);
+      continue;
     }
     unanchored.push(block);
   }

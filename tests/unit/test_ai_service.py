@@ -254,7 +254,7 @@ async def test_chat_simple_response(
     )
     await ai_service.start(resolver)
 
-    text, conv_id, _ui, _tu, _atts, _rounds = await ai_service.chat("Hi")
+    text, conv_id, _ui, _tu, _atts, _rounds, *_ = await ai_service.chat("Hi")
     assert text == "Hello there!"
     assert conv_id  # non-empty UUID string
     assert len(stub_backend.requests) == 1
@@ -265,6 +265,136 @@ async def test_chat_simple_response(
     assert len(req.messages) == 1
     assert req.messages[0].role == MessageRole.USER
     assert req.messages[0].content == "Hi"
+
+
+async def test_chat_interrupted_by_user_cancellation(
+    ai_service: AIService,
+    stub_backend: StubAIBackend,
+    resolver: ServiceResolver,
+    storage_backend: StorageBackend,
+) -> None:
+    """User hitting stop mid-turn persists partial state and flags interrupted.
+
+    Simulated by making the backend raise ``asyncio.CancelledError`` from
+    inside ``generate_stream`` — exactly what asyncio does when the
+    chat.message.cancel RPC calls ``task.cancel()`` on the in-flight
+    send task while it's awaiting the Anthropic HTTP stream.
+    """
+    import asyncio as _asyncio
+
+    from gilbert.core.services.ai import _INTERRUPT_MARKER
+
+    class _CancellingBackend(StubAIBackend):
+        async def generate(self, request: AIRequest) -> AIResponse:  # type: ignore[override]
+            raise _asyncio.CancelledError()
+
+    cancelling = _CancellingBackend()
+    ai_service._backend = cancelling
+    await ai_service.start(resolver)
+
+    result = await ai_service.chat("Do something slow")
+
+    # chat() caught CancelledError, persisted partial state, and
+    # returned a normal result with interrupted=True.
+    assert result.interrupted is True
+    assert result.conversation_id
+    # The visible response text is empty (or pre-marker partial text);
+    # the AI-facing interrupt marker is stripped.
+    assert _INTERRUPT_MARKER not in result.response_text
+    # Persistence happened under asyncio.shield, so the conversation
+    # landed in storage with the interrupted marker on the trailing
+    # assistant row.
+    saved_call = storage_backend.put.call_args  # type: ignore[union-attr]
+    saved_data = saved_call[0][2]
+    messages = saved_data.get("messages", [])
+    interrupted_rows = [
+        m
+        for m in messages
+        if m.get("role") == "assistant" and m.get("interrupted") is True
+    ]
+    assert interrupted_rows, "trailing assistant row should be flagged interrupted"
+    # The persisted content MUST carry the AI-facing interrupt marker
+    # so a subsequent turn sees "do not resume" in the history replay.
+    # Without this, the AI happily picks back up where it left off.
+    assert all(_INTERRUPT_MARKER in m.get("content", "") for m in interrupted_rows)
+    # The user message is always preserved regardless of cancellation.
+    assert any(
+        m.get("role") == "user" and m.get("content") == "Do something slow"
+        for m in messages
+    )
+
+
+async def test_next_turn_after_interrupt_sees_marker_in_history(
+    ai_service: AIService,
+    stub_backend: StubAIBackend,
+    resolver: ServiceResolver,
+    storage_backend: StorageBackend,
+) -> None:
+    """On the turn AFTER an interrupt, the AI request history must carry
+    the ``_INTERRUPT_MARKER`` sentinel on the previous assistant row.
+
+    Without this, the model reads the empty/partial interrupted row as
+    "my unfinished work" and continues it instead of addressing the new
+    user message — the exact behavior the user reported in the
+    ``asdasdf`` chat log.
+    """
+    import asyncio as _asyncio
+
+    from gilbert.core.services.ai import _INTERRUPT_MARKER
+
+    call_count = 0
+
+    class _InterruptThenRespondBackend(StubAIBackend):
+        async def generate(self, request: AIRequest) -> AIResponse:  # type: ignore[override]
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First turn: simulate the user hitting stop mid-
+                # stream.
+                raise _asyncio.CancelledError()
+            # Second turn: record the request and return a normal
+            # reply so we can inspect the history the AI saw.
+            self.requests.append(request)
+            return AIResponse(
+                message=Message(role=MessageRole.ASSISTANT, content="hello back"),
+                model="stub",
+            )
+
+    backend = _InterruptThenRespondBackend()
+    ai_service._backend = backend
+    await ai_service.start(resolver)
+
+    # Turn 1 — gets cancelled.
+    first = await ai_service.chat("start the long task")
+    assert first.interrupted is True
+    conv_id = first.conversation_id
+
+    # Simulate storage round-trip so the second chat() reads the
+    # persisted interrupted state.
+    saved_call = storage_backend.put.call_args  # type: ignore[union-attr]
+    saved_data = saved_call[0][2]
+    storage_backend.get = AsyncMock(return_value=saved_data)  # type: ignore[union-attr]
+
+    # Turn 2 — a fresh, unrelated user message.
+    second = await ai_service.chat("hi", conversation_id=conv_id)
+    assert second.interrupted is False
+    assert second.response_text == "hello back"
+
+    # The request the AI saw on turn 2 MUST include the interrupt
+    # marker on the trailing assistant row of the history replay.
+    # That's what teaches the model not to resume.
+    assert len(backend.requests) == 1
+    history_msgs = backend.requests[0].messages
+    assistant_with_marker = [
+        m
+        for m in history_msgs
+        if m.role == MessageRole.ASSISTANT and _INTERRUPT_MARKER in (m.content or "")
+    ]
+    assert assistant_with_marker, (
+        "second turn's request history should carry the interrupt "
+        "marker on the previous assistant row so the AI knows not to "
+        "resume"
+    )
 
 
 async def test_chat_continues_conversation(
@@ -288,7 +418,7 @@ async def test_chat_continues_conversation(
     await ai_service.start(resolver)
 
     # First message
-    _, conv_id, _ui, _tu, _atts, _rounds = await ai_service.chat("Hello")
+    _, conv_id, _ui, _tu, _atts, _rounds, *_ = await ai_service.chat("Hello")
 
     # Simulate storage returning the saved conversation
     saved_call = storage_backend.put.call_args  # type: ignore[union-attr]
@@ -296,7 +426,7 @@ async def test_chat_continues_conversation(
     storage_backend.get = AsyncMock(return_value=saved_data)  # type: ignore[union-attr]
 
     # Second message in same conversation
-    text, same_id, _ui, _tu, _atts, _rounds = await ai_service.chat("Follow up", conversation_id=conv_id)
+    text, same_id, _ui, _tu, _atts, _rounds, *_ = await ai_service.chat("Follow up", conversation_id=conv_id)
     assert same_id == conv_id
     assert text == "Second reply"
 
@@ -371,7 +501,7 @@ async def test_chat_with_tool_calls(
     )
 
     await ai_service.start(resolver)
-    text, _, _ui, _tu, _atts, _rounds = await ai_service.chat("What's the weather in Portland?")
+    text, _, _ui, _tu, _atts, _rounds, *_ = await ai_service.chat("What's the weather in Portland?")
 
     assert text == "It's 72F and sunny in Portland!"
     assert len(stub_backend.requests) == 2
@@ -569,7 +699,7 @@ async def test_chat_ui_block_response_index_skips_empty_assistant_rows(
     )
 
     await ai_service.start(resolver)
-    _text, _cid, ui_blocks, _tu, _atts, _rounds = await ai_service.chat("pick something")
+    _text, _cid, ui_blocks, _tu, _atts, _rounds, *_ = await ai_service.chat("pick something")
 
     # The call produced one visible assistant bubble, so the block must
     # anchor at response_index=0 — not 1, which would be the result of
@@ -669,8 +799,8 @@ async def test_chat_ui_block_response_index_across_multiple_turns(
     )
 
     await ai_service.start(resolver)
-    _, conv_id, ui_blocks_1, _, _atts, _rounds = await ai_service.chat("first")
-    _, _, ui_blocks_2, _, _atts, _rounds = await ai_service.chat(
+    _, conv_id, ui_blocks_1, _, _atts, _rounds, *_ = await ai_service.chat("first")
+    _, _, ui_blocks_2, _, _atts, _rounds, *_ = await ai_service.chat(
         "second",
         conversation_id=conv_id,
     )
@@ -710,7 +840,7 @@ async def test_chat_max_tool_rounds(
         )
 
     await ai_service.start(resolver)
-    text, _, _ui, _tu, _atts, _rounds = await ai_service.chat("loop forever")
+    text, _, _ui, _tu, _atts, _rounds, *_ = await ai_service.chat("loop forever")
 
     # max_tool_rounds=5, so at most 5 backend calls
     assert len(stub_backend.requests) == 5
@@ -750,7 +880,7 @@ async def test_max_tokens_text_continues(
     )
 
     await ai_service.start(resolver)
-    text, _, _ui, _tu, _atts, _rounds = await ai_service.chat("Give me a long answer")
+    text, _, _ui, _tu, _atts, _rounds, *_ = await ai_service.chat("Give me a long answer")
 
     # Both chunks should appear in the returned text
     assert "Part one of the answer" in text
@@ -790,7 +920,7 @@ async def test_max_tokens_partial_tool_call_surfaces_error(
     )
 
     await ai_service.start(resolver)
-    text, _, _ui, tool_usage, _atts, _rounds = await ai_service.chat("do the thing")
+    text, _, _ui, tool_usage, _atts, _rounds, *_ = await ai_service.chat("do the thing")
 
     # The loop broke out without executing or retrying
     assert len(stub_backend.requests) == 1
@@ -822,7 +952,7 @@ async def test_max_tokens_continuation_cap(
         )
 
     await ai_service.start(resolver)
-    text, _, _ui, _tu, _atts, _rounds = await ai_service.chat("keep going")
+    text, _, _ui, _tu, _atts, _rounds, *_ = await ai_service.chat("keep going")
 
     # Initial call + 2 continuations = 3 backend calls total
     assert len(stub_backend.requests) == 3
@@ -1107,7 +1237,7 @@ async def test_unknown_tool_returns_error_result(
     )
 
     await ai_service.start(resolver)
-    text, _, _ui, _tu, _atts, _rounds = await ai_service.chat("Do something impossible")
+    text, _, _ui, _tu, _atts, _rounds, *_ = await ai_service.chat("Do something impossible")
 
     # The error result was fed back
     second_req = stub_backend.requests[1]
@@ -1157,7 +1287,7 @@ async def test_tool_execution_error_returns_error_result(
     )
 
     await ai_service.start(resolver)
-    text, _, _ui, _tu, _atts, _rounds = await ai_service.chat("Run the bad tool")
+    text, _, _ui, _tu, _atts, _rounds, *_ = await ai_service.chat("Run the bad tool")
 
     second_req = stub_backend.requests[1]
     tool_result_msg = second_req.messages[-1]
@@ -1181,7 +1311,7 @@ async def test_conversation_saved_to_storage(
         )
     )
     await ai_service.start(resolver)
-    _, conv_id, _ui, _tu, _atts, _rounds = await ai_service.chat("Save this")
+    _, conv_id, _ui, _tu, _atts, _rounds, *_ = await ai_service.chat("Save this")
 
     # Find the conversation save call among all put calls (profiles are also seeded)
     conv_calls = [
@@ -1565,7 +1695,7 @@ async def test_set_and_get_conversation_state(
     )
     await ai_service.start(resolver)
 
-    _, conv_id, _, _, _atts, _rounds = await ai_service.chat("Hi")
+    _, conv_id, _, _, _atts, _rounds, *_ = await ai_service.chat("Hi")
 
     # Capture the saved conversation and return it on subsequent gets
     saved_data = storage_backend.put.call_args[0][2]  # type: ignore[union-attr]
@@ -1599,7 +1729,7 @@ async def test_get_missing_state_returns_none(
         )
     )
     await ai_service.start(resolver)
-    _, conv_id, _, _, _atts, _rounds = await ai_service.chat("Hi")
+    _, conv_id, _, _, _atts, _rounds, *_ = await ai_service.chat("Hi")
 
     saved_data = storage_backend.put.call_args[0][2]  # type: ignore[union-attr]
     storage_backend.get = AsyncMock(return_value=saved_data)  # type: ignore[union-attr]
@@ -1622,7 +1752,7 @@ async def test_clear_conversation_state(
         )
     )
     await ai_service.start(resolver)
-    _, conv_id, _, _, _atts, _rounds = await ai_service.chat("Hi")
+    _, conv_id, _, _, _atts, _rounds, *_ = await ai_service.chat("Hi")
 
     saved_data = storage_backend.put.call_args[0][2]  # type: ignore[union-attr]
     storage_backend.get = AsyncMock(return_value=saved_data)  # type: ignore[union-attr]
@@ -1659,7 +1789,7 @@ async def test_multiple_state_keys_coexist(
         )
     )
     await ai_service.start(resolver)
-    _, conv_id, _, _, _atts, _rounds = await ai_service.chat("Hi")
+    _, conv_id, _, _, _atts, _rounds, *_ = await ai_service.chat("Hi")
 
     saved_data = storage_backend.put.call_args[0][2]  # type: ignore[union-attr]
     storage_backend.get = AsyncMock(return_value=saved_data)  # type: ignore[union-attr]
@@ -1690,7 +1820,7 @@ async def test_state_uses_current_conversation_id(
         )
     )
     await ai_service.start(resolver)
-    _, conv_id, _, _, _atts, _rounds = await ai_service.chat("Hi")
+    _, conv_id, _, _, _atts, _rounds, *_ = await ai_service.chat("Hi")
 
     saved_data = storage_backend.put.call_args[0][2]  # type: ignore[union-attr]
     storage_backend.get = AsyncMock(return_value=saved_data)  # type: ignore[union-attr]
@@ -1716,7 +1846,7 @@ async def test_state_injected_into_system_prompt(
         )
     )
     await ai_service.start(resolver)
-    _, conv_id, _, _, _atts, _rounds = await ai_service.chat("Hi")
+    _, conv_id, _, _, _atts, _rounds, *_ = await ai_service.chat("Hi")
 
     # Save state directly in the conversation data
     saved_data = storage_backend.put.call_args[0][2]  # type: ignore[union-attr]

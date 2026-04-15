@@ -96,6 +96,11 @@ export function ChatPage() {
   // because it has to be read+written from event handlers without
   // racing the setTurns batch.
   const nextRoundPendingRef = useRef(false);
+  // RPC ref of the currently in-flight ``chat.message.send``. Set by
+  // ``handleSend`` before awaiting the promise, cleared on resolution
+  // (success or error). The stop button reads this to know what to
+  // cancel via ``api.cancelMessage(ref)``.
+  const inFlightSendRef = useRef<string | null>(null);
   // Keep the ref in sync so streaming event handlers can read the
   // current conversation id without re-registering on every change.
   useEffect(() => {
@@ -288,14 +293,25 @@ export function ChatPage() {
       ]);
       setSending(true);
 
+      // Send via the tracked variant so we capture the RPC ref — the
+      // stop button uses it to send a matching ``chat.message.cancel``.
+      const { ref, promise } = api.sendMessageWithRef(
+        message,
+        activeConvId,
+        attachments,
+      );
+      inFlightSendRef.current = ref;
+
       try {
-        const resp = await api.sendMessage(message, activeConvId, attachments);
+        const resp = await promise;
         setActiveConvId(resp.conversation_id);
 
         // Replace the streaming placeholder with the authoritative
         // committed turn shape. The server's ``rounds`` is the source
         // of truth; the live-built rounds we accumulated from stream
         // events get thrown away in favor of the persisted version.
+        // ``interrupted`` rides through so TurnBubble can render the
+        // subtle stop icon on the committed turn.
         setTurns((prev) => {
           const next = [...prev];
           const lastIdx = next.length - 1;
@@ -306,6 +322,7 @@ export function ChatPage() {
               final_content: resp.response ?? "",
               final_attachments: resp.attachments ?? [],
               incomplete: false,
+              interrupted: resp.interrupted === true,
               streaming: false,
             };
           }
@@ -339,11 +356,30 @@ export function ChatPage() {
           return next;
         });
       } finally {
+        inFlightSendRef.current = null;
         setSending(false);
       }
     },
     [api, activeConvId, refetchConversations],
   );
+
+  const handleStop = useCallback(async () => {
+    // Click-to-interrupt for the stop button. Fires a
+    // ``chat.message.cancel`` against the currently tracked send ref;
+    // the backend cancels the in-flight task, ``AIService.chat()``
+    // catches ``CancelledError`` and persists partial state, and the
+    // awaiting ``handleSend`` resolves with ``interrupted=true``. The
+    // per-turn visual update flows through the normal resolve path.
+    const ref = inFlightSendRef.current;
+    if (!ref) return;
+    try {
+      await api.cancelMessage(ref);
+    } catch {
+      // Cancel failed (404 — turn already finished, 403 — not the
+      // originator in a shared room, or network blip). The
+      // in-flight promise will resolve on its own; nothing else to do.
+    }
+  }, [api]);
 
   const handleBlockSubmit = useCallback(
     async (blockId: string, values: Record<string, unknown>) => {
@@ -1022,7 +1058,8 @@ export function ChatPage() {
         {(activeConvId || turns.length > 0) && (
           <ChatInput
             onSend={handleSend}
-            disabled={sending}
+            onStop={handleStop}
+            sending={sending}
             placeholder={
               isShared
                 ? "Mention 'Gilbert' for AI help..."

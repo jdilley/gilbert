@@ -13,6 +13,7 @@ import {
   FileTextIcon,
   PaperclipIcon,
   SendHorizontalIcon,
+  SquareIcon,
   XIcon,
 } from "lucide-react";
 import { useWsApi } from "@/hooks/useWsApi";
@@ -65,7 +66,13 @@ const TEXT_EXTENSION_ALLOWLIST = new Set([
 
 interface ChatInputProps {
   onSend: (message: string, attachments?: FileAttachment[]) => void;
-  disabled?: boolean;
+  /** Fired when the user clicks the stop button while Gilbert is
+   *  thinking. Triggers ``chat.message.cancel`` in ChatPage. */
+  onStop?: () => void;
+  /** True while a ``chat.message.send`` RPC is in flight. Drives the
+   *  send→stop button swap and keeps the textarea editable so the
+   *  user can start drafting their next message immediately. */
+  sending?: boolean;
   placeholder?: string;
   pendingAttachments: PendingAttachment[];
   attachError: string | null;
@@ -354,7 +361,8 @@ function countCompletedTokens(rest: string): number {
 
 export function ChatInput({
   onSend,
-  disabled = false,
+  onStop,
+  sending = false,
   placeholder = "Type a message...",
   pendingAttachments,
   attachError,
@@ -362,6 +370,12 @@ export function ChatInput({
   onRemoveAttachment,
   onClearAttachments,
 }: ChatInputProps) {
+  // The textarea stays editable even while Gilbert is thinking so the
+  // user can start drafting their next message. ``sending`` only
+  // controls the send→stop button swap; the old ``disabled`` prop is
+  // gone because a disabled textarea blocked the whole point of the
+  // interrupt feature.
+  const disabled = false;
   const [message, setMessage] = useState("");
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
@@ -435,6 +449,12 @@ export function ChatInput({
   }, [suggestions.length, suggestionIndex]);
 
   const handleSend = useCallback(() => {
+    // Ignore Enter / click while a turn is already in flight — the
+    // user has to hit stop first. Letting it through would race two
+    // ``chat.message.send`` RPCs against each other, which isn't what
+    // anyone wants. The textarea stays editable so typed drafts
+    // survive the wait.
+    if (sending) return;
     const trimmed = message.trim();
     if (!trimmed && pendingAttachments.length === 0) return;
     const outgoing: FileAttachment[] = pendingAttachments.map(
@@ -455,7 +475,7 @@ export function ChatInput({
       textareaRef.current.style.height = "auto";
       textareaRef.current.focus();
     }
-  }, [message, pendingAttachments, onSend, onClearAttachments]);
+  }, [sending, message, pendingAttachments, onSend, onClearAttachments]);
 
   const applyHistoryEntry = useCallback((text: string) => {
     setMessage(text);
@@ -706,17 +726,32 @@ export function ChatInput({
             rows={1}
             className="min-h-[40px] max-h-[150px] resize-none text-base sm:text-sm"
           />
-          <Button
-            onClick={handleSend}
-            disabled={
-              disabled || (!message.trim() && pendingAttachments.length === 0)
-            }
-            size="icon"
-            className="shrink-0"
-          >
-            <SendHorizontalIcon className="size-4" />
-            <span className="sr-only">Send</span>
-          </Button>
+          {sending ? (
+            <Button
+              type="button"
+              onClick={onStop}
+              size="icon"
+              variant="destructive"
+              className="shrink-0"
+              aria-label="Stop"
+              title="Stop Gilbert"
+            >
+              <SquareIcon className="size-4 fill-current" />
+              <span className="sr-only">Stop</span>
+            </Button>
+          ) : (
+            <Button
+              onClick={handleSend}
+              disabled={
+                !message.trim() && pendingAttachments.length === 0
+              }
+              size="icon"
+              className="shrink-0"
+            >
+              <SendHorizontalIcon className="size-4" />
+              <span className="sr-only">Send</span>
+            </Button>
+          )}
         </div>
       </div>
     </div>

@@ -20,6 +20,7 @@ import {
   FileIcon,
   FileTextIcon,
   LoaderIcon,
+  SquareIcon,
   WrenchIcon,
   XIcon,
 } from "lucide-react";
@@ -95,7 +96,7 @@ export function TurnBubble({
       </div>
 
       {/* Assistant side — thinking card + final answer. */}
-      {(hasRounds || hasFinal || turn.incomplete || turn.streaming) && (
+      {(hasRounds || hasFinal || turn.incomplete || turn.interrupted || turn.streaming) && (
         <div className="flex flex-row gap-2.5 max-w-3xl mx-auto">
           <Avatar className="size-7 shrink-0 mt-0.5">
             <AvatarFallback className="text-[11px] bg-primary text-primary-foreground">
@@ -103,8 +104,23 @@ export function TurnBubble({
             </AvatarFallback>
           </Avatar>
           <div className="flex flex-col gap-1.5 min-w-0 items-start flex-1">
-            <span className="text-[11px] text-muted-foreground px-0.5">
+            <span className="text-[11px] text-muted-foreground px-0.5 flex items-center gap-1">
               Gilbert
+              {turn.interrupted && (
+                // Subtle stop indicator — a small filled square, the
+                // universal "stopped" glyph. Tooltip spells it out for
+                // a11y. Shown inline next to the "Gilbert" label so
+                // it's visible whether or not the thinking card is
+                // expanded and regardless of whether any final answer
+                // was reached.
+                <span
+                  title="You interrupted this turn"
+                  aria-label="Interrupted"
+                  className="inline-flex"
+                >
+                  <SquareIcon className="size-2.5 fill-muted-foreground/70 text-muted-foreground/70" />
+                </span>
+              )}
             </span>
 
             {(hasRounds || (turn.streaming && !hasFinal)) && (
@@ -115,7 +131,7 @@ export function TurnBubble({
               <FinalAnswer turn={turn} />
             )}
 
-            {!hasFinal && turn.incomplete && (
+            {!hasFinal && turn.incomplete && !turn.interrupted && (
               <div className="flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
                 <AlertTriangleIcon className="size-3.5 shrink-0" />
                 <span>

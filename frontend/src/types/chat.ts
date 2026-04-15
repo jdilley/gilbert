@@ -106,6 +106,11 @@ export interface ChatResponse {
    *  the just-finished turn, replacing whatever live state the
    *  streaming buffer accumulated during the RPC. */
   rounds?: ChatRound[];
+  /** True when the turn was interrupted mid-flight by the user via
+   *  ``chat.message.cancel``. Partial state (completed rounds, any
+   *  attachments produced before the stop) is preserved in the
+   *  response; the frontend renders a subtle stop indicator. */
+  interrupted?: boolean;
 }
 
 // ── Turn-grouped chat history ────────────────────────────────────────
@@ -150,9 +155,17 @@ export interface ChatTurn {
   final_author_id?: string;
   final_author_name?: string;
   /** True if the turn never produced a final assistant message — the
-   *  agentic loop hit max_tool_rounds, the AI errored, or the user
-   *  cancelled. The UI renders an "incomplete" indicator. */
+   *  agentic loop hit max_tool_rounds or the AI errored. Interrupted
+   *  turns use the ``interrupted`` flag instead; this one is for
+   *  unintentional incompletion. */
   incomplete: boolean;
+  /** True when the user stopped the turn mid-flight via the stop
+   *  button (chat.message.cancel RPC). Partial state (completed
+   *  rounds, tool calls so far) is preserved; the TurnBubble renders
+   *  a subtle stop icon to make it clear the turn didn't finish
+   *  organically. Distinct from ``incomplete`` which covers unintended
+   *  cutoffs. */
+  interrupted?: boolean;
   /** True while the turn is being built from streaming events. The
    *  current round's reasoning pulses; previous rounds and the final
    *  answer (if any yet) are static. Cleared once the

@@ -46,6 +46,14 @@ interface WebSocketContextValue {
     frame: Omit<WsFrame, "id">,
     timeout?: number,
   ) => Promise<T>;
+  /** Variant of ``rpc`` that also returns the generated frame id
+   *  (``ref``) immediately. Use this when the caller needs to hold a
+   *  handle on the in-flight RPC — e.g. to send a follow-up frame
+   *  that cancels it. The promise resolves the same way as ``rpc``. */
+  rpcWithRef: <T = Record<string, unknown>>(
+    frame: Omit<WsFrame, "id">,
+    timeout?: number,
+  ) => { ref: string; promise: Promise<T> };
   /**
    * Register a handler invoked when the server sends a frame of the
    * given type that expects a reply. The reply is sent automatically
@@ -92,6 +100,10 @@ const defaultValue: WebSocketContextValue = {
   subscribe: () => () => {},
   send: () => "",
   rpc: () => Promise.reject(new ApiError(503, "WebSocket not connected")),
+  rpcWithRef: () => ({
+    ref: "",
+    promise: Promise.reject(new ApiError(503, "WebSocket not connected")),
+  }),
   registerServerHandler: () => () => {},
   connected: false,
 };
@@ -130,13 +142,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     return id;
   }, []);
 
-  const rpc = useCallback(
+  const rpcWithRef = useCallback(
     <T = Record<string, unknown>>(
       frame: Omit<WsFrame, "id">,
       timeout?: number,
-    ): Promise<T> => {
-      return new Promise<T>((resolve, reject) => {
-        const id = nextFrameId();
+    ): { ref: string; promise: Promise<T> } => {
+      const id = nextFrameId();
+      const promise = new Promise<T>((resolve, reject) => {
         const ms =
           timeout ?? (LONG_TIMEOUT_TYPES.has(frame.type as string) ? LONG_TIMEOUT : DEFAULT_TIMEOUT);
 
@@ -181,8 +193,17 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           }, 100);
         }
       });
+      return { ref: id, promise };
     },
     [],
+  );
+
+  const rpc = useCallback(
+    <T = Record<string, unknown>>(
+      frame: Omit<WsFrame, "id">,
+      timeout?: number,
+    ): Promise<T> => rpcWithRef<T>(frame, timeout).promise,
+    [rpcWithRef],
   );
 
   const registerServerHandler = useCallback(
@@ -352,7 +373,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
   return (
     <WebSocketContext.Provider
-      value={{ subscribe, send, rpc, registerServerHandler, connected }}
+      value={{ subscribe, send, rpc, rpcWithRef, registerServerHandler, connected }}
     >
       {children}
     </WebSocketContext.Provider>

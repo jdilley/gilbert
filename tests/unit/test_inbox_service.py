@@ -1052,7 +1052,7 @@ class TestWorkspaceAttachments:
             ):
                 return staged, None
 
-        inbox_service._skills = FakeSkills()
+        inbox_service._get_skills_service = lambda: FakeSkills()
 
         atts, errs = await inbox_service._resolve_attachments(
             ["workspace:usr_a/conv_b/pdf/po.pdf"]
@@ -1077,7 +1077,7 @@ class TestWorkspaceAttachments:
             ):
                 return None, "File not found: po.pdf"
 
-        inbox_service._skills = FakeSkills()
+        inbox_service._get_skills_service = lambda: FakeSkills()
 
         atts, errs = await inbox_service._resolve_attachments(
             ["workspace:usr_a/conv_b/pdf/po.pdf"]
@@ -1094,13 +1094,72 @@ class TestWorkspaceAttachments:
     ) -> None:
         """A workspace URI with too few segments errors out instead of
         crashing."""
-        inbox_service._skills = object()  # any non-None
+        inbox_service._get_skills_service = lambda: object()
         atts, errs = await inbox_service._resolve_attachments(
             ["workspace:not_enough_segments"]
         )
         assert atts == []
         assert len(errs) == 1
         assert "invalid" in errs[0].lower()
+
+    @pytest.mark.asyncio
+    async def test_skills_capability_resolved_lazily(
+        self,
+        inbox_service: InboxService,
+        tmp_path: Any,
+    ) -> None:
+        """SkillService might start AFTER InboxService — the topological
+        sort only orders by ``requires``, not ``optional``. The skills
+        capability must be looked up at call time, not at start time,
+        so a late-started SkillService is still usable for workspace
+        attachment resolution.
+        """
+        staged = tmp_path / "po.pdf"
+        staged.write_bytes(b"%PDF-1.4 fake")
+
+        class FakeSkills:
+            def _resolve_workspace_file(
+                self, user_id, skill_name, rel_path, conversation_id
+            ):
+                return staged, None
+
+        # Simulate the start-order race: at start time, the resolver
+        # returns None for "skills" (because skills hasn't started).
+        # Later, when the AI fires inbox_send, skills is now ready —
+        # the lazy lookup picks it up.
+        skills_ready = [False]
+        fake_skills = FakeSkills()
+
+        class LazyResolver:
+            def get_capability(self, cap):
+                if cap == "skills" and skills_ready[0]:
+                    return fake_skills
+                return None
+
+            def require_capability(self, cap):
+                svc = self.get_capability(cap)
+                if svc is None:
+                    raise LookupError(cap)
+                return svc
+
+            def get_all(self, cap):
+                return []
+
+        inbox_service._resolver = LazyResolver()
+        # First call: skills isn't ready yet.
+        atts, errs = await inbox_service._resolve_attachments(
+            ["workspace:usr_a/conv_b/pdf/po.pdf"]
+        )
+        assert errs and "skills service not available" in errs[0]
+        # Now SkillService starts.
+        skills_ready[0] = True
+        # Same call now succeeds.
+        atts, errs = await inbox_service._resolve_attachments(
+            ["workspace:usr_a/conv_b/pdf/po.pdf"]
+        )
+        assert errs == []
+        assert len(atts) == 1
+        assert atts[0].filename == "po.pdf"
 
     @pytest.mark.asyncio
     async def test_inbox_send_fails_loudly_on_unresolved_attachment(
@@ -1118,7 +1177,7 @@ class TestWorkspaceAttachments:
             ):
                 return None, "File not found: missing.pdf"
 
-        inbox_service._skills = FakeSkills()
+        inbox_service._get_skills_service = lambda: FakeSkills()
         set_current_user(_owner())
 
         result = await inbox_service.execute_tool(

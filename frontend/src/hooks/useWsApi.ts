@@ -51,7 +51,7 @@ import type {
 } from "@/types/mcp";
 
 export function useWsApi() {
-  const { rpc } = useWebSocket();
+  const { rpc, rpcWithRef } = useWebSocket();
 
   return useMemo(() => ({
     // ── Chat ──────────────────────────────────────────────────────
@@ -76,6 +76,41 @@ export function useWsApi() {
         message,
         conversation_id: conversationId,
         attachments,
+      }),
+
+    /**
+     * Like ``sendMessage`` but returns both the promise and the RPC
+     * ``ref`` immediately. Use this when the caller needs to hold a
+     * handle on the in-flight turn so it can cancel it via
+     * ``cancelMessage(ref)``. The promise still resolves with the same
+     * ``ChatResponse`` shape; if the turn is interrupted the response
+     * carries ``interrupted=true`` and whatever partial state was
+     * persisted (completed rounds, attachments, ui_blocks).
+     */
+    sendMessageWithRef: (
+      message: string,
+      conversationId: string | null,
+      attachments: FileAttachment[] = [],
+    ) =>
+      rpcWithRef<ChatResponse>({
+        type: "chat.message.send",
+        message,
+        conversation_id: conversationId,
+        attachments,
+      }),
+
+    /**
+     * Interrupt an in-flight ``chat.message.send`` by the ``ref`` it
+     * was sent under. The backend cancels the running asyncio task,
+     * ``AIService.chat()`` catches the ``CancelledError``, persists
+     * partial state, and the original ``sendMessage`` promise
+     * resolves with ``interrupted=true``. Only the originator of the
+     * turn can cancel it — cross-user cancels return a 403.
+     */
+    cancelMessage: (ref: string) =>
+      rpc<{ cancelled: boolean; reason?: string }>({
+        type: "chat.message.cancel",
+        ref,
       }),
 
     submitForm: (conversationId: string, blockId: string, values: Record<string, unknown>) =>
@@ -626,5 +661,5 @@ export function useWsApi() {
         profile_name,
       }),
 
-  }), [rpc]);
+  }), [rpc, rpcWithRef]);
 }
