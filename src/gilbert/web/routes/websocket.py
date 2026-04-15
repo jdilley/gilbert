@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -70,9 +71,16 @@ async def event_stream(websocket: WebSocket) -> None:
 
     logger.info("WebSocket connected: user=%s, level=%d, roles=%s", user_ctx.user_id, user_level, sorted(user_ctx.roles))
 
+    # Tasks spawned per-frame by ``_recv_loop`` so a handler that
+    # awaits for a client reply (e.g. the MCP browser bridge) doesn't
+    # block the recv loop from reading the reply frame it's waiting
+    # on. Tracked here so the connection cleanup can cancel any that
+    # are still pending on disconnect instead of leaking.
+    dispatch_tasks: set[asyncio.Task[None]] = set()
+
     try:
         send_task = asyncio.create_task(_send_loop(websocket, conn))
-        recv_task = asyncio.create_task(_recv_loop(websocket, conn))
+        recv_task = asyncio.create_task(_recv_loop(websocket, conn, dispatch_tasks))
 
         done, pending = await asyncio.wait(
             {send_task, recv_task},
@@ -85,6 +93,8 @@ async def event_stream(websocket: WebSocket) -> None:
     except Exception:
         logger.debug("WebSocket error", exc_info=True)
     finally:
+        for task in dispatch_tasks:
+            task.cancel()
         manager.unregister(conn)
         logger.debug("WebSocket disconnected: user=%s", user_ctx.user_id)
 
@@ -124,8 +134,27 @@ async def _send_loop(websocket: WebSocket, conn: WsConnection) -> None:
             return
 
 
-async def _recv_loop(websocket: WebSocket, conn: WsConnection) -> None:
-    """Receive and dispatch incoming frames from the client."""
+async def _recv_loop(
+    websocket: WebSocket,
+    conn: WsConnection,
+    dispatch_tasks: set[asyncio.Task[None]],
+) -> None:
+    """Receive and dispatch incoming frames from the client.
+
+    Each frame is handled in a dedicated background task so a handler
+    that ``await``s for a subsequent frame on the same connection
+    (e.g. ``call_client``'s outbound-RPC future, used by the MCP
+    browser bridge) can't block the recv loop from reading the reply
+    it's waiting on. Without this split, a handler that calls
+    ``await conn.call_client(...)`` would wedge the entire socket:
+    the reply frame the future needs is sitting in the WebSocket
+    receive buffer, but the loop that would read it is blocked on
+    the outer ``await dispatch_frame``.
+
+    Tasks are tracked in ``dispatch_tasks`` so the connection
+    cleanup can cancel any still-running handlers on disconnect
+    instead of leaking them.
+    """
     while True:
         try:
             raw = await websocket.receive_text()
@@ -152,15 +181,32 @@ async def _recv_loop(websocket: WebSocket, conn: WsConnection) -> None:
             })
             continue
 
-        try:
-            response = await dispatch_frame(conn, frame)
-            if response is not None:
-                conn.enqueue(response)
-        except Exception:
-            logger.warning("Frame dispatch error for type=%s", frame.get("type"), exc_info=True)
-            conn.enqueue({
-                "type": "gilbert.error",
-                "ref": frame.get("id"),
-                "error": "Internal server error",
-                "code": 500,
-            })
+        task = asyncio.create_task(_dispatch_and_respond(conn, frame))
+        dispatch_tasks.add(task)
+        task.add_done_callback(dispatch_tasks.discard)
+
+
+async def _dispatch_and_respond(conn: WsConnection, frame: dict[str, Any]) -> None:
+    """Run a single frame through ``dispatch_frame`` and enqueue
+    the response (or a server-side error frame on exception).
+
+    Separated out of ``_recv_loop`` so each frame runs in its own
+    task and can ``await`` for other frames on the same connection
+    without blocking new frames from being read.
+    """
+    try:
+        response = await dispatch_frame(conn, frame)
+    except Exception:
+        logger.warning(
+            "Frame dispatch error for type=%s", frame.get("type"),
+            exc_info=True,
+        )
+        conn.enqueue({
+            "type": "gilbert.error",
+            "ref": frame.get("id"),
+            "error": "Internal server error",
+            "code": 500,
+        })
+        return
+    if response is not None:
+        conn.enqueue(response)
