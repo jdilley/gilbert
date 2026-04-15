@@ -89,6 +89,17 @@ members = [
     "installed-plugins/*",
 ]
 
+# Force an older ``onnxruntime`` across the workspace. ``chromadb``
+# lists ``onnxruntime`` as a hard dep with no version bound, and uv
+# would otherwise resolve to 1.24.x which dropped ``macosx_x86_64``
+# wheels — leaving Intel Mac users unable to sync. 1.20.x is the last
+# series with Intel macOS wheels and is compatible with the chromadb
+# releases we use.
+[tool.uv]
+override-dependencies = [
+    "onnxruntime<1.21",
+]
+
 [tool.pytest.ini_options]
 # Include every plugin directory so plugin-specific tests (which live
 # alongside the plugin sources) run automatically when the plugin is
