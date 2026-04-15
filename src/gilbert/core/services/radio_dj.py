@@ -568,53 +568,117 @@ class RadioDJService(Service):
         return "Failed to skip track."
 
     async def like_current(self, user_id: str) -> str:
-        """Like the current genre (and the specific track, if known) for a user."""
-        if not self._current_genre:
-            return "Nothing is playing right now."
-        await self._add_like(user_id, self._current_genre)
+        """Like whatever's playing right now, wherever it came from.
+
+        There are four state combinations to handle cleanly:
+
+        1. DJ running + speaker reports a track → record track like +
+           genre like, return "Liked: Song — Artist (genre)".
+        2. DJ running + speaker can't report a track (backend doesn't
+           support now_playing, or returned None) → record genre like
+           only, return "Liked: {genre}". Preserves the pre-fix
+           behavior so users whose speaker backend is track-blind
+           still get genre preferences logged.
+        3. DJ NOT running + speaker reports a track → record track
+           like only (no genre to credit), return
+           "Liked: Song — Artist". This is the case the user reported
+           as broken — tracks playing via Spotify / AirPlay /
+           Sonos Radio / any non-DJ source were previously rejected
+           outright.
+        4. Nothing at all — no track and no DJ → return
+           "Nothing is playing right now."
+
+        The key shift from the old implementation is that we consult
+        the speaker BEFORE bailing on an empty ``_current_genre``.
+        """
         now = await self._get_now_playing()
-        if now is not None and now.title:
+        genre = self._current_genre
+        have_track = now is not None and bool(now.title)
+
+        # Case 4: truly nothing to like.
+        if not have_track and not genre:
+            return "Nothing is playing right now."
+
+        # Case 1 / 3: record the specific track when the speaker has it.
+        if have_track:
+            assert now is not None  # narrow for mypy
             await self._add_liked_track(user_id, now)
+
+        # Case 1 / 2: record the genre when the DJ is running.
+        if genre:
+            await self._add_like(user_id, genre)
+
         if self._event_bus:
             await self._event_bus.publish(
                 Event(
                     event_type="radio_dj.track.liked",
                     data={
                         "user_id": user_id,
-                        "genre": self._current_genre,
-                        "title": now.title if now else "",
-                        "artist": now.artist if now else "",
+                        "genre": genre or "",
+                        "title": now.title if have_track and now else "",
+                        "artist": now.artist if have_track and now else "",
                     },
                     source="radio_dj",
                 )
             )
-        if now is not None and now.title:
-            return f"Liked: {now.title} — {now.artist} ({self._current_genre})"
-        return f"Liked: {self._current_genre}"
+
+        if have_track and genre:
+            assert now is not None
+            return f"Liked: {now.title} — {now.artist} ({genre})"
+        if have_track:
+            assert now is not None
+            return f"Liked: {now.title} — {now.artist}"
+        # genre-only path (case 2)
+        return f"Liked: {genre}"
 
     async def dislike_current(self, user_id: str) -> str:
-        """Dislike the current track: veto the genre + this specific track, then skip."""
-        if not self._current_genre:
-            return "Nothing is playing right now."
-        genre = self._current_genre
-        await self._add_veto(user_id, genre)
+        """Dislike whatever's playing: veto the track, and if the DJ is
+        running, veto its genre and switch to something else.
+
+        Same four-state matrix as ``like_current`` with one caveat:
+        when the DJ isn't running we can record the veto but we can't
+        force-skip audio from an external source. The return message
+        spells that out so the user isn't confused.
+        """
         now = await self._get_now_playing()
-        if now is not None and now.title:
+        genre = self._current_genre
+        have_track = now is not None and bool(now.title)
+
+        if not have_track and not genre:
+            return "Nothing is playing right now."
+
+        if have_track:
+            assert now is not None
             await self._add_vetoed_track(user_id, now)
+
+        if genre:
+            await self._add_veto(user_id, genre)
+
         if self._event_bus:
             await self._event_bus.publish(
                 Event(
                     event_type="radio_dj.track.vetoed",
                     data={
                         "user_id": user_id,
-                        "genre": genre,
-                        "title": now.title if now else "",
-                        "artist": now.artist if now else "",
+                        "genre": genre or "",
+                        "title": now.title if have_track and now else "",
+                        "artist": now.artist if have_track and now else "",
                     },
                     source="radio_dj",
                 )
             )
-        # Switch to a different genre
+
+        if not genre:
+            # DJ isn't driving playback — we can remember the veto but
+            # we can't skip someone else's audio source.
+            assert have_track and now is not None  # implied by the guard above
+            return (
+                f"Vetoed {now.title} — {now.artist}. I won't queue it "
+                "again. (The track isn't from the radio DJ, so I can't "
+                "skip it directly — change it on the speaker yourself.)"
+            )
+
+        # DJ is running — switch to a different genre.
         present = await self._get_present_user_ids()
         new_genre = await self.select_genre(present)
         if new_genre and new_genre.lower() != genre.lower():
@@ -798,7 +862,17 @@ class RadioDJService(Service):
                 slash_group="radio",
                 slash_command="like",
                 slash_help="Like what's playing: /radio like",
-                description="Like the current genre/song. Records the genre as a preference for the user.",
+                description=(
+                    "Record that the user likes what's playing right now. "
+                    "Works for ANY track on the speaker regardless of "
+                    "source — radio DJ, Spotify, AirPlay, Sonos Radio, "
+                    "etc. This is the tool to call for generic 'I like "
+                    "this song' / 'this is a great track' / 'save this' "
+                    "messages. It queries the speaker's now-playing, "
+                    "saves the track to the user's liked_tracks list, "
+                    "and (if the radio DJ is also running) credits the "
+                    "current genre."
+                ),
                 required_role="user",
             ),
             ToolDefinition(
@@ -806,7 +880,16 @@ class RadioDJService(Service):
                 slash_group="radio",
                 slash_command="dislike",
                 slash_help="Dislike what's playing and switch: /radio dislike",
-                description="Dislike the current genre/song. Vetoes the genre and switches to something else.",
+                description=(
+                    "Record that the user dislikes what's playing right "
+                    "now. Works for ANY track on the speaker regardless "
+                    "of source. Always records the track veto; when the "
+                    "radio DJ is actively running it ALSO vetoes the "
+                    "genre and switches to something else. When playback "
+                    "is from an external source (Spotify, AirPlay, …) "
+                    "we can only remember the veto — we can't force-skip "
+                    "audio we don't own."
+                ),
                 required_role="user",
             ),
             ToolDefinition(

@@ -629,6 +629,110 @@ class TestPreferences:
         assert any(t["title"] == "Changeling" for t in vetoed)
 
     @pytest.mark.asyncio
+    async def test_like_current_without_dj_uses_speaker_now_playing(
+        self, started_dj: RadioDJService, music_svc: FakeMusicService
+    ) -> None:
+        """The ``asdasdf``-chat bug regression test.
+
+        The radio DJ is NOT running (no ``_current_genre``), but a
+        track is playing on the speaker via an external source —
+        Spotify direct, AirPlay, Sonos Radio, whatever. The user says
+        "I like this song" and the AI calls ``radio_like``. Previously
+        the tool bailed with "Nothing is playing right now." because
+        it only looked at DJ state. The fix is to consult the
+        speaker's now-playing and record a track-level like.
+        """
+        from gilbert.interfaces.speaker import NowPlaying, PlaybackState
+
+        # DJ not running — ``started_dj`` fixture gives us a started
+        # service but we never called ``start_radio``, so
+        # ``_current_genre`` is empty.
+        assert not started_dj._current_genre
+
+        music_svc.current_now_playing = NowPlaying(
+            state=PlaybackState.PLAYING,
+            title="What You Won't Do for Love",
+            artist="Bobby Caldwell",
+            album="What You Won't Do for Love",
+            uri="spotify:track:xyz",
+        )
+
+        result = await started_dj.like_current("alice")
+
+        assert "Bobby Caldwell" in result
+        assert "What You Won't Do for Love" in result
+        # No genre was mentioned because the DJ wasn't driving playback.
+        assert "(" not in result  # no "(genre)" parenthetical
+
+        prefs = await started_dj._get_preferences("alice")
+        liked_tracks = prefs.get("liked_tracks", [])
+        assert len(liked_tracks) == 1
+        assert liked_tracks[0]["title"] == "What You Won't Do for Love"
+        assert liked_tracks[0]["artist"] == "Bobby Caldwell"
+        # And no genre-level like was recorded — there's no genre to
+        # credit when the DJ isn't picking tracks.
+        assert prefs.get("likes", []) == []
+
+    @pytest.mark.asyncio
+    async def test_like_current_with_nothing_playing_anywhere(
+        self, started_dj: RadioDJService, music_svc: FakeMusicService
+    ) -> None:
+        """When the DJ is idle AND the speaker reports no track, the
+        tool should still cleanly report that nothing is playing."""
+        music_svc.current_now_playing = None
+        assert not started_dj._current_genre
+
+        result = await started_dj.like_current("alice")
+        assert "nothing is playing" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_like_current_dj_running_no_track_metadata(
+        self, started_dj: RadioDJService, music_svc: FakeMusicService
+    ) -> None:
+        """Backcompat: when the DJ is running but the speaker can't
+        report a specific track (backend doesn't implement
+        now_playing, for example), the genre-only like path still
+        works. Regression check for the fix to the
+        ``_get_now_playing`` → early-bail case."""
+        music_svc.current_now_playing = None
+        await started_dj.start_radio(genre="jazz")
+
+        result = await started_dj.like_current("alice")
+        assert "jazz" in result.lower()
+
+        prefs = await started_dj._get_preferences("alice")
+        assert "jazz" in prefs.get("likes", [])
+        assert prefs.get("liked_tracks", []) == []
+
+    @pytest.mark.asyncio
+    async def test_dislike_current_without_dj_uses_speaker_now_playing(
+        self, started_dj: RadioDJService, music_svc: FakeMusicService
+    ) -> None:
+        """Same bug, dislike side: DJ not running, external source
+        playing — the veto should be recorded but the tool should
+        explain it can't force-skip audio it doesn't own."""
+        from gilbert.interfaces.speaker import NowPlaying, PlaybackState
+
+        assert not started_dj._current_genre
+        music_svc.current_now_playing = NowPlaying(
+            state=PlaybackState.PLAYING,
+            title="Friday",
+            artist="Rebecca Black",
+        )
+
+        result = await started_dj.dislike_current("alice")
+
+        assert "Friday" in result
+        assert "can't skip" in result.lower() or "change it" in result.lower()
+
+        prefs = await started_dj._get_preferences("alice")
+        vetoed = prefs.get("vetoed_tracks", [])
+        assert len(vetoed) == 1
+        assert vetoed[0]["title"] == "Friday"
+        # No genre-level veto because the DJ wasn't driving playback.
+        assert prefs.get("vetoes", []) == []
+
+    @pytest.mark.asyncio
     async def test_get_status_includes_now_playing(
         self, started_dj: RadioDJService, music_svc: FakeMusicService
     ) -> None:
