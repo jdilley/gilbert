@@ -785,6 +785,112 @@ class TestWorkspace:
         assert attached.attachments[0].workspace_path == "result.txt"
 
     @pytest.mark.asyncio
+    async def test_run_workspace_script_with_packages_creates_venv(
+        self,
+        started_service: SkillService,
+    ) -> None:
+        """Passing ``packages`` makes the tool create a workspace venv
+        via ``uv venv`` and install the requested packages via
+        ``uv pip install`` before running the script. The venv lives
+        at ``<workspace>/.venv/`` so it's cleaned up when the
+        conversation is deleted. This exercises the real ``uv``
+        binary — ``uv`` is a hard project dependency so it's
+        guaranteed to be on PATH in the test environment."""
+        # Write a script that imports a small well-known package
+        # (``six`` — tiny, no compiled extensions, on PyPI) and
+        # prints a fact the test can check.
+        await started_service.execute_tool(
+            "write_skill_workspace_file",
+            {
+                "skill_name": "chat-uploads",
+                "path": "uses_six.py",
+                "content": (
+                    "import six\n"
+                    "print('six version:', six.__version__)\n"
+                    "print('PY3:', six.PY3)\n"
+                ),
+                "_user_id": "alice",
+                "_conversation_id": "conv-venv",
+                "_invocation_source": "slash",
+            },
+        )
+
+        result = await started_service.execute_tool(
+            "run_workspace_script",
+            {
+                "skill_name": "chat-uploads",
+                "path": "uses_six.py",
+                "packages": ["six"],
+                "_user_id": "alice",
+                "_conversation_id": "conv-venv",
+                "_invocation_source": "slash",
+            },
+        )
+
+        assert "workspace venv: installed six" in result
+        assert "six version:" in result
+        assert "PY3: True" in result
+
+        # The venv dir exists at the expected path.
+        workspace = started_service._get_workspace(
+            "alice", "chat-uploads", "conv-venv"
+        )
+        assert (workspace / ".venv" / "bin" / "python").is_file()
+
+    @pytest.mark.asyncio
+    async def test_run_workspace_script_packages_string_normalized(
+        self,
+        started_service: SkillService,
+    ) -> None:
+        """Schema-trained models sometimes send ``packages`` as a
+        comma-separated string instead of a list. Accept either."""
+        await started_service.execute_tool(
+            "write_skill_workspace_file",
+            {
+                "skill_name": "chat-uploads",
+                "path": "uses_six2.py",
+                "content": "import six; print('ok')\n",
+                "_user_id": "alice",
+                "_conversation_id": "conv-venv2",
+                "_invocation_source": "slash",
+            },
+        )
+
+        result = await started_service.execute_tool(
+            "run_workspace_script",
+            {
+                "skill_name": "chat-uploads",
+                "path": "uses_six2.py",
+                # String, not list.
+                "packages": "six",
+                "_user_id": "alice",
+                "_conversation_id": "conv-venv2",
+                "_invocation_source": "slash",
+            },
+        )
+        assert "ok" in result
+
+    @pytest.mark.asyncio
+    async def test_run_workspace_script_packages_rejects_bad_type(
+        self,
+        started_service: SkillService,
+    ) -> None:
+        """Non-list, non-string ``packages`` value is rejected
+        cleanly."""
+        result = await started_service.execute_tool(
+            "run_workspace_script",
+            {
+                "skill_name": "chat-uploads",
+                "path": "doesnt-matter.py",
+                "packages": 42,
+                "_user_id": "alice",
+                "_conversation_id": "conv-venv3",
+                "_invocation_source": "slash",
+            },
+        )
+        assert "packages must be a list" in result
+
+    @pytest.mark.asyncio
     async def test_run_workspace_script_missing_file(
         self,
         started_service: SkillService,
@@ -854,6 +960,110 @@ class TestWorkspace:
         )
         assert "not active" not in result
         assert "not found" in result.lower() or "error" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_chat_uploads_bypasses_activation_gate(
+        self,
+        started_service: SkillService,
+    ) -> None:
+        """The ``chat-uploads`` pseudo-skill is always accessible to
+        AI-invoked workspace tools, even though nothing activates it.
+
+        The upload endpoint puts user-uploaded files under this
+        synthetic skill name, and the user's act of uploading is
+        itself the "I want you to look at this" signal — the AI
+        shouldn't have to jump through an activation hoop to then
+        analyze the file it was told about.
+        """
+        active: list[str] = []  # nothing active
+
+        async def get_conversation_state(key: str, conv_id: str) -> Any:
+            return active if key == "active_skills" else None
+
+        fake_ai = MagicMock()
+        fake_ai.get_conversation_state = get_conversation_state
+        started_service._resolver.get_capability = MagicMock(  # type: ignore[union-attr]
+            side_effect=lambda cap: fake_ai if cap == "ai_chat" else None
+        )
+
+        # Pre-create a fake uploaded file in the chat-uploads
+        # workspace for conv-1 so the tool call has something to
+        # read once the gate lets it through.
+        workspace = started_service._get_workspace(
+            "alice", "chat-uploads", "conv-1"
+        )
+        (workspace / "notes.txt").write_text("hello from the upload")
+
+        result = await started_service.execute_tool(
+            "read_skill_workspace_file",
+            {
+                "skill_name": "chat-uploads",
+                "path": "notes.txt",
+                "_user_id": "alice",
+                "_conversation_id": "conv-1",
+                "_invocation_source": "ai",
+            },
+        )
+        # Bypass means we never see the "not active" refusal.
+        assert "not active" not in result
+        assert result == "hello from the upload"
+
+        # Write also bypasses — the AI can stage an analysis script
+        # alongside the uploaded file without asking for activation.
+        result = await started_service.execute_tool(
+            "write_skill_workspace_file",
+            {
+                "skill_name": "chat-uploads",
+                "path": "analyze.py",
+                "content": "print('ok')",
+                "_user_id": "alice",
+                "_conversation_id": "conv-1",
+                "_invocation_source": "ai",
+            },
+        )
+        assert "not active" not in result
+        assert (workspace / "analyze.py").read_text() == "print('ok')"
+
+    @pytest.mark.asyncio
+    async def test_read_workspace_file_rejects_oversize(
+        self,
+        started_service: SkillService,
+    ) -> None:
+        """``read_skill_workspace_file`` refuses files over 1 MiB and
+        steers the AI to ``run_workspace_script`` instead — reading
+        a 500 MB binary into the prompt would blow out memory and
+        the context window."""
+        active = ["test-skill"]
+
+        async def get_conversation_state(key: str, conv_id: str) -> Any:
+            return active if key == "active_skills" else None
+
+        fake_ai = MagicMock()
+        fake_ai.get_conversation_state = get_conversation_state
+        started_service._resolver.get_capability = MagicMock(  # type: ignore[union-attr]
+            side_effect=lambda cap: fake_ai if cap == "ai_chat" else None
+        )
+
+        workspace = started_service._get_workspace(
+            "alice", "test-skill", "conv-1"
+        )
+        # Write 2 MiB of junk — over the 1 MiB read cap.
+        big = workspace / "big.bin"
+        big.write_bytes(b"x" * (2 * 1024 * 1024))
+
+        result = await started_service.execute_tool(
+            "read_skill_workspace_file",
+            {
+                "skill_name": "test-skill",
+                "path": "big.bin",
+                "_user_id": "alice",
+                "_conversation_id": "conv-1",
+                "_invocation_source": "ai",
+            },
+        )
+        # Error includes a pointer to the right tool.
+        assert "too large" in result.lower()
+        assert "run_workspace_script" in result
 
     @pytest.mark.asyncio
     async def test_slash_invocation_bypasses_gate(

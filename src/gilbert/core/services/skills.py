@@ -50,6 +50,29 @@ logger = logging.getLogger(__name__)
 _SKILL_FILENAME = "SKILL.md"
 _SKILL_COLLECTION = "skill_definitions"
 _ACTIVE_SKILLS_KEY = "active_skills"
+
+# ``read_skill_workspace_file`` refuses anything larger than this so
+# the AI doesn't try to slurp a multi-gigabyte CAD file into its
+# context. Oversize reads get an error steering the AI to
+# ``run_workspace_script``, which can extract a summary via Python.
+_READ_FILE_CAP = 1 * 1024 * 1024  # 1 MiB
+
+# Synthetic skill name used by the HTTP chat upload endpoint
+# (``POST /api/chat/upload``). It isn't a real skill anyone can
+# install or activate — it's just a directory convention for
+# user-uploaded chat attachments. Workspace tools
+# (``run_workspace_script``, ``browse_skill_workspace``,
+# ``read_skill_workspace_file``, ``write_skill_workspace_file``)
+# implicitly allow this name on the conversation that owns the
+# upload so the AI can write+run Python scripts that analyze the
+# uploaded files without the user having to "enable" a
+# nonexistent skill.
+#
+# The rationale mirrors the slash-command bypass: the act of
+# uploading a file IS a user-initiated "I want Gilbert to look at
+# this" signal, so the AI should have the same latitude to act on
+# it as if the user had typed a slash command.
+CHAT_UPLOADS_SKILL = "chat-uploads"
 _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "users"}
 _RESOURCE_DIRS = {"scripts", "references", "assets"}
 _MAX_SCAN_DEPTH = 4
@@ -362,7 +385,15 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                 slash_group="skill",
                 slash_command="ws",
                 slash_help=("List files in your skill workspace: /skill ws <skill_name>"),
-                description="List files in your workspace for a skill (created by script runs).",
+                description=(
+                    "List files in your workspace for a skill. Files get "
+                    "created by script runs, by ``write_skill_workspace_file``, "
+                    "and — when ``skill_name='chat-uploads'`` — by the user "
+                    "dropping files into the chat input. Use the 'chat-uploads' "
+                    "workspace to see what the user has attached to this "
+                    "conversation; no skill activation is needed for that "
+                    "synthetic skill."
+                ),
                 parameters=[
                     ToolParameter(
                         name="skill_name",
@@ -412,7 +443,13 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                     "live under .gilbert/skill-workspaces/<user>/<skill>/ "
                     "and persist across chat turns. Use this instead of "
                     "upload_document — upload_document is for the "
-                    "knowledge base, not skill workspaces."
+                    "knowledge base, not skill workspaces.\n\n"
+                    "To analyze a user-uploaded file, write your analysis "
+                    "script here with skill_name='chat-uploads' (e.g. "
+                    "path='analyze.py'), then call run_workspace_script "
+                    "with the same skill_name. The script will run in "
+                    "the same directory as the uploaded files, so it can "
+                    "open them by their bare filenames."
                 ),
                 parameters=[
                     ToolParameter(
@@ -447,17 +484,41 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                 ),
                 description=(
                     "Execute a script you've placed in your personal "
-                    "skill workspace. Python (``.py``) runs via "
-                    "``python3``, shell (``.sh``) via ``bash``, "
-                    "Node (``.ts``/``.js``) via ``node``. Scripts run "
-                    "with the workspace as their working directory, so "
-                    "output files written via relative paths land back "
-                    "in the workspace and can be picked up by "
-                    "``attach_workspace_file`` for download. Use this "
-                    "for one-off generator scripts that don't belong in "
-                    "the skill's bundled script set — write the script "
-                    "with ``write_skill_workspace_file`` first, then "
-                    "execute it here."
+                    "skill workspace. Python (``.py``) runs via the "
+                    "workspace's own virtual environment (auto-created "
+                    "on first run that needs packages), shell (``.sh``) "
+                    "via ``bash``, Node (``.ts``/``.js``) via ``node``. "
+                    "Scripts run with the workspace as their working "
+                    "directory, so output files written via relative "
+                    "paths land back in the workspace and can be "
+                    "picked up by ``attach_workspace_file`` for "
+                    "download. Use this for one-off generator scripts "
+                    "that don't belong in the skill's bundled script "
+                    "set — write the script with "
+                    "``write_skill_workspace_file`` first, then "
+                    "execute it here. Pass ``packages`` to declare "
+                    "Python libraries the script needs — they're "
+                    "installed into the workspace venv via ``uv pip`` "
+                    "and cached across runs. Script timeout is 120 "
+                    "seconds.\n\n"
+                    "THIS IS ALSO THE TOOL FOR ANALYZING USER-UPLOADED "
+                    "FILES. When the user attaches a file to the chat "
+                    "(anything that shows up as '[Attached file: …]' "
+                    "in their message), the bytes live at "
+                    "skill_name='chat-uploads' and the attachment's "
+                    "``workspace_path``. You can't read the file "
+                    "directly into the prompt — it may be gigabytes — "
+                    "but you CAN write a Python script that opens it "
+                    "by its bare filename, extracts what you need "
+                    "(line count, headers, parsed structure, CAD "
+                    "feature count, whatever), and prints the result. "
+                    "The script's stdout becomes the tool result you "
+                    "see next turn. Request parsers via ``packages`` "
+                    "(e.g. ``['steputils']`` for STEP CAD files, "
+                    "``['PyPDF2']`` for PDFs, ``['pandas']`` for "
+                    "CSVs). No skill activation is required for "
+                    "'chat-uploads' — it's implicitly accessible "
+                    "whenever the user has uploaded a file."
                 ),
                 parameters=[
                     ToolParameter(
@@ -474,6 +535,23 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                         name="arguments",
                         type=ToolParameterType.ARRAY,
                         description="Command-line arguments to pass to the script.",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="packages",
+                        type=ToolParameterType.ARRAY,
+                        description=(
+                            "Python packages the script needs (only "
+                            "meaningful for .py scripts). When provided, "
+                            "the workspace gets a per-workspace virtual "
+                            "environment at ``<workspace>/.venv/`` (via "
+                            "``uv venv``) and the packages are installed "
+                            "via ``uv pip install`` before the script "
+                            "runs. The venv is cached across runs, so "
+                            "later calls with the same packages are "
+                            "near-instant. Example: "
+                            "['steputils', 'numpy']."
+                        ),
                         required=False,
                     ),
                 ],
@@ -641,13 +719,19 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         skills the conversation already activated, so the AI shouldn't
         try in the first place.
 
+        ``chat-uploads`` is also always accessible — the user uploaded
+        a file via the chat input, which is itself an explicit "look
+        at this for me" signal, and the directory contains only files
+        they deliberately put there.
+
         Returns:
             ``None`` when the call is allowed (slash invocation, or
             skill is in the conversation's active list, or no
-            conversation context is available — system callers).
-            Otherwise a JSON-encoded error string the tool should
-            return verbatim so the AI sees the refusal and can ask
-            the user to enable the skill.
+            conversation context is available — system callers, or
+            the synthetic ``chat-uploads`` pseudo-skill). Otherwise a
+            JSON-encoded error string the tool should return verbatim
+            so the AI sees the refusal and can ask the user to enable
+            the skill.
         """
         # Slash commands always pass — user typed it explicitly.
         if arguments.get("_invocation_source") != "ai":
@@ -657,6 +741,13 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
         # consult.
         conv_id = arguments.get("_conversation_id")
         if not conv_id:
+            return None
+        # User-uploaded chat files live in the synthetic
+        # ``chat-uploads`` pseudo-skill. Anyone uploading into a
+        # conversation they own is explicitly saying "analyze this,"
+        # so the AI doesn't need a separate activation step to touch
+        # those files.
+        if skill_name == CHAT_UPLOADS_SKILL:
             return None
         active = await self.get_active_skills(str(conv_id))
         if skill_name in active:
@@ -1791,6 +1882,34 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
             return json.dumps({"error": err})
         assert target is not None  # err is None ⇒ target is set
 
+        # Pre-stat so we don't try to slurp a 500 MB binary into
+        # memory only to fail the truncation check. Files over 1 MiB
+        # are too big for the AI to usefully process inline anyway —
+        # steer it to ``run_workspace_script`` instead, which can
+        # open the file in Python and return a summary.
+        try:
+            size = target.stat().st_size
+        except OSError as exc:
+            return json.dumps({"error": f"Cannot stat file: {exc}"})
+        if size > _READ_FILE_CAP:
+            return json.dumps(
+                {
+                    "error": (
+                        f"File is too large to read directly ({size} bytes "
+                        f"> {_READ_FILE_CAP} byte cap). Use "
+                        "``run_workspace_script`` with "
+                        f"skill_name='{skill_name}' to write and execute a "
+                        "Python script that extracts what you need — "
+                        "the script runs with the workspace as its "
+                        "current directory so it can open the file by "
+                        "its bare relative path."
+                    ),
+                    "size": size,
+                    "path": str(rel_path),
+                    "skill_name": skill_name,
+                }
+            )
+
         try:
             content = str(await _to_thread(target.read_text, "utf-8"))
             if len(content) > 50_000:
@@ -1877,20 +1996,42 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
     ) -> str:
         """Execute a script that lives in the user's skill workspace.
 
-        Mirrors ``_tool_run_skill_script``'s subprocess handling but
-        resolves the script path against the workspace rather than the
-        skill directory. The workspace is also the ``cwd`` so any output
-        files land back in the workspace for later ``attach_workspace_file``
-        pickup.
+        Resolves the script path against the workspace, enforces path
+        traversal guards, and runs the script with the workspace as
+        ``cwd`` so any output files land back in the workspace for
+        later ``attach_workspace_file`` pickup.
+
+        Optional ``packages`` parameter: list of Python packages the
+        script needs. When provided (and the script is ``.py``), the
+        workspace gets its own virtual environment (created lazily
+        via ``uv venv`` inside ``<workspace>/.venv/``, cached across
+        runs), the requested packages are installed via ``uv pip
+        install``, and the script runs with the venv's Python. Lets
+        the AI declare what libraries its analysis needs without
+        polluting Gilbert's own environment.
         """
         skill_name = str(arguments.get("skill_name", "")).strip()
         rel_path = str(arguments.get("path", "")).strip()
         script_args = arguments.get("arguments", []) or []
+        raw_packages = arguments.get("packages") or []
         user_id = arguments.get("_user_id", "system")
 
         if not skill_name or not rel_path:
             return json.dumps(
                 {"error": "skill_name and path are required"},
+            )
+
+        # Normalize the packages argument. Accept either a list of
+        # strings or a single comma/space-separated string since
+        # schema-trained models sometimes stringify arrays.
+        packages: list[str]
+        if isinstance(raw_packages, str):
+            packages = [p.strip() for p in re.split(r"[,\s]+", raw_packages) if p.strip()]
+        elif isinstance(raw_packages, list):
+            packages = [str(p).strip() for p in raw_packages if str(p).strip()]
+        else:
+            return json.dumps(
+                {"error": "packages must be a list of strings"},
             )
 
         gate = await self._assert_skill_accessible(skill_name, arguments)
@@ -1907,14 +2048,52 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                 workspace,
                 rel_path,
                 script_args,
+                packages,
             )
         )
+
+    @staticmethod
+    def _ensure_workspace_venv(workspace: Path) -> tuple[Path, str]:
+        """Create (or reuse) a virtual environment inside ``workspace``.
+
+        Returns the path to the venv's ``python`` binary (which the
+        caller invokes to run scripts inside the venv) and the path
+        to the venv root (used by ``uv pip install --python ...``).
+
+        The venv lives at ``<workspace>/.venv/`` so it gets cleaned
+        up automatically when the conversation is deleted via the
+        existing ``chat.conversation.destroyed`` hook — no separate
+        cleanup needed. First invocation creates it via ``uv venv``;
+        subsequent calls reuse the existing directory and skip the
+        creation step.
+        """
+        venv_dir = workspace / ".venv"
+        python_bin = venv_dir / "bin" / "python"
+        if python_bin.is_file():
+            return python_bin, str(venv_dir)
+
+        # Create the venv. ``uv venv`` is much faster than stdlib
+        # venv and it's already a Gilbert dependency, so we use it.
+        subprocess.run(
+            ["uv", "venv", str(venv_dir)],
+            cwd=str(workspace),
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
+        if not python_bin.is_file():
+            raise RuntimeError(
+                f"uv venv ran but {python_bin} wasn't created"
+            )
+        return python_bin, str(venv_dir)
 
     def _do_run_workspace_script(
         self,
         workspace: Path,
         script_path: str,
         script_args: list[Any],
+        packages: list[str],
     ) -> str:
         """Blocking workspace-script execution. Must run in executor."""
         target = (workspace / script_path).resolve()
@@ -1928,8 +2107,81 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
             return json.dumps({"error": f"Script not found: {script_path}"})
 
         suffix = target.suffix.lower()
+
+        # Packages are only meaningful for Python scripts; silently
+        # ignore for other suffixes rather than erroring so a call
+        # that happens to pass ``packages=[]`` to a bash script
+        # still works.
+        py_bin: Path | None = None
+        venv_setup_log = ""
+        if suffix == ".py" and packages:
+            try:
+                py_bin, venv_path = self._ensure_workspace_venv(workspace)
+            except subprocess.TimeoutExpired:
+                return json.dumps(
+                    {"error": "uv venv timed out after 60 seconds"},
+                )
+            except subprocess.CalledProcessError as exc:
+                return json.dumps(
+                    {
+                        "error": "uv venv failed",
+                        "stderr": (exc.stderr or "")[:2000],
+                    },
+                )
+            except OSError as exc:
+                return json.dumps(
+                    {"error": f"Cannot create venv (is uv installed?): {exc}"},
+                )
+
+            # Install requested packages into the venv. ``uv pip
+            # install`` is idempotent — already-installed packages
+            # are a no-op, so repeat calls across turns are cheap.
+            try:
+                install = subprocess.run(
+                    ["uv", "pip", "install", "--python", str(py_bin), *packages],
+                    cwd=str(workspace),
+                    capture_output=True,
+                    text=True,
+                    timeout=300,  # 5 minutes — big packages can be slow
+                )
+            except subprocess.TimeoutExpired:
+                return json.dumps(
+                    {
+                        "error": "uv pip install timed out after 5 minutes",
+                        "packages": packages,
+                    },
+                )
+            except OSError as exc:
+                return json.dumps(
+                    {"error": f"Cannot run uv pip install: {exc}"},
+                )
+            if install.returncode != 0:
+                return json.dumps(
+                    {
+                        "error": "uv pip install failed",
+                        "packages": packages,
+                        "stderr": (install.stderr or "")[:4000],
+                    },
+                )
+            # Brief log line folded into the output below so the AI
+            # can see which packages were installed (especially
+            # useful on first run of a given workspace).
+            venv_setup_log = (
+                f"[workspace venv: installed {', '.join(packages)}]\n"
+            )
+
         if suffix == ".py":
-            cmd = ["python3", str(target)] + [str(a) for a in script_args]
+            # Use the workspace venv's Python when one exists (either
+            # because we just created it, or because a previous call
+            # already set it up with packages this one didn't
+            # request). This is the right default: scripts run in
+            # the venv if it's there, system Python otherwise.
+            if py_bin is None:
+                existing = workspace / ".venv" / "bin" / "python"
+                if existing.is_file():
+                    py_bin = existing
+            python_cmd = str(py_bin) if py_bin else "python3"
+            cmd = [python_cmd, str(target)] + [str(a) for a in script_args]
         elif suffix == ".sh":
             cmd = ["bash", str(target)] + [str(a) for a in script_args]
         elif suffix in (".ts", ".js"):
@@ -1943,9 +2195,9 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                 cwd=str(workspace),
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=120,  # bumped from 30 → 120 for analysis scripts
             )
-            output = result.stdout
+            output = venv_setup_log + result.stdout
             if result.stderr:
                 output += f"\n[stderr]\n{result.stderr}"
             if result.returncode != 0:
@@ -1954,7 +2206,7 @@ class SkillService(Service, ToolProvider, WsHandlerProvider):
                 output = output[:30_000] + "\n\n[... truncated at 30,000 characters]"
             return output if output.strip() else "(no output)"
         except subprocess.TimeoutExpired:
-            return json.dumps({"error": "Script timed out after 30 seconds"})
+            return json.dumps({"error": "Script timed out after 120 seconds"})
         except OSError as exc:
             return json.dumps({"error": f"Cannot execute script: {exc}"})
 

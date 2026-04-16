@@ -31,7 +31,9 @@ from fastapi.testclient import TestClient
 
 from gilbert.interfaces.auth import UserContext
 from gilbert.web.auth import require_authenticated
-from gilbert.web.routes.chat_uploads import router as chat_uploads_router
+from gilbert.web.routes.chat_uploads import (
+    router as chat_uploads_router,
+)
 
 
 # ── Test doubles ─────────────────────────────────────────────────────
