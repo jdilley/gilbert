@@ -1,9 +1,9 @@
 """Tests for the HTTP chat upload/download endpoints.
 
 The endpoints live at ``src/gilbert/web/routes/chat_uploads.py`` and
-stream user-uploaded files to the per-conversation skill workspace
-under ``chat-uploads/``. These tests spin up a minimal FastAPI app
-with fake Storage + Skills services, hit the endpoints via the
+stream user-uploaded files to the per-conversation workspace
+``uploads/`` directory. These tests spin up a minimal FastAPI app
+with fake Storage + Workspace services, hit the endpoints via the
 Starlette TestClient, and verify end-to-end that:
 
 - An authenticated upload lands on disk with the reported size and
@@ -40,13 +40,6 @@ from gilbert.web.routes.chat_uploads import (
 
 
 class _FakeStorageBackend:
-    """Stand-in for the SQLite backend used by the upload route.
-
-    The route only calls ``get(collection, id)`` so that's all we
-    implement. Conversations live in a plain dict keyed by id; tests
-    seed them in the fixtures below.
-    """
-
     def __init__(self, conversations: dict[str, dict[str, Any]]) -> None:
         self._conversations = conversations
 
@@ -57,10 +50,6 @@ class _FakeStorageBackend:
 
 
 class _FakeStorageProvider:
-    """Stand-in for ``StorageProvider``. The route reaches through
-    ``.backend`` to the actual backend, so we expose that one
-    property."""
-
     def __init__(self, backend: _FakeStorageBackend) -> None:
         self._backend = backend
 
@@ -76,65 +65,64 @@ class _FakeStorageProvider:
         return self._backend
 
 
-class _FakeSkillsProvider:
-    """Stand-in for ``SkillsProvider``. The route only calls
-    ``get_workspace_path``, which must return a real on-disk
-    directory since the upload endpoint actually writes files into
-    it. Tests point this at a per-test tmp_path."""
+class _FakeWorkspaceProvider:
+    """Stand-in for ``WorkspaceProvider``. The route calls
+    ``get_upload_dir``, ``get_workspace_root``, and ``register_file``,
+    which must return real on-disk directories since the upload
+    endpoint writes files."""
 
     def __init__(self, root: Path) -> None:
         self._root = root
 
-    async def get_active_skills(self, conversation_id: str) -> list[str]:
+    def get_workspace_root(self, user_id: str, conversation_id: str) -> Path:
+        d = self._root / "users" / user_id / "conversations" / conversation_id
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def get_upload_dir(self, user_id: str, conversation_id: str) -> Path:
+        d = self.get_workspace_root(user_id, conversation_id) / "uploads"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def get_output_dir(self, user_id: str, conversation_id: str) -> Path:
+        d = self.get_workspace_root(user_id, conversation_id) / "outputs"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def get_scratch_dir(self, user_id: str, conversation_id: str) -> Path:
+        d = self.get_workspace_root(user_id, conversation_id) / "scratch"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    async def register_file(self, **kwargs: Any) -> dict[str, Any]:
+        return {}
+
+    async def list_files(
+        self, conversation_id: str, category: str | None = None
+    ) -> list[dict[str, Any]]:
         return []
-
-    def get_active_allowed_tools(self, active_skills: list[str]) -> set[str]:
-        return set()
-
-    async def build_skills_context(self, conversation_id: str) -> str:
-        return ""
-
-    def get_workspace_path(
-        self,
-        user_id: str,
-        skill_name: str,
-        conversation_id: str | None = None,
-    ) -> Path:
-        if conversation_id:
-            workspace = (
-                self._root
-                / "users"
-                / user_id
-                / "conversations"
-                / conversation_id
-                / skill_name
-            )
-        else:
-            workspace = self._root / user_id / skill_name
-        workspace.mkdir(parents=True, exist_ok=True)
-        return workspace
 
 
 class _FakeServiceManager:
     def __init__(
-        self, storage: _FakeStorageProvider, skills: _FakeSkillsProvider
+        self, storage: _FakeStorageProvider, workspace: _FakeWorkspaceProvider
     ) -> None:
         self._storage = storage
-        self._skills = skills
+        self._workspace = workspace
 
     def get_by_capability(self, capability: str) -> Any:
         if capability == "entity_storage":
             return self._storage
-        if capability == "skills":
-            return self._skills
+        if capability == "workspace":
+            return self._workspace
         return None
 
 
 class _FakeGilbert:
     def __init__(
-        self, storage: _FakeStorageProvider, skills: _FakeSkillsProvider
+        self, storage: _FakeStorageProvider, workspace: _FakeWorkspaceProvider
     ) -> None:
-        self.service_manager = _FakeServiceManager(storage, skills)
+        self.service_manager = _FakeServiceManager(storage, workspace)
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────
@@ -159,7 +147,7 @@ _OTHER_USER = UserContext(
 
 @pytest.fixture
 def workspace_root(tmp_path: Path) -> Path:
-    return tmp_path / "skill-workspaces"
+    return tmp_path / "workspaces"
 
 
 @pytest.fixture
@@ -186,8 +174,8 @@ def app(
     conversations: dict[str, dict[str, Any]],
 ) -> FastAPI:
     storage = _FakeStorageProvider(_FakeStorageBackend(conversations))
-    skills = _FakeSkillsProvider(workspace_root)
-    gilbert = _FakeGilbert(storage, skills)
+    workspace = _FakeWorkspaceProvider(workspace_root)
+    gilbert = _FakeGilbert(storage, workspace)
 
     app = FastAPI()
     app.state.gilbert = gilbert
@@ -196,10 +184,6 @@ def app(
 
 
 def _override_auth(app: FastAPI, user: UserContext | None) -> None:
-    """Swap the ``require_authenticated`` dependency for a fake that
-    returns a specific user (or raises 401 when ``None``). Matches how
-    FastAPI's dependency-override system is meant to be used in tests
-    — cleaner than patching request.state directly."""
     from fastapi import HTTPException
 
     def _fake_dep(request: Request) -> UserContext:
@@ -228,23 +212,21 @@ def test_upload_writes_file_to_disk_and_returns_reference(
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    # Reference-mode FileAttachment shape.
     assert body["kind"] == "file"
     assert body["name"] == "archive.zip"
     assert body["media_type"] == "application/zip"
-    assert body["workspace_skill"] == "chat-uploads"
-    assert body["workspace_path"] == "archive.zip"
+    assert body["workspace_skill"] == "workspace"
+    assert body["workspace_path"] == "uploads/archive.zip"
     assert body["workspace_conv"] == "conv-owned"
     assert body["size"] == len(payload)
 
-    # File actually landed on disk.
     expected_path = (
         workspace_root
         / "users"
         / "usr_owner"
         / "conversations"
         / "conv-owned"
-        / "chat-uploads"
+        / "uploads"
         / "archive.zip"
     )
     assert expected_path.is_file()
@@ -274,8 +256,6 @@ def test_upload_rejects_other_users_conversation(app: FastAPI) -> None:
 
 
 def test_upload_allows_public_room_member(app: FastAPI) -> None:
-    """Anyone can upload into a public room — matches the same
-    access rules as sending messages into one."""
     _override_auth(app, _OTHER_USER)
     client = TestClient(app)
     resp = client.post(
@@ -298,9 +278,6 @@ def test_upload_rejects_unknown_conversation(app: FastAPI) -> None:
 
 
 def test_upload_sanitizes_filename(app: FastAPI, workspace_root: Path) -> None:
-    """Path separators and ``..`` segments get stripped by
-    ``Path.name``; unsafe characters get replaced. A user can't
-    smuggle a file into a sibling directory."""
     _override_auth(app, _OWNER_USER)
     client = TestClient(app)
     resp = client.post(
@@ -316,18 +293,14 @@ def test_upload_sanitizes_filename(app: FastAPI, workspace_root: Path) -> None:
     )
     assert resp.status_code == 200
     body = resp.json()
-    # The ``Path.name`` strip leaves ``evil$name.bin``; the ``$`` is
-    # not in the safe character set and becomes ``_``.
     assert body["name"] == "evil_name.bin"
-    # The file landed under the conversation's workspace, not some
-    # parent directory.
     expected = (
         workspace_root
         / "users"
         / "usr_owner"
         / "conversations"
         / "conv-owned"
-        / "chat-uploads"
+        / "uploads"
         / "evil_name.bin"
     )
     assert expected.is_file()
@@ -336,8 +309,6 @@ def test_upload_sanitizes_filename(app: FastAPI, workspace_root: Path) -> None:
 def test_upload_handles_filename_collisions(
     app: FastAPI, workspace_root: Path
 ) -> None:
-    """Re-uploading a file with the same name appends ``-1``, ``-2``,
-    ``...`` instead of overwriting."""
     _override_auth(app, _OWNER_USER)
     client = TestClient(app)
 
@@ -355,20 +326,13 @@ def test_upload_handles_filename_collisions(
         / "usr_owner"
         / "conversations"
         / "conv-owned"
-        / "chat-uploads"
+        / "uploads"
     )
     landed = sorted(p.name for p in workspace.iterdir())
     assert landed == ["notes-1.pdf", "notes-2.pdf", "notes.pdf"]
 
 
 def test_upload_missing_filename_returns_error(app: FastAPI) -> None:
-    """Multipart parts without a filename are rejected up-front.
-
-    FastAPI's form validator catches this as a 422 before it reaches
-    the handler. Either 400 or 422 is acceptable — both mean "the
-    request was rejected because the filename was missing." The
-    important property is nothing gets written to disk.
-    """
     _override_auth(app, _OWNER_USER)
     client = TestClient(app)
     resp = client.post(
@@ -382,15 +346,9 @@ def test_upload_missing_filename_returns_error(app: FastAPI) -> None:
 def test_upload_defaults_missing_media_type(
     app: FastAPI,
 ) -> None:
-    """Browsers leave ``file.type`` empty for many formats — the
-    server falls back to octet-stream so the response always carries
-    a valid mime type."""
     _override_auth(app, _OWNER_USER)
     client = TestClient(app)
 
-    # Build a multipart body by hand so we can control the
-    # Content-Type of the uploaded part. TestClient's ``files=``
-    # helper insists on a non-empty content type.
     boundary = "----testboundary"
     body = (
         f"--{boundary}\r\n"
@@ -409,8 +367,6 @@ def test_upload_defaults_missing_media_type(
     )
     assert resp.status_code == 200, resp.text
     body_json = resp.json()
-    # The empty content-type on the file part should fall through to
-    # either the filename-based guess or the octet-stream default.
     assert body_json["media_type"] in (
         "application/octet-stream",
         "application/x-ns-proxy-autoconfig",
@@ -444,10 +400,6 @@ def test_download_rejects_path_traversal(app: FastAPI) -> None:
     client = TestClient(app)
 
     resp = client.get("/api/chat/download/conv-owned/..%2Fsecret.txt")
-    # FastAPI normalizes the URL and either 400s on our explicit
-    # check or 404s because the normalized path doesn't exist. Both
-    # are acceptable — the important property is the file isn't
-    # served.
     assert resp.status_code in (400, 404)
 
 

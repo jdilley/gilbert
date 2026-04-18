@@ -2,24 +2,14 @@
 
 Large file attachments (anything the AI can't read natively — zips,
 videos, binaries, big PDFs, …) do NOT round-trip through the WebSocket.
-They'd blow past the WS frame limit as base64, hammer SQLite with
-multi-MB conversation rows, and drag every history load to a crawl.
-
 Instead, the frontend uploads the bytes directly via
 ``POST /api/chat/upload``. This module streams the multipart body to
-disk under the chat's per-conversation skill workspace (using the
-synthetic skill name ``chat-uploads`` so the tree layout matches
-tool-produced files), returns a JSON descriptor that becomes a
-reference-mode ``FileAttachment``, and the chat frame then carries
-only the workspace coordinates — not the bytes.
+disk under the conversation's workspace ``uploads/`` directory, returns
+a JSON descriptor that becomes a reference-mode ``FileAttachment``,
+and the chat frame carries only the workspace coordinates — not the bytes.
 
 On the read side, ``GET /api/chat/download/{conv_id}/{path}`` streams
-the file back out from disk. The existing WS-based
-``skills.workspace.download`` RPC still works for small files (and is
-what tool-produced attachments use), but it base64-encodes everything
-into a single JSON frame which defeats the whole point of putting the
-file on disk. Use the HTTP route for anything a user actually
-uploaded.
+the file back out from disk.
 
 Both endpoints enforce conversation ownership via the shared
 ``check_conversation_access`` helper so users can't upload into, or
@@ -39,20 +29,13 @@ from fastapi.responses import StreamingResponse
 
 from gilbert.core.chat import check_conversation_access
 from gilbert.interfaces.auth import UserContext
-from gilbert.interfaces.skills import SkillsProvider
 from gilbert.interfaces.storage import StorageProvider
+from gilbert.interfaces.workspace import WorkspaceProvider
 from gilbert.web.auth import require_authenticated
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat")
-
-# Synthetic "skill" name for user-uploaded chat files. Not a real
-# skill — just a subdirectory under the per-conversation workspace
-# tree so the layout stays consistent with tool-produced files and
-# the existing cleanup-on-delete hook in SkillService catches it for
-# free.
-_CHAT_UPLOADS_SKILL = "chat-uploads"
 
 # Hard cap mirrored from ``ai.py:_MAX_FILE_BYTES``. Kept as a local
 # constant so this module doesn't pull in ai.py (which would create a
@@ -116,12 +99,11 @@ def _unique_filename(workspace: Path, name: str) -> str:
     return candidate
 
 
-def _resolve_services(request: Request) -> tuple[StorageProvider, SkillsProvider]:
-    """Resolve the storage and skills capabilities from the app.
+def _resolve_services(request: Request) -> tuple[StorageProvider, WorkspaceProvider]:
+    """Resolve the storage and workspace capabilities from the app.
 
-    Both are required for upload/download; if either is missing (the
-    ai or skills service isn't running, the config disabled them, …)
-    we return 503 so the frontend surfaces a clear error instead of
+    Both are required for upload/download; if either is missing we
+    return 503 so the frontend surfaces a clear error instead of
     falling through to a cryptic AttributeError.
     """
     gilbert = getattr(request.app.state, "gilbert", None)
@@ -131,17 +113,17 @@ def _resolve_services(request: Request) -> tuple[StorageProvider, SkillsProvider
     storage = resolver.get_by_capability("entity_storage")
     if not isinstance(storage, StorageProvider):
         raise HTTPException(status_code=503, detail="Entity storage unavailable")
-    skills = resolver.get_by_capability("skills")
-    if not isinstance(skills, SkillsProvider):
-        raise HTTPException(status_code=503, detail="Skills service unavailable")
-    return storage, skills
+    workspace = resolver.get_by_capability("workspace")
+    if not isinstance(workspace, WorkspaceProvider):
+        raise HTTPException(status_code=503, detail="Workspace service unavailable")
+    return storage, workspace
 
 
 async def _authorize_conversation(
     request: Request,
     conversation_id: str,
     user: UserContext,
-) -> tuple[StorageProvider, SkillsProvider]:
+) -> tuple[StorageProvider, WorkspaceProvider]:
     """Look up the conversation, verify the caller has access, return
     the resolved services so the caller can use them.
 
@@ -150,7 +132,7 @@ async def _authorize_conversation(
     existence of conversations a user can't see, but there's no
     realistic attack surface here since conversation ids are UUIDs.
     """
-    storage, skills = _resolve_services(request)
+    storage, workspace = _resolve_services(request)
     backend = storage.backend
     data = await backend.get(_CONVERSATIONS_COLLECTION, conversation_id)
     if data is None:
@@ -158,7 +140,7 @@ async def _authorize_conversation(
     err = check_conversation_access(data, user)
     if err is not None:
         raise HTTPException(status_code=403, detail=err)
-    return storage, skills
+    return storage, workspace
 
 
 @router.post("/upload")
@@ -204,7 +186,7 @@ async def upload_chat_file(
     - 413 — file exceeds ``_MAX_UPLOAD_BYTES``.
     - 503 — storage or skills service unavailable.
     """
-    _, skills = await _authorize_conversation(request, conversation_id, user)
+    _, workspace_svc = await _authorize_conversation(request, conversation_id, user)
 
     raw_name = file.filename or ""
     if not raw_name:
@@ -212,13 +194,9 @@ async def upload_chat_file(
 
     safe_name = _sanitize_filename(raw_name)
 
-    workspace = skills.get_workspace_path(
-        user.user_id,
-        _CHAT_UPLOADS_SKILL,
-        conversation_id,
-    )
-    unique_name = _unique_filename(workspace, safe_name)
-    dest = workspace / unique_name
+    upload_dir = workspace_svc.get_upload_dir(user.user_id, conversation_id)
+    unique_name = _unique_filename(upload_dir, safe_name)
+    dest = upload_dir / unique_name
 
     # Stream to disk in chunks, enforcing the size cap as we go. We
     # can't trust ``Content-Length`` by itself (clients lie / browsers
@@ -273,12 +251,28 @@ async def upload_chat_file(
         media_type,
     )
 
+    # Register in the workspace file registry
+    try:
+        await workspace_svc.register_file(
+            conversation_id=conversation_id,
+            user_id=user.user_id,
+            category="upload",
+            filename=unique_name,
+            original_name=raw_name,
+            rel_path=f"uploads/{unique_name}",
+            media_type=media_type,
+            size=total,
+            created_by="user",
+        )
+    except Exception:
+        logger.debug("failed to register uploaded file", exc_info=True)
+
     return {
         "kind": "file",
         "name": unique_name,
         "media_type": media_type,
-        "workspace_skill": _CHAT_UPLOADS_SKILL,
-        "workspace_path": unique_name,
+        "workspace_skill": "workspace",
+        "workspace_path": f"uploads/{unique_name}",
         "workspace_conv": conversation_id,
         "size": total,
     }
@@ -309,47 +303,41 @@ async def download_chat_file(
     ``skills.workspace.download`` behavior so old attachments
     persisted before per-conversation workspaces still resolve.
     """
-    _, skills = await _authorize_conversation(request, conversation_id, user)
+    _, workspace_svc = await _authorize_conversation(request, conversation_id, user)
 
     # Sanitize the requested path to block traversal. ``path:path``
     # matches anything including slashes, but we only want a single
-    # filename — chat-uploads is a flat directory, not a tree. If a
+    # filename — uploads is a flat directory, not a tree. If a
     # client sends a nested path we reject it outright.
     if "/" in path or "\\" in path or ".." in path:
         raise HTTPException(status_code=400, detail="invalid path")
 
     safe_name = _sanitize_filename(path)
-    workspace = skills.get_workspace_path(
-        user.user_id,
-        _CHAT_UPLOADS_SKILL,
-        conversation_id,
-    )
-    full = workspace / safe_name
+    upload_dir = workspace_svc.get_upload_dir(user.user_id, conversation_id)
+    full = upload_dir / safe_name
 
     if not full.is_file():
-        # Fall back to the legacy per-user workspace (no
-        # conversation_id) for attachments persisted before the
-        # per-conversation refactor.
-        legacy_workspace = skills.get_workspace_path(
-            user.user_id,
-            _CHAT_UPLOADS_SKILL,
-            None,
-        )
-        legacy = legacy_workspace / safe_name
+        # Fall back to the legacy chat-uploads skill workspace for
+        # attachments persisted before the workspace refactor.
+        legacy = Path(".gilbert/skill-workspaces/users") / user.user_id / "conversations" / conversation_id / "chat-uploads" / safe_name
         if legacy.is_file():
             full = legacy
         else:
-            raise HTTPException(status_code=404, detail="file not found")
+            # Try legacy per-user workspace
+            legacy2 = Path(".gilbert/skill-workspaces") / user.user_id / "chat-uploads" / safe_name
+            if legacy2.is_file():
+                full = legacy2
+            else:
+                raise HTTPException(status_code=404, detail="file not found")
 
-    # Resolve the real path and make sure it's still inside the
+    # Resolve the real path and make sure it's still inside a
     # workspace root — belt and suspenders against symlink tricks.
     resolved = full.resolve()
-    workspace_resolved = workspace.resolve()
+    workspace_root = workspace_svc.get_workspace_root(user.user_id, conversation_id).resolve()
+    legacy_root = Path(".gilbert/skill-workspaces").resolve()
     if not (
-        str(resolved).startswith(str(workspace_resolved))
-        or str(resolved).startswith(
-            str(skills.get_workspace_path(user.user_id, _CHAT_UPLOADS_SKILL, None).resolve())
-        )
+        str(resolved).startswith(str(workspace_root))
+        or str(resolved).startswith(str(legacy_root))
     ):
         raise HTTPException(status_code=400, detail="path escapes workspace")
 

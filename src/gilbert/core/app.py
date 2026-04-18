@@ -251,6 +251,11 @@ class Gilbert:
 
         self.service_manager.register(WebSearchService())
 
+        # Workspace service (per-conversation file workspaces)
+        from gilbert.core.services.workspace import WorkspaceService
+
+        self.service_manager.register(WorkspaceService())
+
         # Skills service
         from gilbert.core.services.skills import SkillService
 
