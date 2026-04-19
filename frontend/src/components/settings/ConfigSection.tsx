@@ -284,27 +284,31 @@ export function ConfigSection({ section }: ConfigSectionProps) {
           {backendSettingsParams.length > 0 && (!backendParam || backendName) && (
             <div className="mt-4 pt-4 border-t border-dashed">
               {backendGroups(backendSettingsParams, backendName, !!backendParam).map((group) => {
-                // For multi-backend groups, check if this group's enabled toggle is on.
-                // Fall back to the param's declared default so a backend whose config
-                // has never been saved (no stored ``enabled`` value) still reflects
-                // its default state instead of always reading as "disabled".
+                // Multi-backend groups collapse unless explicitly enabled.
+                // An unset / ``null`` / ``undefined`` stored value counts as
+                // disabled — otherwise every newly-registered backend would
+                // expand its full config on first render (hiding lesser-used
+                // ones behind a wall of api_key / model / base_url fields)
+                // just because its declared default is ``True``.
                 const enableParam = group.params.find((p) => p.key.endsWith(".enabled"));
-                const rawEnableValue = enableParam ? getValue(enableParam.key) : undefined;
-                const effectiveEnableValue =
-                  rawEnableValue === undefined ? enableParam?.default : rawEnableValue;
-                const isEnabled = enableParam ? effectiveEnableValue === true : true;
+                const isEnabled = enableParam
+                  ? getValue(enableParam.key) === true
+                  : true;
                 const otherParams = enableParam
                   ? group.params.filter((p) => p !== enableParam)
                   : group.params;
 
                 return (
-                  <div key={group.label} className="mb-4">
+                  <div
+                    key={group.label}
+                    className="mb-4 rounded-md border border-border/60 bg-muted/20 p-4 last:mb-0"
+                  >
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
                       {group.label}
                     </h4>
                     {/* Show enable toggle if present */}
                     {enableParam && (
-                      <div className="mb-3">
+                      <div className={isEnabled && otherParams.length > 0 ? "mb-3" : ""}>
                         <ConfigField param={enableParam} value={getValue(enableParam.key)} onChange={handleFieldChange} />
                       </div>
                     )}
