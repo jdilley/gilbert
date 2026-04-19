@@ -124,6 +124,7 @@ Interface (core)     →  Implementation (plugin)
 ────────────────────────────────────────────────
 AIBackend            →  anthropic plugin → AnthropicAI (Claude)
                         openai plugin    → OpenAIAI (GPT)
+                        qwen plugin      → QwenAI (Alibaba DashScope)
 VisionBackend        →  anthropic plugin → AnthropicVision
 TTSBackend           →  elevenlabs plugin → ElevenLabsTTS
 SpeakerBackend       →  sonos plugin → SonosSpeaker

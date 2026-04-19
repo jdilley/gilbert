@@ -38,6 +38,7 @@ dependencies = [
     "gilbert-plugin-guess-that-song",
     "gilbert-plugin-ngrok",
     "gilbert-plugin-openai",
+    "gilbert-plugin-qwen",
     "gilbert-plugin-slack",
     "gilbert-plugin-sonos",
     "gilbert-plugin-tavily",
@@ -54,6 +55,7 @@ gilbert-plugin-google = { workspace = true }
 gilbert-plugin-guess-that-song = { workspace = true }
 gilbert-plugin-ngrok = { workspace = true }
 gilbert-plugin-openai = { workspace = true }
+gilbert-plugin-qwen = { workspace = true }
 gilbert-plugin-slack = { workspace = true }
 gilbert-plugin-sonos = { workspace = true }
 gilbert-plugin-tavily = { workspace = true }
