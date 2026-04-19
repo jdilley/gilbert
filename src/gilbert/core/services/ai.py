@@ -1055,14 +1055,28 @@ class AIService(Service):
         await self._reinit_backends(config.get("backends", {}))
 
     async def _reinit_backends(self, backends_config: dict[str, Any]) -> None:
-        """Reinitialize backends from config, closing any that changed."""
+        """Reinitialize backends from config, closing any that changed.
+
+        Backends with ``enabled=False`` in their config section are skipped
+        entirely — any existing instance is closed and dropped from the
+        registry so profile dropdowns / model lists stop listing them.
+        ``enabled`` defaults to True so configs predating the toggle keep
+        initializing their backends without manual migration.
+        """
         if not isinstance(backends_config, dict):
             return
         for name, cls in AIBackend.registered_backends().items():
             cfg = backends_config.get(name, {})
             if not isinstance(cfg, dict):
                 cfg = {}
+            enabled = cfg.get("enabled", True) is True
             old = self._backends.get(name)
+            if not enabled:
+                if old is not None:
+                    await old.close()
+                    self._backends.pop(name, None)
+                    logger.info("AI backend '%s' disabled, closed", name)
+                continue
             try:
                 inst = cls()
                 await inst.initialize(cfg)

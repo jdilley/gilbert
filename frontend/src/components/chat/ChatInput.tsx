@@ -750,7 +750,7 @@ export function ChatInput({
             type="button"
             variant="ghost"
             size="icon"
-            className="shrink-0"
+            className="shrink-0 size-10"
             disabled={disabled}
             onClick={() => fileInputRef.current?.click()}
             aria-label="Attach files"
@@ -782,7 +782,7 @@ export function ChatInput({
               onClick={onStop}
               size="icon"
               variant="destructive"
-              className="shrink-0"
+              className="shrink-0 size-10"
               aria-label="Stop"
               title="Stop Gilbert"
             >
@@ -799,7 +799,7 @@ export function ChatInput({
                     .length === 0)
               }
               size="icon"
-              className="shrink-0"
+              className="shrink-0 size-10"
               title={
                 uploadingInProgress
                   ? "Waiting for uploads to finish…"
@@ -1034,7 +1034,7 @@ function ModelSelector({
         type="button"
         variant="ghost"
         size="sm"
-        className="h-8 gap-1 px-2 text-xs text-muted-foreground"
+        className="h-10 gap-1 px-2 text-xs text-muted-foreground"
         onClick={() => onOpenChange(!open)}
         title="Select model"
       >

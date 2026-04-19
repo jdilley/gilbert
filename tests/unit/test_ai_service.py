@@ -237,6 +237,49 @@ async def test_stop_closes_backends(
     assert stub_backend.closed
 
 
+# --- Backend enable/disable ---
+
+
+async def test_reinit_backends_skips_disabled(ai_service: AIService) -> None:
+    """``enabled=False`` in a backend's config section closes any running
+    instance and drops it from the registry, so profile dropdowns and
+    ``/api/models`` stop listing it."""
+
+    class TogglableBackend(StubAIBackend):
+        backend_name = "togglable_test"
+
+    try:
+        ai_service._backends = {}
+        await ai_service._reinit_backends({"togglable_test": {"api_key": "x"}})
+        assert "togglable_test" in ai_service._backends
+        running = ai_service._backends["togglable_test"]
+
+        await ai_service._reinit_backends(
+            {"togglable_test": {"api_key": "x", "enabled": False}}
+        )
+        assert "togglable_test" not in ai_service._backends
+        assert running.closed is True
+    finally:
+        AIBackend._registry.pop("togglable_test", None)
+
+
+async def test_reinit_backends_defaults_enabled_true(ai_service: AIService) -> None:
+    """A config section with no ``enabled`` key still initializes the
+    backend — existing configs predate the toggle and shouldn't need a
+    manual migration."""
+
+    class LegacyBackend(StubAIBackend):
+        backend_name = "legacy_test"
+
+    try:
+        ai_service._backends = {}
+        # No ``enabled`` key at all — the default path must initialize.
+        await ai_service._reinit_backends({"legacy_test": {"api_key": "x"}})
+        assert "legacy_test" in ai_service._backends
+    finally:
+        AIBackend._registry.pop("legacy_test", None)
+
+
 # --- Chat (no tools) ---
 
 

@@ -284,9 +284,15 @@ export function ConfigSection({ section }: ConfigSectionProps) {
           {backendSettingsParams.length > 0 && (!backendParam || backendName) && (
             <div className="mt-4 pt-4 border-t border-dashed">
               {backendGroups(backendSettingsParams, backendName, !!backendParam).map((group) => {
-                // For multi-backend groups, check if this group's enabled toggle is on
+                // For multi-backend groups, check if this group's enabled toggle is on.
+                // Fall back to the param's declared default so a backend whose config
+                // has never been saved (no stored ``enabled`` value) still reflects
+                // its default state instead of always reading as "disabled".
                 const enableParam = group.params.find((p) => p.key.endsWith(".enabled"));
-                const isEnabled = enableParam ? getValue(enableParam.key) === true : true;
+                const rawEnableValue = enableParam ? getValue(enableParam.key) : undefined;
+                const effectiveEnableValue =
+                  rawEnableValue === undefined ? enableParam?.default : rawEnableValue;
+                const isEnabled = enableParam ? effectiveEnableValue === true : true;
                 const otherParams = enableParam
                   ? group.params.filter((p) => p !== enableParam)
                   : group.params;
