@@ -1465,16 +1465,6 @@ class AIService(Service):
                 else:
                     round_prompt = effective_prompt
 
-                # Materialize reference attachments so the AI backend
-                # gets the actual bytes (base64/text) it needs to build
-                # content blocks. Only the most recent user message can
-                # carry attachments that need materializing — older ones
-                # are already persisted with inline data or were reference
-                # stubs the backend saw on a previous turn.
-                await self._materialize_reference_attachments(
-                    truncated, user_ctx,
-                )
-
                 request = AIRequest(
                     messages=truncated,
                     system_prompt=round_prompt,
@@ -2056,122 +2046,6 @@ class AIService(Service):
 
         return "\n\n".join(parts) if parts else ""
 
-    async def _materialize_reference_attachments(
-        self,
-        messages: list[Message],
-        user_ctx: UserContext | None,
-    ) -> None:
-        """Read file bytes from disk for reference-mode user attachments.
-
-        The AI backend (Anthropic, etc.) needs ``att.data`` or ``att.text``
-        populated to build content blocks. When all attachments go through
-        the upload endpoint, user attachments arrive as references (workspace
-        path set, no data). This method reads the file from disk and rebuilds
-        the attachment with inline data so the backend can consume it.
-
-        Mutates messages in place — replaces attachment lists on user messages.
-        """
-        if not self._resolver or not user_ctx:
-            return
-
-        from gilbert.interfaces.workspace import WorkspaceProvider
-
-        ws_svc = self._resolver.get_capability("workspace")
-        if not isinstance(ws_svc, WorkspaceProvider):
-            return
-
-        import base64 as b64mod
-
-        for msg in messages:
-            if msg.role != MessageRole.USER or not msg.attachments:
-                continue
-
-            new_atts: list[FileAttachment] = []
-            changed = False
-            for att in msg.attachments:
-                if att.is_reference and not att.data and not att.text:
-                    # Need to materialize from disk
-                    conv_id = att.workspace_conv
-                    if not conv_id:
-                        new_atts.append(att)
-                        continue
-
-                    ws_root = ws_svc.get_workspace_root(user_ctx.user_id, conv_id)
-                    file_path = (ws_root / att.workspace_path).resolve()
-
-                    try:
-                        file_path.relative_to(ws_root.resolve())
-                    except ValueError:
-                        new_atts.append(att)
-                        continue
-
-                    if not file_path.is_file():
-                        new_atts.append(att)
-                        continue
-
-                    try:
-                        raw = file_path.read_bytes()
-                    except OSError:
-                        new_atts.append(att)
-                        continue
-
-                    mt = att.media_type or ""
-
-                    if mt.startswith("image/"):
-                        kind = "image"
-                        data = b64mod.b64encode(raw).decode("ascii")
-                        new_atts.append(FileAttachment(
-                            kind=kind,
-                            name=att.name,
-                            media_type=mt,
-                            data=data,
-                            workspace_skill=att.workspace_skill,
-                            workspace_path=att.workspace_path,
-                            workspace_conv=att.workspace_conv,
-                            workspace_file_id=att.workspace_file_id,
-                            size=len(raw),
-                        ))
-                    elif mt == "application/pdf":
-                        data = b64mod.b64encode(raw).decode("ascii")
-                        new_atts.append(FileAttachment(
-                            kind="document",
-                            name=att.name,
-                            media_type=mt,
-                            data=data,
-                            workspace_skill=att.workspace_skill,
-                            workspace_path=att.workspace_path,
-                            workspace_conv=att.workspace_conv,
-                            workspace_file_id=att.workspace_file_id,
-                            size=len(raw),
-                        ))
-                    elif mt.startswith("text/") or mt in ("application/json", "application/xml", "application/javascript"):
-                        try:
-                            text_content = raw.decode("utf-8")
-                        except UnicodeDecodeError:
-                            text_content = raw.decode("latin-1")
-                        new_atts.append(FileAttachment(
-                            kind="text",
-                            name=att.name,
-                            media_type=mt,
-                            text=text_content,
-                            workspace_skill=att.workspace_skill,
-                            workspace_path=att.workspace_path,
-                            workspace_conv=att.workspace_conv,
-                            workspace_file_id=att.workspace_file_id,
-                            size=len(raw),
-                        ))
-                    else:
-                        # Opaque file — AI can't read it natively.
-                        # Keep as reference; AI uses workspace tools.
-                        new_atts.append(att)
-                        continue
-
-                    changed = True
-                else:
-                    new_atts.append(att)
-
-            if changed:
-                msg.attachments = new_atts
 
     async def _ensure_attachments_registered(
         self,
