@@ -131,6 +131,7 @@ AIBackend            →  anthropic plugin → AnthropicAI (Claude)
                         xai plugin       → XAIAI (Grok 4 / 3 / 2 Vision)
                         openrouter plugin → OpenRouterAI (~200 models, multi-provider)
                         ollama plugin    → OllamaAI (local / self-hosted open-weights)
+                        gemini plugin    → GeminiAI (Google Gemini 2.5)
 VisionBackend        →  anthropic plugin → AnthropicVision
 TTSBackend           →  elevenlabs plugin → ElevenLabsTTS
 SpeakerBackend       →  sonos plugin → SonosSpeaker

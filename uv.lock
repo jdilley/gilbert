@@ -14,6 +14,7 @@ members = [
     "gilbert-plugin-arr",
     "gilbert-plugin-deepseek",
     "gilbert-plugin-elevenlabs",
+    "gilbert-plugin-gemini",
     "gilbert-plugin-google",
     "gilbert-plugin-groq",
     "gilbert-plugin-guess-that-song",
@@ -871,6 +872,7 @@ dependencies = [
     { name = "gilbert-plugin-arr" },
     { name = "gilbert-plugin-deepseek" },
     { name = "gilbert-plugin-elevenlabs" },
+    { name = "gilbert-plugin-gemini" },
     { name = "gilbert-plugin-google" },
     { name = "gilbert-plugin-groq" },
     { name = "gilbert-plugin-guess-that-song" },
@@ -932,6 +934,7 @@ requires-dist = [
     { name = "gilbert-plugin-arr", virtual = "std-plugins/arr" },
     { name = "gilbert-plugin-deepseek", virtual = "std-plugins/deepseek" },
     { name = "gilbert-plugin-elevenlabs", virtual = "std-plugins/elevenlabs" },
+    { name = "gilbert-plugin-gemini", virtual = "std-plugins/gemini" },
     { name = "gilbert-plugin-google", virtual = "std-plugins/google" },
     { name = "gilbert-plugin-groq", virtual = "std-plugins/groq" },
     { name = "gilbert-plugin-guess-that-song", virtual = "std-plugins/guess-that-song" },
@@ -1004,6 +1007,11 @@ source = { virtual = "std-plugins/deepseek" }
 name = "gilbert-plugin-elevenlabs"
 version = "1.0.0"
 source = { virtual = "std-plugins/elevenlabs" }
+
+[[package]]
+name = "gilbert-plugin-gemini"
+version = "1.0.0"
+source = { virtual = "std-plugins/gemini" }
 
 [[package]]
 name = "gilbert-plugin-google"
