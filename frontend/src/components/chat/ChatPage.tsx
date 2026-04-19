@@ -564,6 +564,13 @@ export function ChatPage() {
     setPendingInvites([]);
     setOwnerId("");
     setRoomTitle("");
+    // Reset model selection so the next conversation starts on "Default"
+    // (falling back to whichever model the AI profile resolves) instead
+    // of sticking on the previous chat's choice. Without this, picking
+    // e.g. Haiku once in conv A means every subsequent new/cleared
+    // chat starts preselected on Haiku and persists Haiku into its
+    // own ``model_preference`` on first send.
+    setModelSelection({ backend: "", model: "" });
     setSidebarOpen(false);
   }, []);
 
@@ -583,6 +590,10 @@ export function ChatPage() {
           setIsShared(false);
           setMembers([]);
           setRoomTitle(result.title);
+          // New conv has no persisted model preference; start on "Default"
+          // rather than inheriting whatever was selected in the previous
+          // chat. See clearChat for the full rationale.
+          setModelSelection({ backend: "", model: "" });
         } catch {
           // ignore
         }

@@ -4488,13 +4488,30 @@ class AIService(Service):
             if cancel_key:
                 self._in_flight_chats.pop(cancel_key, None)
 
-        # Persist model preference when the user explicitly selects one
-        if (frame_model or frame_backend) and conv_id:
-            await self.set_conversation_state(
-                "model_preference",
-                {"backend": frame_backend, "model": frame_model},
-                conv_id,
-            )
+        # Persist model preference when the user explicitly selects one,
+        # and clear any stored preference when they explicitly send with
+        # "Default" (empty selection). Without the clear path, once a
+        # conversation gets a model preference pinned, picking "Default"
+        # later is a no-op on the server — the pin survives on reload
+        # and the chat keeps defaulting to whatever was previously
+        # pinned (e.g. Haiku).
+        if conv_id:
+            if frame_model or frame_backend:
+                await self.set_conversation_state(
+                    "model_preference",
+                    {"backend": frame_backend, "model": frame_model},
+                    conv_id,
+                )
+            else:
+                existing = await self.get_conversation_state(
+                    "model_preference", conv_id
+                )
+                if existing:
+                    await self.set_conversation_state(
+                        "model_preference",
+                        {"backend": "", "model": ""},
+                        conv_id,
+                    )
 
         return {
             "type": "chat.message.send.result",
