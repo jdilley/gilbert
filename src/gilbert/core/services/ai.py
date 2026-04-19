@@ -5,6 +5,7 @@ separate services, now merged into AIService).
 """
 
 import asyncio
+import contextlib
 import json as _json
 import logging
 import uuid
@@ -1124,9 +1125,62 @@ class AIService(Service):
     ) -> ConfigActionResult:
         backend_name = payload.get("backend", "")
         backend = self._backends.get(backend_name) if backend_name else None
+
+        # If the named backend isn't running, spin up a transient instance
+        # from the stored config and run the action on it. Covers two
+        # cases the old "fall back to the first live backend" path got
+        # wrong: (1) the backend is disabled via its ``enabled`` toggle,
+        # and (2) its last init failed (bad api_key, unreachable host)
+        # — precisely when the user clicks "Test connection" to diagnose.
+        transient: AIBackend | None = None
+        if backend is None and backend_name:
+            cls = AIBackend.registered_backends().get(backend_name)
+            if cls is not None:
+                cfg = self._load_backend_config(backend_name)
+                try:
+                    transient = cls()
+                    await transient.initialize(cfg)
+                    backend = transient
+                except Exception as exc:
+                    if transient is not None:
+                        with contextlib.suppress(Exception):
+                            await transient.close()
+                    return ConfigActionResult(
+                        status="error",
+                        message=(
+                            f"Backend '{backend_name}' couldn't initialize "
+                            f"with current settings: {exc}"
+                        ),
+                    )
+
         if backend is None and self._backends:
             backend = next(iter(self._backends.values()))
-        return await invoke_backend_action(backend, key, payload)
+        try:
+            return await invoke_backend_action(backend, key, payload)
+        finally:
+            if transient is not None:
+                with contextlib.suppress(Exception):
+                    await transient.close()
+
+    def _load_backend_config(self, name: str) -> dict[str, Any]:
+        """Read ``backends.<name>.*`` from the current AI config section.
+
+        Used to bootstrap a transient backend instance for config actions
+        (e.g. ``test_connection``) when the backend isn't currently
+        initialized — either because it's disabled, or because its last
+        init attempt raised.
+        """
+        if self._resolver is None:
+            return {}
+        config_svc = self._resolver.get_capability("configuration")
+        if not isinstance(config_svc, ConfigurationReader):
+            return {}
+        section = config_svc.get_section_safe("ai") or {}
+        backends = section.get("backends", {})
+        if not isinstance(backends, dict):
+            return {}
+        cfg = backends.get(name, {})
+        return cfg if isinstance(cfg, dict) else {}
 
     # --- AI Context Profiles ---
 

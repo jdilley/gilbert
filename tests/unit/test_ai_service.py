@@ -280,6 +280,104 @@ async def test_reinit_backends_defaults_enabled_true(ai_service: AIService) -> N
         AIBackend._registry.pop("legacy_test", None)
 
 
+async def test_invoke_config_action_transient_init_for_disabled_backend(
+    ai_service: AIService,
+) -> None:
+    """Clicking "Test connection" on a backend that isn't running must
+    spin up a transient instance from the stored config and invoke
+    the action on *that backend* — not silently fall back to whichever
+    other backend happens to be live.
+
+    Covers the common case of the user testing a freshly-pasted
+    api_key before enabling the backend / saving the config.
+    """
+    from gilbert.interfaces.configuration import (
+        ConfigActionResult,
+        ConfigurationReader,
+    )
+
+    class TestConnTarget(StubAIBackend):
+        backend_name = "testconn_target"
+
+        action_invoked_with: list[dict[str, Any]] = []
+
+        def backend_actions(self) -> list[Any]:
+            from gilbert.interfaces.configuration import ConfigAction
+
+            return [ConfigAction(key="test_connection", label="Test")]
+
+        async def invoke_backend_action(
+            self,
+            key: str,
+            payload: dict[str, Any],
+        ) -> ConfigActionResult:
+            TestConnTarget.action_invoked_with.append({"key": key, "api_key": self.init_config.get("api_key")})
+            return ConfigActionResult(status="ok", message="hit the target")
+
+    # A second backend is running, so the old "fall back to first live
+    # backend" path would have routed the action to it instead of the
+    # requested one. We assert the request actually reached the target.
+    class OtherBackend(StubAIBackend):
+        backend_name = "other_live"
+
+    # Mock a config reader that returns a stored api_key for the target.
+    class FakeConfigReader:
+        def get(self, path: str) -> Any:
+            return None
+
+        def get_section(self, namespace: str) -> dict[str, Any]:
+            return self.get_section_safe(namespace)
+
+        def get_section_safe(self, namespace: str) -> dict[str, Any]:
+            if namespace == "ai":
+                return {
+                    "backends": {
+                        "testconn_target": {
+                            "api_key": "sk-live-from-stored-config",
+                            "enabled": False,
+                        }
+                    }
+                }
+            return {}
+
+        async def set(self, path: str, value: Any) -> dict[str, Any]:
+            return {}
+
+    assert isinstance(FakeConfigReader(), ConfigurationReader)
+
+    try:
+        live = OtherBackend()
+        ai_service._backends = {"other_live": live}
+
+        class _FakeResolver:
+            def get_capability(self, cap: str) -> Any:
+                if cap == "configuration":
+                    return FakeConfigReader()
+                return None
+
+        ai_service._resolver = _FakeResolver()  # type: ignore[assignment]
+
+        TestConnTarget.action_invoked_with.clear()
+        result = await ai_service.invoke_config_action(
+            "test_connection",
+            {"backend": "testconn_target"},
+        )
+
+        assert result.status == "ok"
+        assert result.message == "hit the target"
+        # Action ran on the target, not on the live "other" backend.
+        assert len(TestConnTarget.action_invoked_with) == 1
+        # Transient instance was initialized with the stored api_key so
+        # the test uses the real credentials.
+        assert (
+            TestConnTarget.action_invoked_with[0]["api_key"]
+            == "sk-live-from-stored-config"
+        )
+    finally:
+        AIBackend._registry.pop("testconn_target", None)
+        AIBackend._registry.pop("other_live", None)
+
+
 # --- Chat (no tools) ---
 
 
