@@ -130,6 +130,7 @@ AIBackend            →  anthropic plugin → AnthropicAI (Claude)
                         mistral plugin   → MistralAI (La Plateforme)
                         xai plugin       → XAIAI (Grok 4 / 3 / 2 Vision)
                         openrouter plugin → OpenRouterAI (~200 models, multi-provider)
+                        ollama plugin    → OllamaAI (local / self-hosted open-weights)
 VisionBackend        →  anthropic plugin → AnthropicVision
 TTSBackend           →  elevenlabs plugin → ElevenLabsTTS
 SpeakerBackend       →  sonos plugin → SonosSpeaker

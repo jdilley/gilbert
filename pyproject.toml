@@ -40,6 +40,7 @@ dependencies = [
     "gilbert-plugin-guess-that-song",
     "gilbert-plugin-mistral",
     "gilbert-plugin-ngrok",
+    "gilbert-plugin-ollama",
     "gilbert-plugin-openai",
     "gilbert-plugin-openrouter",
     "gilbert-plugin-qwen",
@@ -62,6 +63,7 @@ gilbert-plugin-groq = { workspace = true }
 gilbert-plugin-guess-that-song = { workspace = true }
 gilbert-plugin-mistral = { workspace = true }
 gilbert-plugin-ngrok = { workspace = true }
+gilbert-plugin-ollama = { workspace = true }
 gilbert-plugin-openai = { workspace = true }
 gilbert-plugin-openrouter = { workspace = true }
 gilbert-plugin-qwen = { workspace = true }

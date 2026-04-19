@@ -19,6 +19,7 @@ members = [
     "gilbert-plugin-guess-that-song",
     "gilbert-plugin-mistral",
     "gilbert-plugin-ngrok",
+    "gilbert-plugin-ollama",
     "gilbert-plugin-openai",
     "gilbert-plugin-openrouter",
     "gilbert-plugin-qwen",
@@ -875,6 +876,7 @@ dependencies = [
     { name = "gilbert-plugin-guess-that-song" },
     { name = "gilbert-plugin-mistral" },
     { name = "gilbert-plugin-ngrok" },
+    { name = "gilbert-plugin-ollama" },
     { name = "gilbert-plugin-openai" },
     { name = "gilbert-plugin-openrouter" },
     { name = "gilbert-plugin-qwen" },
@@ -935,6 +937,7 @@ requires-dist = [
     { name = "gilbert-plugin-guess-that-song", virtual = "std-plugins/guess-that-song" },
     { name = "gilbert-plugin-mistral", virtual = "std-plugins/mistral" },
     { name = "gilbert-plugin-ngrok", virtual = "std-plugins/ngrok" },
+    { name = "gilbert-plugin-ollama", virtual = "std-plugins/ollama" },
     { name = "gilbert-plugin-openai", virtual = "std-plugins/openai" },
     { name = "gilbert-plugin-openrouter", virtual = "std-plugins/openrouter" },
     { name = "gilbert-plugin-qwen", virtual = "std-plugins/qwen" },
@@ -1042,6 +1045,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "pyngrok", specifier = ">=8.0.0" }]
+
+[[package]]
+name = "gilbert-plugin-ollama"
+version = "1.0.0"
+source = { virtual = "std-plugins/ollama" }
 
 [[package]]
 name = "gilbert-plugin-openai"
