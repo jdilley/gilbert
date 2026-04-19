@@ -2285,3 +2285,205 @@ async def test_history_load_incomplete_turn_marked(
     assert turns[0]["final_content"] == ""
     assert len(turns[0]["rounds"]) == 1
     assert turns[0]["rounds"][0]["tools"][0]["result"] == "ok"
+
+
+# --- Compression ---
+
+
+def test_truncate_history_with_compression_state(ai_service: AIService) -> None:
+    """When compression state exists, truncation starts from compressed_up_to."""
+    msgs = [
+        Message(role=MessageRole.USER, content=f"msg {i}")
+        for i in range(60)
+    ]
+    compression_state = {"compressed_up_to": 30, "summary": "some summary"}
+
+    result = ai_service._truncate_history(msgs, compression_state=compression_state)
+
+    assert result[0].content == "msg 30"
+    assert len(result) == 30
+
+
+def test_truncate_history_without_compression_state(ai_service: AIService) -> None:
+    """Without compression state, falls back to count-based truncation."""
+    msgs = [
+        Message(role=MessageRole.USER, content=f"msg {i}")
+        for i in range(60)
+    ]
+
+    result = ai_service._truncate_history(msgs)
+
+    assert len(result) == ai_service._max_history_messages
+
+
+def test_truncate_history_compression_with_hard_cap(ai_service: AIService) -> None:
+    """max_history_messages still acts as a hard cap even with compression."""
+    ai_service._max_history_messages = 10
+    msgs = [
+        Message(role=MessageRole.USER, content=f"msg {i}")
+        for i in range(60)
+    ]
+    compression_state = {"compressed_up_to": 5, "summary": "summary"}
+
+    result = ai_service._truncate_history(msgs, compression_state=compression_state)
+
+    assert len(result) == 10
+    assert result[-1].content == "msg 59"
+
+
+def test_truncate_history_compression_preserves_tool_pairs(
+    ai_service: AIService,
+) -> None:
+    """Tool-call/result pairs at the boundary are kept intact."""
+    msgs = [
+        Message(role=MessageRole.USER, content="old"),
+        Message(
+            role=MessageRole.ASSISTANT,
+            content="calling",
+            tool_calls=[ToolCall(tool_call_id="t1", tool_name="x", arguments={})],
+        ),
+        Message(
+            role=MessageRole.TOOL_RESULT,
+            tool_results=[ToolResult(tool_call_id="t1", content="result")],
+        ),
+        Message(role=MessageRole.USER, content="recent"),
+    ]
+    compression_state = {"compressed_up_to": 2, "summary": "summary"}
+
+    result = ai_service._truncate_history(msgs, compression_state=compression_state)
+
+    assert result[0].role == MessageRole.ASSISTANT
+    assert result[0].content == "calling"
+
+
+def test_find_clean_boundary_skips_tool_results() -> None:
+    """Boundary should advance past TOOL_RESULT messages."""
+    msgs = [
+        Message(role=MessageRole.USER, content="a"),
+        Message(
+            role=MessageRole.ASSISTANT,
+            content="b",
+            tool_calls=[ToolCall(tool_call_id="t1", tool_name="x", arguments={})],
+        ),
+        Message(
+            role=MessageRole.TOOL_RESULT,
+            tool_results=[ToolResult(tool_call_id="t1", content="r")],
+        ),
+        Message(role=MessageRole.USER, content="c"),
+    ]
+    boundary = AIService._find_clean_boundary(msgs, 2)
+    assert boundary == 3
+
+
+def test_effective_compression_config_defaults(ai_service: AIService) -> None:
+    """Without per-conversation overrides, returns global defaults."""
+    cfg = ai_service._get_effective_compression_config(None)
+    assert cfg["enabled"] is True
+    assert cfg["threshold"] == 40
+    assert cfg["keep_recent"] == 20
+    assert cfg["summary_max_tokens"] == 1500
+
+
+def test_effective_compression_config_with_overrides(ai_service: AIService) -> None:
+    """Per-conversation overrides merge on top of global defaults."""
+    cfg = ai_service._get_effective_compression_config(
+        {"threshold": 100, "keep_recent": 5}
+    )
+    assert cfg["threshold"] == 100
+    assert cfg["keep_recent"] == 5
+    assert cfg["enabled"] is True
+    assert cfg["summary_max_tokens"] == 1500
+
+
+async def test_maybe_compress_history_below_threshold(
+    ai_service: AIService,
+    stub_backend: StubAIBackend,
+    storage_backend: StorageBackend,
+    resolver: ServiceResolver,
+) -> None:
+    """No compression when message count is below threshold."""
+    await ai_service.start(resolver)
+    ai_service._compression_threshold = 50
+
+    msgs = [Message(role=MessageRole.USER, content=f"m{i}") for i in range(30)]
+    await ai_service._maybe_compress_history(msgs, "conv-1")
+
+    assert len(stub_backend.requests) == 0
+
+
+async def test_maybe_compress_history_generates_summary(
+    ai_service: AIService,
+    stub_backend: StubAIBackend,
+    storage_backend: StorageBackend,
+    resolver: ServiceResolver,
+) -> None:
+    """Compression generates a summary and persists it in conversation state."""
+    await ai_service.start(resolver)
+    ai_service._compression_threshold = 10
+    ai_service._compression_keep_recent = 5
+
+    stub_backend.queue_response(
+        AIResponse(
+            message=Message(
+                role=MessageRole.ASSISTANT,
+                content="Summary of the conversation so far.",
+            ),
+            model="stub",
+        )
+    )
+
+    msgs = [Message(role=MessageRole.USER, content=f"m{i}") for i in range(20)]
+    ai_service._current_conversation_id = "conv-compress"
+    await ai_service._maybe_compress_history(msgs, "conv-compress")
+
+    assert len(stub_backend.requests) == 1
+    req = stub_backend.requests[0]
+    assert _COMPRESSION_SYSTEM_PROMPT in req.system_prompt
+    assert req.tools == []
+
+    storage_backend.put.assert_called()
+    call_args = storage_backend.put.call_args
+    doc = call_args[0][2]
+    state = doc.get("state", {})
+    compression = state.get("compression", {})
+    assert compression["summary"] == "Summary of the conversation so far."
+    assert compression["compressed_up_to"] == 15
+
+
+async def test_maybe_compress_history_disabled(
+    ai_service: AIService,
+    stub_backend: StubAIBackend,
+    storage_backend: StorageBackend,
+    resolver: ServiceResolver,
+) -> None:
+    """No compression when globally disabled."""
+    await ai_service.start(resolver)
+    ai_service._compression_enabled = False
+    ai_service._compression_threshold = 5
+
+    msgs = [Message(role=MessageRole.USER, content=f"m{i}") for i in range(20)]
+    await ai_service._maybe_compress_history(msgs, "conv-disabled")
+
+    assert len(stub_backend.requests) == 0
+
+
+async def test_maybe_compress_history_backend_failure(
+    ai_service: AIService,
+    storage_backend: StorageBackend,
+    resolver: ServiceResolver,
+) -> None:
+    """Backend failure during summarization logs warning but doesn't crash."""
+    await ai_service.start(resolver)
+    ai_service._compression_threshold = 5
+    ai_service._compression_keep_recent = 2
+
+    failing_backend = AsyncMock(spec=AIBackend)
+    failing_backend.generate = AsyncMock(side_effect=RuntimeError("API down"))
+    ai_service._backend = failing_backend
+
+    msgs = [Message(role=MessageRole.USER, content=f"m{i}") for i in range(10)]
+    ai_service._current_conversation_id = "conv-fail"
+    await ai_service._maybe_compress_history(msgs, "conv-fail")
+
+
+from gilbert.core.services.ai import _COMPRESSION_SYSTEM_PROMPT

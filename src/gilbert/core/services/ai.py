@@ -67,6 +67,32 @@ ai_logger = logging.getLogger("gilbert.ai")
 _COLLECTION = "ai_conversations"
 _PROFILES_COLLECTION = "ai_profiles"
 _ASSIGNMENTS_COLLECTION = "ai_profile_assignments"
+_COMPRESSION_STATE_KEY = "compression"
+_COMPRESSION_CONFIG_KEY = "compression_config"
+
+_COMPRESSION_SYSTEM_PROMPT = """\
+You are a conversation summarizer. Produce a concise, factual summary of the \
+conversation history provided.
+
+Preserve:
+- Key decisions made and their rationale
+- Important facts, data, and specific details (names, dates, numbers)
+- User preferences and standing instructions
+- Open questions or pending tasks
+- Outcomes of tool calls and actions taken
+- File attachments: note what was attached (filename, type) and what was \
+discussed about it — this is the only record of those files
+
+Omit:
+- Pleasantries and small talk
+- Redundant back-and-forth
+- Raw tool call parameters and verbose tool output (summarize outcomes only)
+- Formatting artifacts
+
+If a prior summary is provided under "EXISTING SUMMARY", integrate the new \
+messages into it rather than starting from scratch. Output only the summary \
+text with no preamble.\
+"""
 
 # Attachment limits for chat.message.send frames. Keep these tight enough
 # that a single turn can't bloat the conversation entity beyond what
@@ -808,6 +834,10 @@ class AIService(Service):
         # happen per chat turn so a pathological stream can't burn tokens
         # forever. Applies independently of _max_tool_rounds.
         self._max_continuation_rounds: int = 2
+        self._compression_enabled: bool = True
+        self._compression_threshold: int = 40
+        self._compression_keep_recent: int = 20
+        self._compression_summary_max_tokens: int = 1500
         self._storage: StorageBackend | None = None
         self._resolver: ServiceResolver | None = None
         self._acl_svc: Any | None = None
@@ -922,6 +952,16 @@ class AIService(Service):
         self._max_continuation_rounds = section.get(
             "max_continuation_rounds", self._max_continuation_rounds
         )
+        self._compression_enabled = section.get("compression_enabled", self._compression_enabled)
+        self._compression_threshold = section.get(
+            "compression_threshold", self._compression_threshold
+        )
+        self._compression_keep_recent = section.get(
+            "compression_keep_recent", self._compression_keep_recent
+        )
+        self._compression_summary_max_tokens = section.get(
+            "compression_summary_max_tokens", self._compression_summary_max_tokens
+        )
         self._config = section.get("settings", self._config)
 
     # --- Configurable protocol ---
@@ -979,6 +1019,39 @@ class AIService(Service):
                 description="Whether the AI memory system is enabled.",
                 default=True,
                 restart_required=True,
+            ),
+            ConfigParam(
+                key="compression_enabled",
+                type=ToolParameterType.BOOLEAN,
+                description=(
+                    "Summarize older messages when a conversation exceeds the "
+                    "threshold, preserving context that would otherwise be lost."
+                ),
+                default=True,
+            ),
+            ConfigParam(
+                key="compression_threshold",
+                type=ToolParameterType.INTEGER,
+                description=(
+                    "Compress when total message count exceeds this value."
+                ),
+                default=40,
+            ),
+            ConfigParam(
+                key="compression_keep_recent",
+                type=ToolParameterType.INTEGER,
+                description=(
+                    "Always keep this many recent messages verbatim (uncompressed)."
+                ),
+                default=20,
+            ),
+            ConfigParam(
+                key="compression_summary_max_tokens",
+                type=ToolParameterType.INTEGER,
+                description=(
+                    "Maximum tokens for the AI-generated conversation summary."
+                ),
+                default=1500,
             ),
         ]
         # Include backend-declared params under settings.*
@@ -1404,6 +1477,12 @@ class AIService(Service):
             user_ctx,
         )
 
+        # Compress older messages if the conversation is long enough.
+        await self._maybe_compress_history(messages, conversation_id)
+        compression_state = await self.get_conversation_state(
+            _COMPRESSION_STATE_KEY, conversation_id
+        )
+
         # Agentic loop
         response: AIResponse | None = None
         all_ui_blocks: list[UIBlock] = []
@@ -1455,15 +1534,32 @@ class AIService(Service):
             """
             nonlocal response, continuation_count
             for round_num in range(self._max_tool_rounds):
-                truncated = self._truncate_history(messages)
+                truncated = self._truncate_history(
+                    messages, compression_state=compression_state
+                )
 
                 # Dynamically append conversation state each round so tool-call
                 # mutations are visible to subsequent AI rounds.
                 conv_state = await self._load_conversation_state(conversation_id)
+
+                # Inject compression summary into the prompt (and exclude
+                # the raw compression dict from _format_state_for_context).
+                summary_section = ""
                 if conv_state:
-                    round_prompt = f"{effective_prompt}\n\n{self._format_state_for_context(conv_state)}"
-                else:
-                    round_prompt = effective_prompt
+                    comp = conv_state.pop(_COMPRESSION_STATE_KEY, None)
+                    if isinstance(comp, dict) and comp.get("summary"):
+                        summary_section = (
+                            "\n\n## Prior Conversation Context\n"
+                            "The following is a summary of earlier parts of "
+                            "this conversation that are no longer shown in "
+                            "full:\n\n"
+                            + comp["summary"]
+                        )
+                    conv_state.pop(_COMPRESSION_CONFIG_KEY, None)
+
+                round_prompt = effective_prompt + summary_section
+                if conv_state:
+                    round_prompt += f"\n\n{self._format_state_for_context(conv_state)}"
 
                 request = AIRequest(
                     messages=truncated,
@@ -3208,23 +3304,198 @@ class AIService(Service):
 
     # --- History Management ---
 
-    def _truncate_history(self, messages: list[Message]) -> list[Message]:
-        """Truncate to max_history_messages, preserving tool-call/result pairs."""
-        if len(messages) <= self._max_history_messages:
-            return list(messages)
+    def _get_effective_compression_config(
+        self, per_conv: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """Merge per-conversation compression overrides with global defaults."""
+        defaults = {
+            "enabled": self._compression_enabled,
+            "threshold": self._compression_threshold,
+            "keep_recent": self._compression_keep_recent,
+            "summary_max_tokens": self._compression_summary_max_tokens,
+        }
+        if per_conv:
+            defaults.update({k: v for k, v in per_conv.items() if v is not None})
+        return defaults
 
-        truncated = messages[-self._max_history_messages :]
+    @staticmethod
+    def _find_clean_boundary(messages: list[Message], raw_idx: int) -> int:
+        """Adjust a split index so it doesn't land between a tool_call and its result."""
+        idx = raw_idx
+        while idx < len(messages) and messages[idx].role == MessageRole.TOOL_RESULT:
+            idx += 1
+        return min(idx, len(messages))
 
-        # If the first message is TOOL_RESULT, include the preceding assistant
-        # message (which has the tool_calls) to keep the pair intact.
-        while truncated and truncated[0].role == MessageRole.TOOL_RESULT:
-            idx = messages.index(truncated[0])
+    async def _maybe_compress_history(
+        self,
+        messages: list[Message],
+        conversation_id: str,
+        *,
+        force: bool = False,
+    ) -> None:
+        """Summarize older messages if the conversation exceeds the threshold.
+
+        The summary is persisted in conversation state and injected into the
+        system prompt on subsequent turns. The original messages are kept in
+        storage — compression only affects what gets sent to the backend.
+
+        When *force* is True, the threshold check is skipped (but
+        ``keep_recent`` is still respected).
+        """
+        if self._backend is None:
+            return
+
+        per_conv_config = await self.get_conversation_state(
+            _COMPRESSION_CONFIG_KEY, conversation_id
+        )
+        cfg = self._get_effective_compression_config(
+            per_conv_config if isinstance(per_conv_config, dict) else None
+        )
+
+        if not force:
+            if not cfg["enabled"]:
+                return
+            if len(messages) <= cfg["threshold"]:
+                return
+
+        existing = await self.get_conversation_state(
+            _COMPRESSION_STATE_KEY, conversation_id
+        )
+        compressed_up_to = (
+            existing.get("compressed_up_to", 0)
+            if isinstance(existing, dict)
+            else 0
+        )
+        existing_summary = (
+            existing.get("summary", "") if isinstance(existing, dict) else ""
+        )
+
+        keep_recent: int = cfg["keep_recent"]
+        new_boundary = self._find_clean_boundary(
+            messages, max(len(messages) - keep_recent, compressed_up_to)
+        )
+
+        if new_boundary <= compressed_up_to:
+            return
+
+        chunk = messages[compressed_up_to:new_boundary]
+        if not chunk:
+            return
+
+        chunk_text_parts: list[str] = []
+        if existing_summary:
+            chunk_text_parts.append(f"EXISTING SUMMARY:\n{existing_summary}\n")
+        chunk_text_parts.append("NEW MESSAGES TO INCORPORATE:")
+        for msg in chunk:
+            role_label = msg.role.value.upper()
+            line = f"[{role_label}] {msg.content}"
+            if msg.attachments:
+                att_descs = []
+                for att in msg.attachments:
+                    desc = att.name or "unnamed"
+                    if att.media_type:
+                        desc += f" ({att.media_type})"
+                    att_descs.append(desc)
+                line += f" [attachments: {', '.join(att_descs)}]"
+            if msg.tool_calls:
+                tool_names = ", ".join(tc.tool_name for tc in msg.tool_calls)
+                line += f" [called: {tool_names}]"
+            if msg.tool_results:
+                for tr in msg.tool_results:
+                    snippet = tr.content[:200] if tr.content else ""
+                    err = " (ERROR)" if tr.is_error else ""
+                    line += f"\n  -> result{err}: {snippet}"
+            chunk_text_parts.append(line)
+
+        await self._publish_event(
+            "chat.compression.started",
+            {
+                "conversation_id": conversation_id,
+                "messages_to_compress": len(chunk),
+                "total_messages": len(messages),
+            },
+        )
+
+        summary_request = AIRequest(
+            messages=[
+                Message(
+                    role=MessageRole.USER,
+                    content="\n".join(chunk_text_parts),
+                )
+            ],
+            system_prompt=_COMPRESSION_SYSTEM_PROMPT,
+        )
+
+        try:
+            resp = await self._backend.generate(summary_request)
+            summary_text = resp.message.content.strip()
+        except Exception:
+            logger.warning(
+                "Compression summarization failed for conversation %s; "
+                "falling back to plain truncation",
+                conversation_id,
+                exc_info=True,
+            )
+            await self._publish_event(
+                "chat.compression.failed",
+                {"conversation_id": conversation_id},
+            )
+            return
+
+        await self.set_conversation_state(
+            _COMPRESSION_STATE_KEY,
+            {
+                "summary": summary_text,
+                "compressed_up_to": new_boundary,
+                "last_compressed_at": datetime.now(UTC).isoformat(),
+            },
+            conversation_id,
+        )
+
+        await self._publish_event(
+            "chat.compression.completed",
+            {
+                "conversation_id": conversation_id,
+                "messages_compressed": len(chunk),
+                "compressed_up_to": new_boundary,
+            },
+        )
+        logger.info(
+            "Compressed %d messages in conversation %s (up to index %d)",
+            len(chunk),
+            conversation_id,
+            new_boundary,
+        )
+
+    def _truncate_history(
+        self,
+        messages: list[Message],
+        compression_state: dict[str, Any] | None = None,
+    ) -> list[Message]:
+        """Truncate to max_history_messages, preserving tool-call/result pairs.
+
+        When a compression summary exists, slices from ``compressed_up_to``
+        instead of a blind last-N. The summary itself is injected into the
+        system prompt separately — this method only decides which raw messages
+        to include in the request.
+        """
+        start = 0
+        if compression_state and isinstance(compression_state.get("compressed_up_to"), int):
+            start = compression_state["compressed_up_to"]
+
+        tail = messages[start:]
+
+        if len(tail) > self._max_history_messages:
+            tail = tail[-self._max_history_messages :]
+
+        while tail and tail[0].role == MessageRole.TOOL_RESULT:
+            idx = messages.index(tail[0])
             if idx > 0:
-                truncated.insert(0, messages[idx - 1])
+                tail.insert(0, messages[idx - 1])
             else:
                 break
 
-        return truncated
+        return tail
 
     # --- ToolProvider protocol ---
 
@@ -3453,6 +3724,87 @@ class AIService(Service):
                     required_role="user",
                 ),
             )
+        tools.extend(
+            [
+                ToolDefinition(
+                    name="get_compression_config",
+                    slash_group="compression",
+                    slash_command="show",
+                    slash_help="Show compression settings for this conversation",
+                    description=(
+                        "Show the effective compression settings and current "
+                        "compression state for the active conversation."
+                    ),
+                    required_role="everyone",
+                ),
+                ToolDefinition(
+                    name="set_compression_config",
+                    slash_group="compression",
+                    slash_command="set",
+                    slash_help=(
+                        "Override compression settings: "
+                        "/compression set [enabled] [threshold] [keep_recent] [summary_max_tokens]"
+                    ),
+                    description=(
+                        "Set per-conversation compression overrides. Only "
+                        "provided fields are updated; omitted fields keep "
+                        "their current value."
+                    ),
+                    parameters=[
+                        ToolParameter(
+                            name="enabled",
+                            type=ToolParameterType.BOOLEAN,
+                            description="Enable or disable compression for this conversation.",
+                            required=False,
+                        ),
+                        ToolParameter(
+                            name="threshold",
+                            type=ToolParameterType.INTEGER,
+                            description="Compress when message count exceeds this.",
+                            required=False,
+                        ),
+                        ToolParameter(
+                            name="keep_recent",
+                            type=ToolParameterType.INTEGER,
+                            description="Number of recent messages to always keep verbatim.",
+                            required=False,
+                        ),
+                        ToolParameter(
+                            name="summary_max_tokens",
+                            type=ToolParameterType.INTEGER,
+                            description="Max tokens for the generated summary.",
+                            required=False,
+                        ),
+                    ],
+                    required_role="user",
+                ),
+                ToolDefinition(
+                    name="clear_compression",
+                    slash_group="compression",
+                    slash_command="clear",
+                    slash_help="Clear compression state (summary) for this conversation",
+                    description=(
+                        "Clear the compression summary for the active "
+                        "conversation. The full message history is preserved; "
+                        "a new summary will be generated when the threshold "
+                        "is exceeded again."
+                    ),
+                    required_role="user",
+                ),
+                ToolDefinition(
+                    name="force_compression",
+                    slash_group="compression",
+                    slash_command="compress",
+                    slash_help="Force compression now, ignoring the threshold",
+                    description=(
+                        "Force-compress the current conversation immediately, "
+                        "regardless of message count. Useful for long "
+                        "conversations that haven't hit the threshold yet."
+                    ),
+                    required_role="user",
+                ),
+            ]
+        )
         return tools
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
@@ -3477,6 +3829,14 @@ class AIService(Service):
                 return await self._tool_reset_persona()
             case "memory":
                 return await self._tool_memory_action(arguments)
+            case "get_compression_config":
+                return await self._tool_get_compression_config(arguments)
+            case "set_compression_config":
+                return await self._tool_set_compression_config(arguments)
+            case "clear_compression":
+                return await self._tool_clear_compression(arguments)
+            case "force_compression":
+                return await self._tool_force_compression(arguments)
             case _:
                 raise KeyError(f"Unknown tool: {name}")
 
@@ -3531,6 +3891,91 @@ class AIService(Service):
     async def _tool_clear_assignment(self, arguments: dict[str, Any]) -> str:
         await self.clear_assignment(arguments["call_name"])
         return _json.dumps({"status": "cleared"})
+
+    # --- Compression tool handlers ---
+
+    async def _tool_get_compression_config(self, arguments: dict[str, Any]) -> str:
+        conv_id = self._resolve_conversation_id(arguments.get("_conversation_id"))
+        per_conv = await self.get_conversation_state(_COMPRESSION_CONFIG_KEY, conv_id)
+        effective = self._get_effective_compression_config(
+            per_conv if isinstance(per_conv, dict) else None
+        )
+        state = await self.get_conversation_state(_COMPRESSION_STATE_KEY, conv_id)
+        messages = await self._load_conversation(conv_id)
+
+        lines = ["**Compression Settings**"]
+        source = "per-conversation override" if per_conv else "global defaults"
+        lines.append(f"Source: {source}")
+        lines.append(f"Enabled: {'yes' if effective['enabled'] else 'no'}")
+        lines.append(f"Threshold: {effective['threshold']} messages")
+        lines.append(f"Keep recent: {effective['keep_recent']} messages")
+        lines.append(f"Summary max tokens: {effective['summary_max_tokens']}")
+        lines.append(f"Total messages in conversation: {len(messages)}")
+
+        if isinstance(state, dict) and state.get("summary"):
+            lines.append("")
+            lines.append("**Current Compression State**")
+            lines.append(
+                f"Messages summarized: {state.get('compressed_up_to', 0)} "
+                f"of {len(messages)}"
+            )
+            lines.append(
+                f"Summary length: {len(state['summary']):,} characters"
+            )
+            ts = state.get("last_compressed_at", "")
+            if ts:
+                lines.append(f"Last compressed: {ts}")
+        else:
+            lines.append("")
+            lines.append("No compression has been performed yet.")
+
+        return "\n".join(lines)
+
+    async def _tool_set_compression_config(self, arguments: dict[str, Any]) -> str:
+        conv_id = self._resolve_conversation_id(arguments.get("_conversation_id"))
+        existing = await self.get_conversation_state(_COMPRESSION_CONFIG_KEY, conv_id)
+        merged: dict[str, Any] = existing if isinstance(existing, dict) else {}
+        changed: list[str] = []
+        for key in ("enabled", "threshold", "keep_recent", "summary_max_tokens"):
+            if key in arguments:
+                merged[key] = arguments[key]
+                changed.append(f"{key} = {arguments[key]}")
+        await self.set_conversation_state(_COMPRESSION_CONFIG_KEY, merged, conv_id)
+        if changed:
+            return "Updated compression settings:\n" + "\n".join(
+                f"  {c}" for c in changed
+            )
+        return "No changes — no settings were provided."
+
+    async def _tool_clear_compression(self, arguments: dict[str, Any]) -> str:
+        conv_id = self._resolve_conversation_id(arguments.get("_conversation_id"))
+        await self.clear_conversation_state(_COMPRESSION_STATE_KEY, conv_id)
+        return (
+            "Compression state cleared. The full message history is still "
+            "stored — a new summary will be generated when the conversation "
+            "exceeds the threshold again."
+        )
+
+    async def _tool_force_compression(self, arguments: dict[str, Any]) -> str:
+        conv_id = self._resolve_conversation_id(arguments.get("_conversation_id"))
+        if self._backend is None:
+            return "Cannot compress — AI backend is not available."
+        messages = await self._load_conversation(conv_id)
+        if len(messages) < 4:
+            return "Not enough messages to compress (need at least 4)."
+
+        await self._maybe_compress_history(messages, conv_id, force=True)
+
+        state = await self.get_conversation_state(_COMPRESSION_STATE_KEY, conv_id)
+        if isinstance(state, dict) and state.get("summary"):
+            compressed_up_to = state.get("compressed_up_to", 0)
+            remaining = len(messages) - compressed_up_to
+            return (
+                f"Compressed {compressed_up_to} of {len(messages)} messages "
+                f"into a {len(state['summary']):,}-character summary. "
+                f"{remaining} recent messages kept verbatim."
+            )
+        return "Compression failed — check the logs for details."
 
     # --- Persona tool handlers ---
 
