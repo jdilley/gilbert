@@ -17,6 +17,7 @@ members = [
     "gilbert-plugin-google",
     "gilbert-plugin-groq",
     "gilbert-plugin-guess-that-song",
+    "gilbert-plugin-mistral",
     "gilbert-plugin-ngrok",
     "gilbert-plugin-openai",
     "gilbert-plugin-qwen",
@@ -870,6 +871,7 @@ dependencies = [
     { name = "gilbert-plugin-google" },
     { name = "gilbert-plugin-groq" },
     { name = "gilbert-plugin-guess-that-song" },
+    { name = "gilbert-plugin-mistral" },
     { name = "gilbert-plugin-ngrok" },
     { name = "gilbert-plugin-openai" },
     { name = "gilbert-plugin-qwen" },
@@ -927,6 +929,7 @@ requires-dist = [
     { name = "gilbert-plugin-google", virtual = "std-plugins/google" },
     { name = "gilbert-plugin-groq", virtual = "std-plugins/groq" },
     { name = "gilbert-plugin-guess-that-song", virtual = "std-plugins/guess-that-song" },
+    { name = "gilbert-plugin-mistral", virtual = "std-plugins/mistral" },
     { name = "gilbert-plugin-ngrok", virtual = "std-plugins/ngrok" },
     { name = "gilbert-plugin-openai", virtual = "std-plugins/openai" },
     { name = "gilbert-plugin-qwen", virtual = "std-plugins/qwen" },
@@ -1017,6 +1020,11 @@ source = { virtual = "std-plugins/groq" }
 name = "gilbert-plugin-guess-that-song"
 version = "1.0.0"
 source = { virtual = "std-plugins/guess-that-song" }
+
+[[package]]
+name = "gilbert-plugin-mistral"
+version = "1.0.0"
+source = { virtual = "std-plugins/mistral" }
 
 [[package]]
 name = "gilbert-plugin-ngrok"

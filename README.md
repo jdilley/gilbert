@@ -127,6 +127,7 @@ AIBackend            →  anthropic plugin → AnthropicAI (Claude)
                         qwen plugin      → QwenAI (Alibaba DashScope)
                         deepseek plugin  → DeepSeekAI (V3 + R1)
                         groq plugin      → GroqAI (Llama/Qwen/Mixtral on LPUs)
+                        mistral plugin   → MistralAI (La Plateforme)
 VisionBackend        →  anthropic plugin → AnthropicVision
 TTSBackend           →  elevenlabs plugin → ElevenLabsTTS
 SpeakerBackend       →  sonos plugin → SonosSpeaker
