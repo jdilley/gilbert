@@ -47,6 +47,7 @@ dependencies = [
     "gilbert-plugin-tavily",
     "gilbert-plugin-tesseract",
     "gilbert-plugin-unifi",
+    "gilbert-plugin-xai",
     "mcp>=1.2.0",
 ]
 
@@ -67,6 +68,7 @@ gilbert-plugin-sonos = { workspace = true }
 gilbert-plugin-tavily = { workspace = true }
 gilbert-plugin-tesseract = { workspace = true }
 gilbert-plugin-unifi = { workspace = true }
+gilbert-plugin-xai = { workspace = true }
 
 [project.optional-dependencies]
 dev = [

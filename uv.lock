@@ -26,6 +26,7 @@ members = [
     "gilbert-plugin-tavily",
     "gilbert-plugin-tesseract",
     "gilbert-plugin-unifi",
+    "gilbert-plugin-xai",
 ]
 overrides = [{ name = "onnxruntime", specifier = "<1.21" }]
 
@@ -880,6 +881,7 @@ dependencies = [
     { name = "gilbert-plugin-tavily" },
     { name = "gilbert-plugin-tesseract" },
     { name = "gilbert-plugin-unifi" },
+    { name = "gilbert-plugin-xai" },
     { name = "httpx" },
     { name = "markdown" },
     { name = "mcp" },
@@ -938,6 +940,7 @@ requires-dist = [
     { name = "gilbert-plugin-tavily", virtual = "std-plugins/tavily" },
     { name = "gilbert-plugin-tesseract", virtual = "std-plugins/tesseract" },
     { name = "gilbert-plugin-unifi", virtual = "std-plugins/unifi" },
+    { name = "gilbert-plugin-xai", virtual = "std-plugins/xai" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "markdown", specifier = ">=3.5" },
     { name = "mcp", specifier = ">=1.2.0" },
@@ -1089,6 +1092,11 @@ requires-dist = [{ name = "pytesseract", specifier = ">=0.3.13" }]
 name = "gilbert-plugin-unifi"
 version = "1.0.0"
 source = { virtual = "std-plugins/unifi" }
+
+[[package]]
+name = "gilbert-plugin-xai"
+version = "1.0.0"
+source = { virtual = "std-plugins/xai" }
 
 [[package]]
 name = "google-api-core"
