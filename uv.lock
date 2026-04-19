@@ -12,6 +12,7 @@ members = [
     "gilbert",
     "gilbert-plugin-anthropic",
     "gilbert-plugin-arr",
+    "gilbert-plugin-deepseek",
     "gilbert-plugin-elevenlabs",
     "gilbert-plugin-google",
     "gilbert-plugin-guess-that-song",
@@ -863,6 +864,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "gilbert-plugin-anthropic" },
     { name = "gilbert-plugin-arr" },
+    { name = "gilbert-plugin-deepseek" },
     { name = "gilbert-plugin-elevenlabs" },
     { name = "gilbert-plugin-google" },
     { name = "gilbert-plugin-guess-that-song" },
@@ -918,6 +920,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.135.3" },
     { name = "gilbert-plugin-anthropic", virtual = "std-plugins/anthropic" },
     { name = "gilbert-plugin-arr", virtual = "std-plugins/arr" },
+    { name = "gilbert-plugin-deepseek", virtual = "std-plugins/deepseek" },
     { name = "gilbert-plugin-elevenlabs", virtual = "std-plugins/elevenlabs" },
     { name = "gilbert-plugin-google", virtual = "std-plugins/google" },
     { name = "gilbert-plugin-guess-that-song", virtual = "std-plugins/guess-that-song" },
@@ -976,6 +979,11 @@ requires-dist = [{ name = "anthropic", specifier = ">=0.89.0" }]
 name = "gilbert-plugin-arr"
 version = "1.0.0"
 source = { virtual = "std-plugins/arr" }
+
+[[package]]
+name = "gilbert-plugin-deepseek"
+version = "1.0.0"
+source = { virtual = "std-plugins/deepseek" }
 
 [[package]]
 name = "gilbert-plugin-elevenlabs"

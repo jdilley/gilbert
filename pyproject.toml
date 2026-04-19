@@ -33,6 +33,7 @@ dependencies = [
     # shared venv, so users don't have to remember ``--all-packages``.
     "gilbert-plugin-anthropic",
     "gilbert-plugin-arr",
+    "gilbert-plugin-deepseek",
     "gilbert-plugin-elevenlabs",
     "gilbert-plugin-google",
     "gilbert-plugin-guess-that-song",
@@ -50,6 +51,7 @@ dependencies = [
 [tool.uv.sources]
 gilbert-plugin-anthropic = { workspace = true }
 gilbert-plugin-arr = { workspace = true }
+gilbert-plugin-deepseek = { workspace = true }
 gilbert-plugin-elevenlabs = { workspace = true }
 gilbert-plugin-google = { workspace = true }
 gilbert-plugin-guess-that-song = { workspace = true }
