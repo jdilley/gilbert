@@ -20,6 +20,7 @@ members = [
     "gilbert-plugin-mistral",
     "gilbert-plugin-ngrok",
     "gilbert-plugin-openai",
+    "gilbert-plugin-openrouter",
     "gilbert-plugin-qwen",
     "gilbert-plugin-slack",
     "gilbert-plugin-sonos",
@@ -875,6 +876,7 @@ dependencies = [
     { name = "gilbert-plugin-mistral" },
     { name = "gilbert-plugin-ngrok" },
     { name = "gilbert-plugin-openai" },
+    { name = "gilbert-plugin-openrouter" },
     { name = "gilbert-plugin-qwen" },
     { name = "gilbert-plugin-slack" },
     { name = "gilbert-plugin-sonos" },
@@ -934,6 +936,7 @@ requires-dist = [
     { name = "gilbert-plugin-mistral", virtual = "std-plugins/mistral" },
     { name = "gilbert-plugin-ngrok", virtual = "std-plugins/ngrok" },
     { name = "gilbert-plugin-openai", virtual = "std-plugins/openai" },
+    { name = "gilbert-plugin-openrouter", virtual = "std-plugins/openrouter" },
     { name = "gilbert-plugin-qwen", virtual = "std-plugins/qwen" },
     { name = "gilbert-plugin-slack", virtual = "std-plugins/slack" },
     { name = "gilbert-plugin-sonos", virtual = "std-plugins/sonos" },
@@ -1044,6 +1047,11 @@ requires-dist = [{ name = "pyngrok", specifier = ">=8.0.0" }]
 name = "gilbert-plugin-openai"
 version = "1.0.0"
 source = { virtual = "std-plugins/openai" }
+
+[[package]]
+name = "gilbert-plugin-openrouter"
+version = "1.0.0"
+source = { virtual = "std-plugins/openrouter" }
 
 [[package]]
 name = "gilbert-plugin-qwen"
