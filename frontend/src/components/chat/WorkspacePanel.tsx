@@ -21,6 +21,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { useWsApi } from "@/hooks/useWsApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { FileViewerModal } from "./FileViewer";
 import type { WorkspaceFile } from "@/types/workspace";
 
 interface WorkspacePanelProps {
@@ -72,12 +73,14 @@ function base64ToArrayBuffer(b64: string): ArrayBuffer {
 function FileRow({
   file,
   allFiles,
+  onView,
   onDownload,
   onPin,
   onDelete,
 }: {
   file: WorkspaceFile;
   allFiles: WorkspaceFile[];
+  onView: (file: WorkspaceFile) => void;
   onDownload: (file: WorkspaceFile) => void;
   onPin: (file: WorkspaceFile) => void;
   onDelete: (file: WorkspaceFile) => void;
@@ -89,7 +92,10 @@ function FileRow({
     : null;
 
   return (
-    <div className="group rounded-md px-2 py-1.5 hover:bg-muted/50 transition-colors">
+    <div
+      className="group rounded-md px-2 py-1.5 hover:bg-muted/50 transition-colors cursor-pointer"
+      onClick={() => onView(file)}
+    >
       <div className="flex items-start gap-2">
         {fileIcon(file.media_type)}
         <div className="flex-1 min-w-0">
@@ -181,6 +187,7 @@ function FileSection({
   files,
   allFiles,
   defaultOpen,
+  onView,
   onDownload,
   onPin,
   onDelete,
@@ -190,6 +197,7 @@ function FileSection({
   files: WorkspaceFile[];
   allFiles: WorkspaceFile[];
   defaultOpen: boolean;
+  onView: (file: WorkspaceFile) => void;
   onDownload: (file: WorkspaceFile) => void;
   onPin: (file: WorkspaceFile) => void;
   onDelete: (file: WorkspaceFile) => void;
@@ -221,6 +229,7 @@ function FileSection({
               key={file._id}
               file={file}
               allFiles={allFiles}
+              onView={onView}
               onDownload={onDownload}
               onPin={onPin}
               onDelete={onDelete}
@@ -321,6 +330,12 @@ export function WorkspacePanelContent({ conversationId }: WorkspacePanelProps) {
     }
   }, [api, loadFiles]);
 
+  const [viewerFile, setViewerFile] = useState<WorkspaceFile | null>(null);
+
+  const handleView = useCallback((file: WorkspaceFile) => {
+    setViewerFile(file);
+  }, []);
+
   const hasFiles = uploads.length > 0 || outputs.length > 0 || scratch.length > 0;
 
   return (
@@ -352,6 +367,7 @@ export function WorkspacePanelContent({ conversationId }: WorkspacePanelProps) {
               files={uploads}
               allFiles={allFiles}
               defaultOpen={true}
+              onView={handleView}
               onDownload={handleDownload}
               onPin={handlePin}
               onDelete={handleDelete}
@@ -362,6 +378,7 @@ export function WorkspacePanelContent({ conversationId }: WorkspacePanelProps) {
               files={outputs}
               allFiles={allFiles}
               defaultOpen={true}
+              onView={handleView}
               onDownload={handleDownload}
               onPin={handlePin}
               onDelete={handleDelete}
@@ -372,6 +389,7 @@ export function WorkspacePanelContent({ conversationId }: WorkspacePanelProps) {
               files={scratch}
               allFiles={allFiles}
               defaultOpen={false}
+              onView={handleView}
               onDownload={handleDownload}
               onPin={handlePin}
               onDelete={handleDelete}
@@ -379,6 +397,16 @@ export function WorkspacePanelContent({ conversationId }: WorkspacePanelProps) {
           </div>
         )}
       </div>
+
+      {conversationId && (
+        <FileViewerModal
+          open={viewerFile !== null}
+          onClose={() => setViewerFile(null)}
+          files={allFiles}
+          initialFile={viewerFile ?? undefined}
+          conversationId={conversationId}
+        />
+      )}
     </ScrollArea>
   );
 }
