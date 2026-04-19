@@ -16,6 +16,7 @@ members = [
     "gilbert-plugin-google",
     "gilbert-plugin-guess-that-song",
     "gilbert-plugin-ngrok",
+    "gilbert-plugin-openai",
     "gilbert-plugin-slack",
     "gilbert-plugin-sonos",
     "gilbert-plugin-tavily",
@@ -865,6 +866,7 @@ dependencies = [
     { name = "gilbert-plugin-google" },
     { name = "gilbert-plugin-guess-that-song" },
     { name = "gilbert-plugin-ngrok" },
+    { name = "gilbert-plugin-openai" },
     { name = "gilbert-plugin-slack" },
     { name = "gilbert-plugin-sonos" },
     { name = "gilbert-plugin-tavily" },
@@ -918,6 +920,7 @@ requires-dist = [
     { name = "gilbert-plugin-google", virtual = "std-plugins/google" },
     { name = "gilbert-plugin-guess-that-song", virtual = "std-plugins/guess-that-song" },
     { name = "gilbert-plugin-ngrok", virtual = "std-plugins/ngrok" },
+    { name = "gilbert-plugin-openai", virtual = "std-plugins/openai" },
     { name = "gilbert-plugin-slack", virtual = "std-plugins/slack" },
     { name = "gilbert-plugin-sonos", virtual = "std-plugins/sonos" },
     { name = "gilbert-plugin-tavily", virtual = "std-plugins/tavily" },
@@ -1006,6 +1009,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "pyngrok", specifier = ">=8.0.0" }]
+
+[[package]]
+name = "gilbert-plugin-openai"
+version = "1.0.0"
+source = { virtual = "std-plugins/openai" }
 
 [[package]]
 name = "gilbert-plugin-slack"

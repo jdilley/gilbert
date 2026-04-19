@@ -1,7 +1,7 @@
 # AI Service
 
 ## Summary
-Central AI service that orchestrates conversations with tool use. Uses the AIBackend ABC + backend registry pattern. Currently uses Anthropic Claude via direct httpx calls (both the non-streaming `generate()` path for tests/simple callers and an SSE streaming `generate_stream()` path). Includes internal helpers for persona and user memory (previously separate services).
+Central AI service that orchestrates conversations with tool use. Uses the AIBackend ABC + backend registry pattern. Ships with two first-party backends — Anthropic Claude (`std-plugins/anthropic`) and OpenAI GPT (`std-plugins/openai`) — both speaking their respective HTTP APIs directly via httpx, with real SSE streaming and user-side multimodal attachments. Includes internal helpers for persona and user memory (previously separate services).
 
 ## Details
 
@@ -12,6 +12,7 @@ Central AI service that orchestrates conversations with tool use. Uses the AIBac
 - **`interfaces/ui.py`** — `ToolOutput` (text + ui_blocks + attachments)
 - **`core/services/ai.py`** — `AIService(Service)` — the orchestrator, plus `_PersonaHelper` and `_MemoryHelper`
 - **`std-plugins/anthropic/anthropic_ai.py`** — `AnthropicAI(AIBackend)` — Claude via httpx (lives in the `anthropic` std-plugin, not in core)
+- **`std-plugins/openai/openai_ai.py`** — `OpenAIAI(AIBackend)` — GPT via httpx (lives in the `openai` std-plugin, not in core). Talks Chat Completions; uses `max_completion_tokens` so it works for both classic and `o`-series reasoning models; omits `temperature` for `o1`/`o3` since those models reject non-default sampling. Image attachments ride as `image_url` content parts; PDFs become workspace-tool text stubs.
 
 ### AIService
 - **Capabilities:** `ai_chat`, `ai_tools`, `ws_handlers`, `persona`, `user_memory`

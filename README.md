@@ -123,6 +123,7 @@ Every component in Gilbert is defined as a Python ABC (abstract base class) with
 Interface (core)     →  Implementation (plugin)
 ────────────────────────────────────────────────
 AIBackend            →  anthropic plugin → AnthropicAI (Claude)
+                        openai plugin    → OpenAIAI (GPT)
 VisionBackend        →  anthropic plugin → AnthropicVision
 TTSBackend           →  elevenlabs plugin → ElevenLabsTTS
 SpeakerBackend       →  sonos plugin → SonosSpeaker
@@ -236,6 +237,7 @@ Every third-party integration is a plugin in the [gilbert-plugins](https://githu
 | **google** | OAuth login, Workspace directory sync, Gmail backend, Google Drive documents |
 | **guess-that-song** | Multiplayer music guessing game managed by the AI |
 | **ngrok** | Public HTTPS tunnel for OAuth callbacks and webhooks |
+| **openai** | OpenAI GPT chat backend (configure alongside or instead of anthropic) |
 | **slack** | Socket Mode bot bridging Slack DMs/mentions to the AI service |
 | **sonos** | Sonos speaker control and Sonos-linked music service access |
 | **tavily** | Web search backend with AI-generated summaries |
