@@ -44,6 +44,33 @@ _DEFAULT_SHARE_TTL_SECONDS = 24 * 60 * 60  # 24 hours
 _MAX_SHARE_MAX_ACCESSES = 1000
 _MAX_SHARE_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
+# UPnP consumers (Sonos especially) whitelist canonical audio MIME types
+# and trip error 714 "Illegal MIME-Type" on the ``audio/x-*`` experimental
+# prefix Python's ``mimetypes`` returns by default. Normalize to the
+# widely-accepted forms at both share-create and share-serve time.
+_MEDIA_TYPE_ALIASES = {
+    "audio/x-wav": "audio/wav",
+    "audio/wave": "audio/wav",
+    "audio/vnd.wave": "audio/wav",
+    "audio/mp3": "audio/mpeg",
+    "audio/x-mpeg": "audio/mpeg",
+    "audio/x-mpeg-3": "audio/mpeg",
+    "audio/x-flac": "audio/flac",
+    "audio/x-aac": "audio/aac",
+    "audio/x-m4a": "audio/mp4",
+    "audio/x-ogg": "audio/ogg",
+}
+
+
+def _normalize_media_type(media_type: str) -> str:
+    """Fold experimental / vendor-prefix audio MIME types into the
+    canonical forms HTTP consumers (Sonos, DLNA devices, browsers'
+    native <audio>) actually whitelist."""
+    if not media_type:
+        return "application/octet-stream"
+    mt = media_type.strip().lower()
+    return _MEDIA_TYPE_ALIASES.get(mt, media_type)
+
 
 async def _to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
     loop = asyncio.get_running_loop()
@@ -404,6 +431,10 @@ class WorkspaceService(Service, ToolProvider, WsHandlerProvider):
             )
             size = target.stat().st_size
 
+        # Canonicalize the MIME type so downstream UPnP consumers don't
+        # reject the stream with error 714 "Illegal MIME-Type".
+        media_type = _normalize_media_type(media_type)
+
         # Resolve the outbound URL. Local (default) builds a LAN URL;
         # tunnel builds a tunnel URL and errors if the tunnel isn't up.
         if via_tunnel:
@@ -503,7 +534,12 @@ class WorkspaceService(Service, ToolProvider, WsHandlerProvider):
         user_id = str(record.get("user_id") or "")
         conv_id = str(record.get("conversation_id") or "")
         rel_path = str(record.get("rel_path") or "")
-        media_type = str(record.get("media_type") or "application/octet-stream")
+        # Re-normalize on the way out too — records written before the
+        # normalizer existed would otherwise keep serving ``audio/x-wav``
+        # until they expire.
+        media_type = _normalize_media_type(
+            str(record.get("media_type") or "application/octet-stream")
+        )
 
         target, err = self._resolve_file_path(user_id, rel_path, conv_id)
         if err is not None or target is None or not target.is_file():

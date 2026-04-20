@@ -22,6 +22,7 @@ import pytest
 from gilbert.core.services.workspace import (
     _WORKSPACE_SHARES_COLLECTION,
     WorkspaceService,
+    _normalize_media_type,
 )
 from gilbert.interfaces.service import ServiceResolver
 from gilbert.interfaces.storage import StorageProvider
@@ -421,3 +422,99 @@ async def test_tool_share_workspace_file_surfaces_value_errors(
     parsed = json.loads(result)
     assert "error" in parsed
     assert "not found" in parsed["error"].lower()
+
+
+# --- Media type normalization ---
+#
+# Regression coverage for the UPnP error 714 "Illegal MIME-Type" failure
+# a real Sonos Amp tripped on when we served ``audio/x-wav`` — the
+# Python mimetypes default — for a workspace WAV. Sonos whitelists
+# ``audio/wav`` but not the ``x-*`` experimental prefix.
+
+
+def test_normalize_media_type_wav_variants_canonicalize() -> None:
+    assert _normalize_media_type("audio/x-wav") == "audio/wav"
+    assert _normalize_media_type("audio/wave") == "audio/wav"
+    assert _normalize_media_type("audio/vnd.wave") == "audio/wav"
+    # Case insensitive on the input side.
+    assert _normalize_media_type("AUDIO/X-WAV") == "audio/wav"
+
+
+def test_normalize_media_type_mp3_variants_canonicalize() -> None:
+    assert _normalize_media_type("audio/mp3") == "audio/mpeg"
+    assert _normalize_media_type("audio/x-mpeg") == "audio/mpeg"
+    assert _normalize_media_type("audio/x-mpeg-3") == "audio/mpeg"
+    # Already canonical → passthrough.
+    assert _normalize_media_type("audio/mpeg") == "audio/mpeg"
+
+
+def test_normalize_media_type_passthrough_for_unknown() -> None:
+    assert _normalize_media_type("image/png") == "image/png"
+    assert _normalize_media_type("video/mp4") == "video/mp4"
+    assert _normalize_media_type("") == "application/octet-stream"
+
+
+async def test_share_wav_record_stores_canonical_media_type(
+    service: WorkspaceService, sqlite_storage: SQLiteStorage
+) -> None:
+    """WAV files land in the record as ``audio/wav``, not ``audio/x-wav``.
+
+    Both ends of the share lifecycle need to produce canonical types:
+    if either slips ``audio/x-wav`` through, Sonos Amp bails with UPnP
+    error 714 before playing a single byte."""
+    _write_workspace_file(service, "u1", "c1", "outputs/fart.wav", b"RIFFfake")
+    share = await service.create_file_share(
+        user_id="u1",
+        conversation_id="c1",
+        rel_path="outputs/fart.wav",
+    )
+    assert share["media_type"] == "audio/wav"
+
+    from gilbert.interfaces.storage import Filter, FilterOp, Query
+
+    records = await sqlite_storage.query(
+        Query(
+            collection=_WORKSPACE_SHARES_COLLECTION,
+            filters=[
+                Filter(field="token", op=FilterOp.EQ, value=share["token"])
+            ],
+        )
+    )
+    assert records[0]["media_type"] == "audio/wav"
+
+
+async def test_consume_renormalizes_legacy_record(
+    service: WorkspaceService, sqlite_storage: SQLiteStorage
+) -> None:
+    """Records written before the normalizer existed (or by a stale
+    process) still serve canonical types on consume. Without this,
+    shares minted pre-fix would keep returning ``audio/x-wav`` until
+    they expired."""
+    _write_workspace_file(service, "u1", "c1", "outputs/legacy.wav", b"RIFFfake")
+    share = await service.create_file_share(
+        user_id="u1",
+        conversation_id="c1",
+        rel_path="outputs/legacy.wav",
+    )
+
+    # Rewrite the stored record with the pre-fix media type.
+    from gilbert.interfaces.storage import Filter, FilterOp, Query
+
+    records = await sqlite_storage.query(
+        Query(
+            collection=_WORKSPACE_SHARES_COLLECTION,
+            filters=[
+                Filter(field="token", op=FilterOp.EQ, value=share["token"])
+            ],
+        )
+    )
+    record = dict(records[0])
+    record["media_type"] = "audio/x-wav"
+    await sqlite_storage.put(
+        _WORKSPACE_SHARES_COLLECTION, records[0]["_id"], record
+    )
+
+    resolved = await service.consume_file_share(share["token"])
+    assert resolved is not None
+    _path, media_type, _filename = resolved
+    assert media_type == "audio/wav"
