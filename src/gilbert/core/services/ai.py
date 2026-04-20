@@ -1563,7 +1563,7 @@ class AIService(Service):
         ai_call: str | None = None,
         attachments: list[FileAttachment] | None = None,
         model: str = "",
-        backend: str = "",
+        backend_override: str = "",
         ai_profile: str = "",
     ) -> ChatTurnResult:
         """Send a user message and get an AI response (with full agentic loop).
@@ -1677,8 +1677,9 @@ class AIService(Service):
 
         # Resolve backend + model from profile and overrides
         resolved_backend, resolved_model = self._resolve_backend_and_model(
-            profile, backend, model
+            profile, backend_override, model
         )
+        resolved_backend_name = resolved_backend.backend_name
 
         # Discover and filter tools based on profile
         tools_by_name = self._discover_tools(user_ctx=user_ctx, profile=profile)
@@ -1885,7 +1886,7 @@ class AIService(Service):
                     user_ctx=user_ctx,
                     conversation_id=conversation_id,
                     profile=profile,
-                    backend_name=backend.backend_name,  # type: ignore[attr-defined]
+                    backend_name=resolved_backend_name,
                     round_num=round_num,
                     turn_totals=turn_usage_totals,
                     invocation_source=invocation_source,
@@ -4770,7 +4771,7 @@ class AIService(Service):
                         ai_profile=self._chat_profile,
                         attachments=attachments,
                         model=frame_model,
-                        backend=frame_backend,
+                        backend_override=frame_backend,
                     )
                     response_text = turn_result.response_text
                     conv_id = turn_result.conversation_id
@@ -4821,7 +4822,7 @@ class AIService(Service):
                     ai_profile=self._chat_profile,
                     attachments=attachments,
                     model=frame_model,
-                    backend=frame_backend,
+                    backend_override=frame_backend,
                 )
                 response_text = turn_result.response_text
                 conv_id = turn_result.conversation_id

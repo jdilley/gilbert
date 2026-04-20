@@ -111,6 +111,7 @@ Out of the box — once the `std-plugins` submodule is initialized — Gilbert p
 - **MCP (Model Context Protocol)** — Gilbert is both an **MCP client** (connect to external MCP servers, per-server RBAC, OAuth 2.1 support, stdio + streamable HTTP + SSE transports, with the external tools merged into Gilbert's own AI pipeline) and an **MCP server** (expose Gilbert's own tools to external agents like Claude Desktop or Cursor over a bearer-authenticated endpoint at `/api/mcp`, with per-client owner identity and AI profile filtering).
 - **Remote screens** — push content (PDFs, images, HTML) to browser-based displays via SSE (core).
 - **Personalized greetings, Radio DJ, roasts, scheduled jobs, RBAC, interactive tool forms** — all core services.
+- **AI usage reporting** — every AI round's token consumption (input / output / cache creation / cache read) and USD cost is recorded to the `ai_token_usage` entity collection. Per-round and per-turn totals render inline in chat; an admin-only `/usage` page groups by user / backend / model / profile / tool / date with filterable bar and area charts.
 - **Plugin system** — add runtime integrations from any GitHub URL via `/plugin install`, with automatic dependency resolution through the uv workspace. Plugins that need new Python packages trigger a supervised restart; plugins without extra deps hot-load immediately.
 
 ## Architecture
@@ -303,7 +304,7 @@ Uninstall with `/plugin uninstall <name>`; list with `/plugin list`.
 
 ## Web UI
 
-Gilbert includes a React SPA with pages for chat, inbox, MCP administration, security (users / roles / tool permissions / AI profiles / collection ACLs / event visibility / RPC permissions), and system operations (settings / scheduler / entity browser / plugins / service inspector). **All data operations use the WebSocket protocol** — the only HTTP endpoints are authentication (OAuth callbacks, login), the raw ASGI MCP endpoint (`/api/mcp`), and static file serving. The SPA connects to `/ws/events` on load and communicates exclusively via typed RPC frames.
+Gilbert includes a React SPA with pages for chat, inbox, MCP administration, security (users / roles / tool permissions / AI profiles / collection ACLs / event visibility / RPC permissions), and system operations (settings / scheduler / entity browser / plugins / service inspector / AI usage reporting). **All data operations use the WebSocket protocol** — the only HTTP endpoints are authentication (OAuth callbacks, login), the raw ASGI MCP endpoint (`/api/mcp`), and static file serving. The SPA connects to `/ws/events` on load and communicates exclusively via typed RPC frames.
 
 Top-level navigation is organized into dropdown groups (Chat · Inbox · MCP · Security · System) that render as a horizontal nav on desktop and a drawer on mobile. Menu items are filtered per-user by the `dashboard.get` RPC so users only see what they can actually access — e.g. non-admins don't see Security or System at all, and users without the `mcp_server` capability enabled don't see **MCP → Clients**. Clicking a parent group lands on its default child (Users for Security, Settings for System, Servers for MCP).
 

@@ -444,10 +444,17 @@ class AIProvider(Protocol):
         ai_call: str | None = None,
         attachments: list[FileAttachment] | None = None,
         model: str = "",
-        backend: str = "",
+        backend_override: str = "",
         ai_profile: str = "",
     ) -> ChatTurnResult:
-        """Run a full AI chat turn. See ``ChatTurnResult`` for the shape."""
+        """Run a full AI chat turn. See ``ChatTurnResult`` for the shape.
+
+        ``backend_override`` forces a specific backend name (e.g.
+        ``"anthropic"``); empty string means "resolve from profile or
+        fall through to default". The distinct name keeps the method
+        body free of shadowing between the external-facing string and
+        the internal resolved ``AIBackend`` instance.
+        """
         ...
 
 

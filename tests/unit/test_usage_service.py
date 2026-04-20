@@ -279,15 +279,25 @@ async def test_record_round_writes_entity(
     assert row["date"] == row["timestamp"][:10]
 
 
-async def test_record_round_never_raises_on_storage_failure(
-    service: UsageService,
-) -> None:
-    # Force put() to blow up
-    async def boom(*args: Any, **kwargs: Any) -> None:
-        raise RuntimeError("disk full")
+async def test_record_round_never_raises_on_storage_failure() -> None:
+    # Back the service with a storage that raises on every put — verifies
+    # the AI-loop-protection path that swallows + logs failures.
+    class _RaisingStorage(_StubStorage):
+        async def put(
+            self,
+            collection: str,
+            entity_id: str,
+            data: dict[str, Any],
+        ) -> None:
+            raise RuntimeError("disk full")
 
-    service._storage.put = boom  # type: ignore[method-assign]
-    # Must not raise — the AI loop can't tolerate recording failures
+    storage_svc = StorageService(_RaisingStorage())
+    resolver = AsyncMock(spec=ServiceResolver)
+    resolver.require_capability.return_value = storage_svc
+    resolver.get_capability.return_value = None
+    service = UsageService()
+    await service.start(resolver)
+
     record = await service.record_round(
         user_ctx=_ctx(),
         conversation_id="c1",
@@ -376,25 +386,29 @@ async def test_query_usage_filter_by_tool_name(service: UsageService) -> None:
     assert len(rows) == 2
 
 
-async def test_query_usage_group_by_date(service: UsageService) -> None:
-    # Two rounds on distinct synthetic dates
+async def test_query_usage_group_by_date(
+    service: UsageService,
+    storage: _StubStorage,
+) -> None:
+    # Two rounds on distinct synthetic dates. Seeding goes through the
+    # raw storage (prefixed with the StorageService namespace) so we can
+    # backdate timestamps — ``record_round`` always stamps ``now``.
     ns_col = f"gilbert.{USAGE_COLLECTION}"
     today = "2026-04-19"
     yesterday = "2026-04-18"
-    await service._storage.put(  # type: ignore[union-attr]
-        ns_col.replace("gilbert.", ""),  # StorageService already namespaces
-        "r1",
-        {
-            "timestamp": f"{today}T10:00:00+00:00",
-            "date": today,
+
+    def _row(day: str, input_tokens: int, output_tokens: int) -> dict[str, Any]:
+        return {
+            "timestamp": f"{day}T10:00:00+00:00",
+            "date": day,
             "user_id": "u1",
             "user_name": "U1",
             "conversation_id": "c",
             "profile": "standard",
             "backend": "anthropic",
             "model": "claude-opus-4-20250514",
-            "input_tokens": 100,
-            "output_tokens": 50,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
             "cache_creation_tokens": 0,
             "cache_read_tokens": 0,
             "cost_usd": 0.01,
@@ -402,31 +416,11 @@ async def test_query_usage_group_by_date(service: UsageService) -> None:
             "stop_reason": "end_turn",
             "round_num": 0,
             "invocation_source": "chat",
-        },
-    )
-    await service._storage.put(  # type: ignore[union-attr]
-        ns_col.replace("gilbert.", ""),
-        "r2",
-        {
-            "timestamp": f"{yesterday}T10:00:00+00:00",
-            "date": yesterday,
-            "user_id": "u1",
-            "user_name": "U1",
-            "conversation_id": "c",
-            "profile": "standard",
-            "backend": "anthropic",
-            "model": "claude-opus-4-20250514",
-            "input_tokens": 200,
-            "output_tokens": 100,
-            "cache_creation_tokens": 0,
-            "cache_read_tokens": 0,
-            "cost_usd": 0.02,
-            "tool_names": [],
-            "stop_reason": "end_turn",
-            "round_num": 0,
-            "invocation_source": "chat",
-        },
-    )
+        }
+
+    await storage.put(ns_col, "r1", _row(today, 100, 50))
+    await storage.put(ns_col, "r2", _row(yesterday, 200, 100))
+
     rows = await service.query_usage(UsageQuery(group_by=("date",)))
     by_date = {r.dimensions["date"]: r for r in rows}
     assert by_date[today].input_tokens == 100
