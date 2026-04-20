@@ -826,12 +826,10 @@ function CopyButton({
   const [copied, setCopied] = useState(false);
   const copy = async (e: React.MouseEvent) => {
     if (stopPropagation) e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(getText());
+    const ok = await writeClipboard(getText());
+    if (ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Insecure context, clipboard permission denied, etc. No-op.
     }
   };
   return (
@@ -852,6 +850,61 @@ function CopyButton({
       )}
     </button>
   );
+}
+
+/**
+ * Write ``text`` to the clipboard. Prefers the async Clipboard API
+ * when available; falls back to the legacy ``execCommand("copy")``
+ * via a hidden textarea for insecure contexts (http:// on LAN hosts,
+ * which is the common case for self-hosted Gilbert — ``navigator.clipboard``
+ * is ``undefined`` there on most browsers).
+ *
+ * Returns ``true`` when the copy succeeded, ``false`` when every path
+ * failed. Never throws.
+ */
+async function writeClipboard(text: string): Promise<boolean> {
+  // Modern API — only reachable in secure contexts (https:// or
+  // http://localhost). Guard on ``isSecureContext`` as well because
+  // some browsers expose ``navigator.clipboard`` but reject
+  // ``writeText`` on insecure origins.
+  if (
+    typeof navigator !== "undefined" &&
+    window.isSecureContext &&
+    navigator.clipboard?.writeText
+  ) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to the legacy path.
+    }
+  }
+  // Legacy fallback. ``execCommand("copy")`` is formally deprecated
+  // but still universally implemented — and it's the only thing that
+  // works over plain HTTP.
+  if (typeof document === "undefined") return false;
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    // Keep the textarea off-screen but in the DOM so ``select()`` and
+    // ``execCommand("copy")`` can act on it. ``readonly`` prevents the
+    // iOS keyboard from popping; ``position: fixed`` means no scroll
+    // jump.
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.top = "0";
+    textarea.style.left = "0";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    document.body.appendChild(textarea);
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 /**
