@@ -650,12 +650,25 @@ class SpeakerService(Service):
                 slash_group="speaker",
                 slash_command="play",
                 slash_help="Play a URI on speakers: /speaker play <uri> [speakers] [volume]",
-                description="Play audio from a URI on one or more speakers.",
+                description=(
+                    "Play audio from an HTTP(S) URI on one or more speakers. "
+                    "The speaker fetches the bytes over the network — it CANNOT "
+                    "read local file paths or workspace-relative paths. "
+                    "If you want to play a workspace file (something in "
+                    "``uploads/``, ``outputs/``, or ``scratch/``), first call "
+                    "``share_workspace_file`` to mint an HTTP URL for it, then "
+                    "pass that URL's ``url`` field here as ``uri``. Passing a "
+                    "raw path like ``uploads/song.mp3`` will fail."
+                ),
                 parameters=[
                     ToolParameter(
                         name="uri",
                         type=ToolParameterType.STRING,
-                        description="URI of the audio to play.",
+                        description=(
+                            "HTTP(S) URL of the audio to play. For workspace "
+                            "files, get a URL from ``share_workspace_file`` "
+                            "first — local paths will not work."
+                        ),
                     ),
                     ToolParameter(
                         name="speakers",

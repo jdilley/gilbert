@@ -13,12 +13,21 @@ from gilbert.interfaces.auth import UserContext
 # Exact matches checked first, then prefixes.
 # Paths that bypass authentication on local access.
 _PUBLIC_EXACT = ("/", "/auth/login", "/auth/logout", "/auth/session", "/screens")
-_PUBLIC_PREFIXES = ("/auth/login/", "/static/", "/output/", "/screens/")
+_PUBLIC_PREFIXES = ("/auth/login/", "/static/", "/output/", "/screens/", "/api/share/")
 
 # On tunnel access, only auth-related paths are public — everything else
-# requires an authenticated user with at least "user" role.
+# requires an authenticated user with at least "user" role. Share tokens
+# are bearer-like (the token *is* the auth) so ``/api/share/`` is public
+# over the tunnel too, otherwise ``share_workspace_file(via_tunnel=True)``
+# would produce URLs that immediately redirect to /auth/login.
 _TUNNEL_PUBLIC_EXACT = ("/auth/login", "/auth/logout", "/auth/session", "/screens")
-_TUNNEL_PUBLIC_PREFIXES = ("/auth/login/", "/static/", "/screens/stream", "/screens/tmp/")
+_TUNNEL_PUBLIC_PREFIXES = (
+    "/auth/login/",
+    "/static/",
+    "/screens/stream",
+    "/screens/tmp/",
+    "/api/share/",
+)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

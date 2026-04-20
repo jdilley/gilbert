@@ -33,8 +33,16 @@ logger = logging.getLogger(__name__)
 
 _READ_FILE_CAP = 1 * 1024 * 1024  # 1 MiB
 _WORKSPACE_FILES_COLLECTION = "workspace_files"
+_WORKSPACE_SHARES_COLLECTION = "workspace_file_shares"
 
 _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv"}
+
+# Share defaults (per brian@2026-04-19 product call — "24h TTL / 10 accesses
+# is generous enough for media links handed out in chat").
+_DEFAULT_SHARE_MAX_ACCESSES = 10
+_DEFAULT_SHARE_TTL_SECONDS = 24 * 60 * 60  # 24 hours
+_MAX_SHARE_MAX_ACCESSES = 1000
+_MAX_SHARE_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
 
 async def _to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
@@ -54,6 +62,12 @@ class WorkspaceService(Service, ToolProvider, WsHandlerProvider):
         self._resolver: ServiceResolver | None = None
         self._storage: Any = None
         self._event_bus: Any = None
+        # Captured from the ``web`` YAML section so share URLs can route
+        # back to this Gilbert instance over the LAN. ``0.0.0.0`` falls
+        # back to the auto-detected LAN IP when a URL actually gets
+        # built (same pattern as SpeakerService uses for TTS audio).
+        self._web_host: str = "0.0.0.0"
+        self._web_port: int = 8000
 
     # ── Service interface ────────────────────────────────────────────
 
@@ -62,7 +76,11 @@ class WorkspaceService(Service, ToolProvider, WsHandlerProvider):
             name="workspace",
             capabilities=frozenset({"workspace", "ai_tools", "ws_handlers"}),
             requires=frozenset({"entity_storage"}),
-            optional=frozenset({"event_bus"}),
+            # ``configuration`` is read for the web host/port used when
+            # building share URLs; ``scheduler`` hosts the hourly cleanup
+            # of exhausted/expired share tokens; ``tunnel`` is consulted
+            # when a caller asks for a publicly-reachable share URL.
+            optional=frozenset({"event_bus", "configuration", "scheduler", "tunnel"}),
         )
 
     async def start(self, resolver: ServiceResolver) -> None:
@@ -92,6 +110,54 @@ class WorkspaceService(Service, ToolProvider, WsHandlerProvider):
                     fields=["derived_from"],
                 )
             )
+            # Indexes for share-token lookup + expiry sweeps. ``token``
+            # is the hot lookup path (every share URL fetch hits it);
+            # ``expires_at`` powers the periodic cleanup query.
+            await self._storage.ensure_index(
+                IndexDefinition(
+                    collection=_WORKSPACE_SHARES_COLLECTION,
+                    fields=["token"],
+                )
+            )
+            await self._storage.ensure_index(
+                IndexDefinition(
+                    collection=_WORKSPACE_SHARES_COLLECTION,
+                    fields=["expires_at"],
+                )
+            )
+            await self._storage.ensure_index(
+                IndexDefinition(
+                    collection=_WORKSPACE_SHARES_COLLECTION,
+                    fields=["conversation_id"],
+                )
+            )
+
+        # Capture web host/port for building share URLs. The share endpoint
+        # lives on this same FastAPI app, so the URL is just
+        # ``http://<host>:<port>/api/share/<token>``.
+        config_svc = resolver.get_capability("configuration")
+        if config_svc is not None:
+            from gilbert.interfaces.configuration import ConfigurationReader
+
+            if isinstance(config_svc, ConfigurationReader):
+                web_section = config_svc.get_section("web")
+                self._web_host = str(web_section.get("host", "0.0.0.0"))
+                self._web_port = int(web_section.get("port", 8000))
+
+        # Hourly cleanup of exhausted/expired share tokens. Optional —
+        # works without the scheduler (shares just pile up until the
+        # 30-day-maximum TTL ages them out behaviourally).
+        scheduler = resolver.get_capability("scheduler")
+        if scheduler is not None and self._storage is not None:
+            from gilbert.interfaces.scheduler import Schedule, SchedulerProvider
+
+            if isinstance(scheduler, SchedulerProvider):
+                scheduler.add_job(
+                    name="workspace-share-cleanup",
+                    schedule=Schedule.every(60 * 60),
+                    callback=self._cleanup_file_shares,
+                    system=True,
+                )
 
         self._unsubscribe_conv_destroyed: Any = None
         event_bus_svc = resolver.get_capability("event_bus")
@@ -267,6 +333,307 @@ class WorkspaceService(Service, ToolProvider, WsHandlerProvider):
                 logger.exception(
                     "Failed to remove conversation workspace: %s", resolved
                 )
+
+    # ── Share tokens ─────────────────────────────────────────────────
+
+    async def create_file_share(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        rel_path: str,
+        max_accesses: int = _DEFAULT_SHARE_MAX_ACCESSES,
+        ttl_seconds: int = _DEFAULT_SHARE_TTL_SECONDS,
+        via_tunnel: bool = False,
+    ) -> dict[str, Any]:
+        """Mint a temporary URL that serves a workspace file over HTTP.
+
+        External consumers (speakers, SMS/MMS bridges, email attachments,
+        anything that needs a URL rather than a file path) fetch the URL;
+        the web layer streams bytes and decrements the access counter.
+        The token dies when ``max_accesses`` is exhausted or
+        ``ttl_seconds`` elapses, whichever comes first.
+
+        Returns ``{"url", "token", "expires_at", "max_accesses",
+        "remaining_uses", "via_tunnel", "file_id", "rel_path",
+        "media_type", "size"}``.
+
+        Raises ``ValueError`` when inputs are invalid, storage isn't
+        available, the file can't be resolved, or ``via_tunnel=True`` is
+        requested without a live tunnel.
+        """
+        import secrets
+        import uuid
+        from datetime import timedelta
+
+        if self._storage is None:
+            raise ValueError("storage is not available")
+        if not conversation_id:
+            raise ValueError("conversation_id is required")
+        if not rel_path:
+            raise ValueError("rel_path is required")
+
+        max_accesses = max(1, min(int(max_accesses), _MAX_SHARE_MAX_ACCESSES))
+        ttl_seconds = max(60, min(int(ttl_seconds), _MAX_SHARE_TTL_SECONDS))
+
+        # Resolve the path through the same safety path the other tools
+        # use — catches path traversal + missing-file before we mint.
+        target, err = self._resolve_file_path(user_id, rel_path, conversation_id)
+        if err is not None:
+            raise ValueError(err)
+        if target is None or not target.is_file():
+            raise ValueError(f"File not found: {rel_path}")
+
+        # Look up the registered file entity (for media_type + file_id).
+        # If the file isn't registered, fall back to mimetypes + a
+        # synthesized uuid so this still works for freshly-created
+        # scratch files that haven't been register_file'd yet.
+        file_entity = await self._find_registered_file(conversation_id, rel_path)
+        if file_entity:
+            file_id = str(file_entity.get("_id") or "")
+            media_type = str(
+                file_entity.get("media_type")
+                or mimetypes.guess_type(target.name)[0]
+                or "application/octet-stream"
+            )
+            size = int(file_entity.get("size") or target.stat().st_size)
+        else:
+            file_id = ""
+            media_type = (
+                mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+            )
+            size = target.stat().st_size
+
+        # Resolve the outbound URL. Local (default) builds a LAN URL;
+        # tunnel builds a tunnel URL and errors if the tunnel isn't up.
+        if via_tunnel:
+            tunnel_url = self._tunnel_base_url()
+            if not tunnel_url:
+                raise ValueError(
+                    "via_tunnel=true requires a running tunnel service with a "
+                    "public_url — none is available. Start the tunnel plugin "
+                    "(e.g. ngrok) or call with via_tunnel=false."
+                )
+            base = tunnel_url.rstrip("/")
+        else:
+            base = self._local_base_url()
+
+        token = secrets.token_urlsafe(32)
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=ttl_seconds)
+
+        record: dict[str, Any] = {
+            "token": token,
+            "conversation_id": conversation_id,
+            "user_id": user_id,
+            "file_id": file_id,
+            "rel_path": rel_path,
+            "media_type": media_type,
+            "size": size,
+            "max_accesses": max_accesses,
+            "remaining_uses": max_accesses,
+            "created_at": now.isoformat(),
+            "expires_at": expires_at.isoformat(),
+            "via_tunnel": bool(via_tunnel),
+        }
+        share_id = str(uuid.uuid4())
+        await self._storage.put(_WORKSPACE_SHARES_COLLECTION, share_id, record)
+
+        url = f"{base}/api/share/{token}"
+        return {
+            "url": url,
+            "token": token,
+            "expires_at": record["expires_at"],
+            "max_accesses": max_accesses,
+            "remaining_uses": max_accesses,
+            "via_tunnel": bool(via_tunnel),
+            "file_id": file_id,
+            "rel_path": rel_path,
+            "media_type": media_type,
+            "size": size,
+        }
+
+    async def consume_file_share(
+        self,
+        token: str,
+    ) -> tuple[Path, str, str] | None:
+        """Validate + consume a share token.
+
+        Returns ``(resolved_path, media_type, filename)`` on a successful
+        hit and decrements ``remaining_uses`` in storage. Returns
+        ``None`` when the token is unknown, expired, or exhausted — the
+        caller should 404 without differentiating (don't leak "exists
+        but exhausted" vs "never existed").
+        """
+        if self._storage is None or not token:
+            return None
+
+        from gilbert.interfaces.storage import Filter, FilterOp, Query
+
+        docs = await self._storage.query(
+            Query(
+                collection=_WORKSPACE_SHARES_COLLECTION,
+                filters=[Filter(field="token", op=FilterOp.EQ, value=token)],
+                limit=1,
+            )
+        )
+        if not docs:
+            return None
+        record = docs[0]
+        share_id = str(record.get("_id") or "")
+        if not share_id:
+            return None
+
+        # Expiry check — compare ISO strings after parsing.
+        expires_raw = str(record.get("expires_at") or "")
+        try:
+            expires_at = datetime.fromisoformat(expires_raw)
+        except ValueError:
+            expires_at = None
+        if expires_at is not None and expires_at <= datetime.now(UTC):
+            # Fire-and-forget cleanup — caller still 404s.
+            await self._storage.delete(_WORKSPACE_SHARES_COLLECTION, share_id)
+            return None
+
+        remaining = int(record.get("remaining_uses") or 0)
+        if remaining <= 0:
+            await self._storage.delete(_WORKSPACE_SHARES_COLLECTION, share_id)
+            return None
+
+        user_id = str(record.get("user_id") or "")
+        conv_id = str(record.get("conversation_id") or "")
+        rel_path = str(record.get("rel_path") or "")
+        media_type = str(record.get("media_type") or "application/octet-stream")
+
+        target, err = self._resolve_file_path(user_id, rel_path, conv_id)
+        if err is not None or target is None or not target.is_file():
+            await self._storage.delete(_WORKSPACE_SHARES_COLLECTION, share_id)
+            return None
+
+        # Atomically decrement. SQLite JSON storage is serialised per-
+        # connection so racing is unlikely, but we still read-modify-write
+        # through a single put so the "remaining reaches zero, delete"
+        # branch stays simple.
+        record["remaining_uses"] = remaining - 1
+        if record["remaining_uses"] <= 0:
+            await self._storage.delete(_WORKSPACE_SHARES_COLLECTION, share_id)
+        else:
+            await self._storage.put(
+                _WORKSPACE_SHARES_COLLECTION, share_id, record
+            )
+
+        return target, media_type, Path(rel_path).name
+
+    async def _cleanup_file_shares(self) -> None:
+        """Delete share records that have expired or run out of uses.
+
+        Runs hourly; the same check also happens lazily at consume time
+        so the cleanup is a floor on storage growth, not a safety rail."""
+        if self._storage is None:
+            return
+
+        from gilbert.interfaces.storage import Query
+
+        now_iso = datetime.now(UTC).isoformat()
+        try:
+            docs = await self._storage.query(
+                Query(collection=_WORKSPACE_SHARES_COLLECTION)
+            )
+        except Exception:
+            logger.exception("Failed to list workspace file shares for cleanup")
+            return
+
+        deleted = 0
+        for doc in docs:
+            share_id = str(doc.get("_id") or "")
+            if not share_id:
+                continue
+            expires = str(doc.get("expires_at") or "")
+            remaining = int(doc.get("remaining_uses") or 0)
+            if remaining <= 0 or (expires and expires <= now_iso):
+                try:
+                    await self._storage.delete(
+                        _WORKSPACE_SHARES_COLLECTION, share_id
+                    )
+                    deleted += 1
+                except Exception:
+                    logger.exception(
+                        "Failed to delete expired share %s", share_id
+                    )
+        if deleted:
+            logger.info(
+                "Cleaned up %d expired/exhausted workspace file share(s)", deleted
+            )
+
+    async def _find_registered_file(
+        self,
+        conversation_id: str,
+        rel_path: str,
+    ) -> dict[str, Any] | None:
+        """Best-effort lookup of the workspace_files entity for a rel_path."""
+        if self._storage is None:
+            return None
+        from gilbert.interfaces.storage import Filter, FilterOp, Query
+
+        try:
+            docs = await self._storage.query(
+                Query(
+                    collection=_WORKSPACE_FILES_COLLECTION,
+                    filters=[
+                        Filter(
+                            field="conversation_id",
+                            op=FilterOp.EQ,
+                            value=conversation_id,
+                        ),
+                        Filter(field="rel_path", op=FilterOp.EQ, value=rel_path),
+                    ],
+                    limit=1,
+                )
+            )
+        except Exception:
+            return None
+        return docs[0] if docs else None
+
+    def _local_base_url(self) -> str:
+        """Build the http://host:port prefix for local share URLs.
+
+        Mirrors SpeakerService's audio-URL logic — ``0.0.0.0`` / loopback
+        binds get replaced with the machine's LAN IP so external devices
+        (speakers, phones on the same Wi-Fi) can actually reach the
+        server."""
+        host = self._web_host
+        if host in ("0.0.0.0", "127.0.0.1", "localhost"):
+            host = self._get_lan_ip()
+        return f"http://{host}:{self._web_port}"
+
+    def _tunnel_base_url(self) -> str:
+        """Return the tunnel's public URL, or ``""`` if no tunnel is live."""
+        if self._resolver is None:
+            return ""
+        tunnel_svc = self._resolver.get_capability("tunnel")
+        if tunnel_svc is None:
+            return ""
+        from gilbert.interfaces.tunnel import TunnelProvider
+
+        if not isinstance(tunnel_svc, TunnelProvider):
+            return ""
+        return tunnel_svc.public_url or ""
+
+    @staticmethod
+    def _get_lan_ip() -> str:
+        """Discover the machine's LAN-facing IP.
+
+        Connects a UDP socket to 8.8.8.8 to force the OS to pick an
+        outbound interface; no packets are actually sent. Same trick
+        SpeakerService uses for TTS audio URLs."""
+        import socket
+
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                return str(s.getsockname()[0])
+        except OSError:
+            return "127.0.0.1"
 
     # ── File Registry ────────────────────────────────────────────────
 
@@ -544,6 +911,17 @@ class WorkspaceService(Service, ToolProvider, WsHandlerProvider):
             for i, f in enumerate(scratch):
                 parts.append(_format_file(f, f"S{i + 1}"))
 
+        # One-line proactive hint: external consumers (speakers, SMS,
+        # email attachments) can't read workspace paths. Without this
+        # nudge, the AI tries to pass ``uploads/foo.mp3`` to ``play_audio``
+        # and fails. Kept terse so it survives context-window pressure.
+        parts.append(
+            "\n_To hand any of these to an HTTP-only consumer (speakers, "
+            "SMS/MMS, email attachments, webhooks), first call "
+            "``share_workspace_file`` to mint a URL — don't pass raw "
+            "workspace paths as URIs._"
+        )
+
         return "\n".join(parts)
 
     # ── ToolProvider interface ───────────────────────────────────────
@@ -790,6 +1168,71 @@ class WorkspaceService(Service, ToolProvider, WsHandlerProvider):
                 ],
                 required_role="user",
             ),
+            ToolDefinition(
+                name="share_workspace_file",
+                slash_command="share",
+                slash_help=(
+                    "Mint a temporary HTTP URL for a workspace file: "
+                    "/workspace share <path> [max_accesses] [ttl_seconds]"
+                ),
+                description=(
+                    "Create a temporary HTTP URL that serves a workspace "
+                    "file to external consumers (speakers, SMS/MMS, email "
+                    "attachments, anything that needs a URL rather than a "
+                    "local path). The URL works until ``max_accesses`` is "
+                    "exhausted or ``ttl_seconds`` elapses, whichever comes "
+                    "first. Returns JSON with the URL and its metadata — "
+                    "pass the ``url`` field along to the service that "
+                    "needs it. USE THIS before asking the speaker service "
+                    "(or any HTTP-only consumer) to play a workspace file "
+                    "— they can't read local paths."
+                ),
+                parameters=[
+                    ToolParameter(
+                        name="path",
+                        type=ToolParameterType.STRING,
+                        description=(
+                            "Workspace-relative path to share "
+                            "(e.g. 'uploads/song.mp3', 'outputs/greeting.wav')."
+                        ),
+                    ),
+                    ToolParameter(
+                        name="max_accesses",
+                        type=ToolParameterType.INTEGER,
+                        description=(
+                            "Number of times the URL can be fetched before "
+                            "the token dies. Default 10."
+                        ),
+                        required=False,
+                        default=_DEFAULT_SHARE_MAX_ACCESSES,
+                    ),
+                    ToolParameter(
+                        name="ttl_seconds",
+                        type=ToolParameterType.INTEGER,
+                        description=(
+                            "Seconds until the URL expires even if it hasn't "
+                            "been fully consumed. Default 86400 (24h)."
+                        ),
+                        required=False,
+                        default=_DEFAULT_SHARE_TTL_SECONDS,
+                    ),
+                    ToolParameter(
+                        name="via_tunnel",
+                        type=ToolParameterType.BOOLEAN,
+                        description=(
+                            "If true, build the URL against the public "
+                            "tunnel (ngrok) so consumers outside the LAN "
+                            "can reach it. Requires the tunnel service "
+                            "to be running. Default false — the URL uses "
+                            "the LAN address and only works for clients "
+                            "on the same network as the Gilbert host."
+                        ),
+                        required=False,
+                        default=False,
+                    ),
+                ],
+                required_role="user",
+            ),
         ]
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> Any:
@@ -808,6 +1251,8 @@ class WorkspaceService(Service, ToolProvider, WsHandlerProvider):
                 return await self._tool_annotate_workspace_file(arguments)
             case "delete_workspace_file":
                 return await self._tool_delete_workspace_file(arguments)
+            case "share_workspace_file":
+                return await self._tool_share_workspace_file(arguments)
             # Legacy tool names — aliases for backward compat
             case "browse_skill_workspace":
                 return await self._tool_browse_workspace(arguments)
@@ -1551,6 +1996,57 @@ class WorkspaceService(Service, ToolProvider, WsHandlerProvider):
         return json.dumps(
             {"status": "deleted", "path": rel_path}
         )
+
+    async def _tool_share_workspace_file(
+        self, arguments: dict[str, Any]
+    ) -> str:
+        rel_path = str(arguments.get("path", "")).strip()
+        user_id = arguments.get("_user_id", "system")
+        conv_id = self._conv_id_from_args(arguments)
+
+        if not rel_path:
+            return json.dumps({"error": "path is required"})
+        if not conv_id:
+            return json.dumps({"error": "No conversation context"})
+
+        # Tool parameters arrive as their declared types after coercion,
+        # but defend against strings-coming-in-as-JSON too.
+        try:
+            max_accesses = int(
+                arguments.get("max_accesses") or _DEFAULT_SHARE_MAX_ACCESSES
+            )
+        except (TypeError, ValueError):
+            max_accesses = _DEFAULT_SHARE_MAX_ACCESSES
+        try:
+            ttl_seconds = int(
+                arguments.get("ttl_seconds") or _DEFAULT_SHARE_TTL_SECONDS
+            )
+        except (TypeError, ValueError):
+            ttl_seconds = _DEFAULT_SHARE_TTL_SECONDS
+        via_tunnel_raw = arguments.get("via_tunnel")
+        via_tunnel = bool(via_tunnel_raw) and str(via_tunnel_raw).lower() not in (
+            "false",
+            "0",
+            "no",
+            "off",
+        )
+
+        try:
+            share = await self.create_file_share(
+                user_id=user_id,
+                conversation_id=conv_id,
+                rel_path=rel_path,
+                max_accesses=max_accesses,
+                ttl_seconds=ttl_seconds,
+                via_tunnel=via_tunnel,
+            )
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+        except Exception as exc:
+            logger.exception("Failed to create workspace file share")
+            return json.dumps({"error": f"Unexpected error: {exc}"})
+
+        return json.dumps(share)
 
     # ── WebSocket Handlers ───────────────────────────────────────────
 
