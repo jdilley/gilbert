@@ -1492,12 +1492,30 @@ class AIService(Service):
         2. Profile's backend + model fields
         3. First available backend + its default model
 
+        If the resolved model isn't one the resolved backend advertises,
+        fall back to the backend's own default. Protects against sticky
+        UI model selections carrying over after a backend change —
+        e.g. "sonnet" (Claude Code CLI shorthand) surviving in the
+        chat frame after Claude Code is removed, and reaching the
+        Anthropic REST API as an invalid model id.
+
         Returns (backend_instance, model_id). model_id may be empty
         (backend uses its own default).
         """
         backend_name = backend_override or (profile.backend if profile else "") or ""
         model = model_override or (profile.model if profile else "") or ""
         backend = self.get_backend(backend_name)
+        if model:
+            available = {m.id for m in backend.available_models()}
+            if available and model not in available:
+                logger.warning(
+                    "Model %r is not available on backend %r (available: %s) — "
+                    "falling back to backend default",
+                    model,
+                    backend.backend_name,
+                    sorted(available),
+                )
+                model = ""
         return backend, model
 
     # --- One-shot completion (no persistence, no agentic loop) ---
