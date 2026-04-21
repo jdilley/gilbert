@@ -49,6 +49,47 @@ class FakeEventBus:
         self.published.append(event)
 
 
+class _FakeAISampling:
+    """Minimal AISamplingProvider stub for greeting/roast tests.
+
+    ``AsyncMock`` doesn't satisfy ``isinstance(x, AISamplingProvider)``
+    under Python 3.12+'s stricter runtime_checkable check, so tests use
+    this concrete class instead.
+    """
+
+    def __init__(self, content: str = "") -> None:
+        self._content = content
+        self.calls: list[dict[str, Any]] = []
+
+    def has_profile(self, name: str) -> bool:
+        return True
+
+    async def complete_one_shot(
+        self,
+        *,
+        messages: Any,
+        system_prompt: str = "",
+        profile_name: str | None = None,
+        max_tokens: int | None = None,
+        tools_override: Any = None,
+    ) -> Any:
+        from gilbert.interfaces.ai import AIResponse, Message, MessageRole
+
+        self.calls.append(
+            {
+                "messages": messages,
+                "system_prompt": system_prompt,
+                "profile_name": profile_name,
+                "max_tokens": max_tokens,
+                "tools_override": tools_override,
+            },
+        )
+        return AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content=self._content),
+            model="test-model",
+        )
+
+
 class FakeEventBusSvc:
     def __init__(self) -> None:
         self.bus = FakeEventBus()
@@ -167,15 +208,20 @@ class TestGreetingService:
         resolver: FakeResolver,
     ) -> None:
         """AI greeting looks up 'ai_chat' capability, not 'ai'."""
+        from gilbert.interfaces.ai import AISamplingProvider
+
         await greeting_service.start(resolver)
 
-        mock_ai = AsyncMock()
-        mock_ai.chat = AsyncMock(return_value=("Hey Brian, welcome!", "conv1", [], []))
-        resolver.caps["ai_chat"] = mock_ai
+        fake_ai = _FakeAISampling(content="Hey Brian, welcome!")
+        assert isinstance(fake_ai, AISamplingProvider)
+        resolver.caps["ai_chat"] = fake_ai
 
         greeting = await greeting_service._generate_greeting("Brian")
         assert greeting == "Hey Brian, welcome!"
-        mock_ai.chat.assert_called_once()
+        assert len(fake_ai.calls) == 1
+        # Must force zero tools regardless of profile — this is the
+        # bug-fix-regression guard from the Sonos announce-loop incident.
+        assert fake_ai.calls[0]["tools_override"] == []
 
     @pytest.mark.asyncio
     async def test_generate_greeting_wrong_capability_falls_back(
@@ -187,12 +233,12 @@ class TestGreetingService:
         await greeting_service.start(resolver)
 
         # Register under wrong name — should not be found
-        mock_ai = AsyncMock()
-        resolver.caps["ai"] = mock_ai
+        fake_ai = _FakeAISampling(content="nope")
+        resolver.caps["ai"] = fake_ai
 
         greeting = await greeting_service._generate_greeting("Brian")
         assert "Good morning" in greeting  # Fallback, not AI-generated
-        mock_ai.chat.assert_not_called()
+        assert fake_ai.calls == []
 
     @pytest.mark.asyncio
     async def test_startup_greets_already_present(

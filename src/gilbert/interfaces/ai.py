@@ -506,6 +506,7 @@ class AISamplingProvider(Protocol):
         system_prompt: str = "",
         profile_name: str | None = None,
         max_tokens: int | None = None,
+        tools_override: list[ToolDefinition] | None = None,
     ) -> AIResponse:
         ...
 

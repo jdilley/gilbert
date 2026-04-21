@@ -20,9 +20,15 @@ Named bundles of (tool allowlist + backend + model) that every AI call resolves 
 - `light` — light tier (fast, cost-effective model), all tools
 - `standard` — standard tier (balanced model), all tools
 - `advanced` — advanced tier (most capable model), all tools
-- `text_only` — **zero tools** (`tool_mode="include"`, `tools=[]`). Used for pure text-generation calls (greetings, roasts) where giving the model tool access would let it accidentally trigger side effects. *Footgun learned the hard way:* greeting was briefly assigned to `light`, the model saw the `announce` tool in its toolset and called it repeatedly with greeting text — resulting in the Sonos clip-loop bug. Any AI call that asks the model to *write text* (not *do something*) should use `text_only`.
 
 The tiers themselves are just profile names; admins map each tier to a real backend/model under **Settings → AI → Profiles**. Custom profiles can be added on top.
+
+### Pure-Text Calls Force Zero Tools at the Call Site
+Greeting and roast want the model to *write text*, not *do something* — if they inherit their profile's toolset, the model can and will invoke tools like `announce` as its "way of saying" the greeting. That's how the Sonos audio-clip loop bug happened: greeting was routed to `light` (tools on), the model called `announce` multiple times per turn with generated text, each call fired a fresh TTS and played it.
+
+Fix: those services call `ai_svc.complete_one_shot(..., tools_override=[])`. The `tools_override` parameter (when non-None) replaces profile-driven tool discovery entirely, guaranteeing zero tools regardless of which profile was selected. Profile still picks backend/model. No special "text-only" profile is needed or exposed to users.
+
+Any future service that asks the model for bare text should do the same.
 
 ### Built-in Call Assignments
 `_BUILTIN_ASSIGNMENTS` in `core/services/ai.py` seeds these on first start:
@@ -30,8 +36,8 @@ The tiers themselves are just profile names; admins map each tier to a real back
 | ai_call | Profile |
 |---|---|
 | `human_chat` | standard |
-| `greeting` | text_only |
-| `roast` | text_only |
+| `greeting` | light |
+| `roast` | standard |
 | `scheduled_action` | standard |
 | `inbox_ai_chat` | standard |
 | `guess_song_validate` | light |

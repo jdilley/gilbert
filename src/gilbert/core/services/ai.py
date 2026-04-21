@@ -845,21 +845,18 @@ _BUILTIN_PROFILES = [
         description="Advanced tier — most capable model with all tools",
         tool_mode="all",
     ),
-    AIContextProfile(
-        name="text_only",
-        description="Text generation only — no tools exposed to the model",
-        tool_mode="include",
-        tools=[],
-    ),
 ]
 
-_UNDELETABLE_PROFILES = frozenset({"light", "standard", "advanced", "text_only"})
+_UNDELETABLE_PROFILES = frozenset({"light", "standard", "advanced"})
 
-# Built-in call→profile assignments seeded on first start
+# Built-in call→profile assignments seeded on first start.
+# Greeting/roast run through ``complete_one_shot(tools_override=[])``
+# so tool access is disabled at the call site regardless of profile —
+# these assignments only steer which backend/model gets used.
 _BUILTIN_ASSIGNMENTS: dict[str, str] = {
     "human_chat": "standard",
-    "greeting": "text_only",
-    "roast": "text_only",
+    "greeting": "light",
+    "roast": "standard",
     "scheduled_action": "standard",
     "inbox_ai_chat": "standard",
     "guess_song_validate": "light",
@@ -1527,32 +1524,39 @@ class AIService(Service):
         system_prompt: str = "",
         profile_name: str | None = None,
         max_tokens: int | None = None,
+        tools_override: list[ToolDefinition] | None = None,
     ) -> AIResponse:
         """Run a single round of the AI backend and return the raw response.
 
         Unlike ``chat``, this method:
 
         - Doesn't persist to a conversation.
-        - Doesn't loop on tool calls (callers pass a profile with no
-          tools if they want that guarantee — this method doesn't
-          enforce it).
+        - Doesn't loop on tool calls. Callers that need a guaranteed
+          zero-tool call (pure text generation like greetings or
+          roasts — where a tool call would be a bug, not a feature)
+          should pass ``tools_override=[]`` rather than relying on the
+          profile's tool_mode. When ``tools_override`` is ``None``,
+          tool discovery follows the profile.
         - Doesn't take a ``user_ctx`` — ``profile_name`` is the only
           authorization signal, and the caller is expected to have
           already decided the call is safe to make.
 
-        Used by ``MCPService`` to service remote sampling requests.
-        Other non-conversational use cases (batch jobs, eval harnesses)
-        can adopt the same entry point rather than hand-rolling
-        ``AIBackend`` calls.
+        Used by ``MCPService`` to service remote sampling requests, by
+        greeting/roast for tool-free text generation, and anywhere
+        else a single backend round without the agentic loop is
+        appropriate.
         """
         if not self._backends:
             raise RuntimeError("No AI backends initialized")
         profile = self._profiles.get(profile_name) if profile_name else None
         backend, model = self._resolve_backend_and_model(profile)
-        tools: list[ToolDefinition] = []
-        if profile is not None and profile.tool_mode != "include":
-            discovered = self._discover_tools(user_ctx=None, profile=profile)
-            tools = [td for _, td in discovered.values()]
+        if tools_override is not None:
+            tools = list(tools_override)
+        else:
+            tools = []
+            if profile is not None and profile.tool_mode != "include":
+                discovered = self._discover_tools(user_ctx=None, profile=profile)
+                tools = [td for _, td in discovered.values()]
         request = AIRequest(
             messages=list(messages),
             system_prompt=system_prompt,

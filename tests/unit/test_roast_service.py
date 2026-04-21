@@ -9,6 +9,45 @@ from gilbert.core.services.roast import _DEFAULT_ROASTS, RoastService
 from gilbert.core.services.scheduler import SchedulerService
 
 
+class _FakeAISampling:
+    """Concrete stub for AISamplingProvider — see test_greeting_service."""
+
+    def __init__(self, content: str = "", raises: Exception | None = None) -> None:
+        self._content = content
+        self._raises = raises
+        self.calls: list[dict[str, Any]] = []
+
+    def has_profile(self, name: str) -> bool:
+        return True
+
+    async def complete_one_shot(
+        self,
+        *,
+        messages: Any,
+        system_prompt: str = "",
+        profile_name: str | None = None,
+        max_tokens: int | None = None,
+        tools_override: Any = None,
+    ) -> Any:
+        from gilbert.interfaces.ai import AIResponse, Message, MessageRole
+
+        self.calls.append(
+            {
+                "messages": messages,
+                "system_prompt": system_prompt,
+                "profile_name": profile_name,
+                "max_tokens": max_tokens,
+                "tools_override": tools_override,
+            },
+        )
+        if self._raises is not None:
+            raise self._raises
+        return AIResponse(
+            message=Message(role=MessageRole.ASSISTANT, content=self._content),
+            model="test-model",
+        )
+
+
 class FakeScheduler(SchedulerService):
     """Captures add_job calls without running real scheduler logic."""
 
@@ -156,21 +195,21 @@ class TestGenerateRoast:
     @pytest.mark.asyncio
     async def test_ai_roast(self, roast_service: RoastService, resolver: FakeResolver) -> None:
         """With AI available, uses AI-generated roast."""
-        fake_ai = MagicMock()
-        fake_ai.chat = AsyncMock(return_value=("Hey Alice, nice work today!", "conv1", [], []))
+        fake_ai = _FakeAISampling(content="Hey Alice, nice work today!")
         resolver.caps["ai_chat"] = fake_ai
 
         await roast_service.start(resolver)
         roast = await roast_service._generate_roast("Alice")
         assert roast == "Hey Alice, nice work today!"
+        # Must force zero tools regardless of profile.
+        assert fake_ai.calls[0]["tools_override"] == []
 
     @pytest.mark.asyncio
     async def test_ai_failure_falls_back_to_template(
         self, roast_service: RoastService, resolver: FakeResolver
     ) -> None:
         """When AI fails, falls back to template."""
-        fake_ai = MagicMock()
-        fake_ai.chat = AsyncMock(side_effect=Exception("API error"))
+        fake_ai = _FakeAISampling(raises=Exception("API error"))
         resolver.caps["ai_chat"] = fake_ai
 
         await roast_service.start(resolver)

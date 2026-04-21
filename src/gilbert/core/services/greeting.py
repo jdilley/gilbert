@@ -12,7 +12,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from gilbert.interfaces.ai import AIProvider
+from gilbert.interfaces.ai import AISamplingProvider, Message, MessageRole
 from gilbert.interfaces.auth import UserContext
 from gilbert.interfaces.configuration import ConfigParam
 from gilbert.interfaces.events import Event, EventBus, EventBusProvider
@@ -56,7 +56,7 @@ class GreetingService(Service):
         self._style: str = ""
         self._speakers: list[str] = []
         self._timezone: str = "UTC"
-        self._ai_profile: str = "text_only"
+        self._ai_profile: str = "light"
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
@@ -400,7 +400,7 @@ class GreetingService(Service):
             return f"Good morning, {name}!"
 
         ai_svc = self._resolver.get_capability("ai_chat")
-        if not isinstance(ai_svc, AIProvider):
+        if not isinstance(ai_svc, AISamplingProvider):
             return f"Good morning, {name}!"
 
         style_instruction = ""
@@ -424,16 +424,19 @@ class GreetingService(Service):
             f"{style_instruction}{avoid_section}"
         )
 
+        # tools_override=[] forces a zero-tool call regardless of the
+        # profile's tool_mode, so the model can't accidentally call
+        # `announce` (or anything else) as a side effect of generating
+        # greeting text. Profile is still used for backend/model choice.
         try:
-            from gilbert.interfaces.auth import UserContext
-
-            response, *_ = await ai_svc.chat(
-                prompt,
-                user_ctx=UserContext.SYSTEM,
-                ai_profile=self._ai_profile,
+            response = await ai_svc.complete_one_shot(
+                messages=[Message(role=MessageRole.USER, content=prompt)],
+                profile_name=self._ai_profile,
+                tools_override=[],
             )
-            if response and len(response) < 500:
-                return response.strip()
+            text = response.message.content.strip()
+            if text and len(text) < 500:
+                return text
         except Exception:
             logger.warning("AI greeting generation failed", exc_info=True)
 
@@ -450,7 +453,7 @@ class GreetingService(Service):
             return f"Good morning, {', '.join(names)}!"
 
         ai_svc = self._resolver.get_capability("ai_chat")
-        if not isinstance(ai_svc, AIProvider):
+        if not isinstance(ai_svc, AISamplingProvider):
             return f"Good morning, {', '.join(names)}!"
 
         style_instruction = ""
@@ -476,15 +479,14 @@ class GreetingService(Service):
         )
 
         try:
-            from gilbert.interfaces.auth import UserContext
-
-            response, *_ = await ai_svc.chat(
-                prompt,
-                user_ctx=UserContext.SYSTEM,
-                ai_profile=self._ai_profile,
+            response = await ai_svc.complete_one_shot(
+                messages=[Message(role=MessageRole.USER, content=prompt)],
+                profile_name=self._ai_profile,
+                tools_override=[],
             )
-            if response and len(response) < 500:
-                return response.strip()
+            text = response.message.content.strip()
+            if text and len(text) < 500:
+                return text
         except Exception:
             logger.warning("AI group greeting failed", exc_info=True)
 

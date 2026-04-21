@@ -45,7 +45,7 @@ class RoastService(Service):
             "Keep it to 1-2 sentences."
         )
         self._speakers: list[str] = []
-        self._ai_profile: str = "text_only"
+        self._ai_profile: str = "standard"
         self._resolver: ServiceResolver | None = None
 
     def service_info(self) -> ServiceInfo:
@@ -191,25 +191,27 @@ class RoastService(Service):
 
     async def _generate_roast(self, name: str) -> str:
         """Generate a roast via AI if available, otherwise use a template."""
-        from gilbert.interfaces.ai import AIProvider
+        from gilbert.interfaces.ai import AISamplingProvider, Message, MessageRole
         from gilbert.interfaces.speaker import (
             SpeakerProvider,  # noqa: F401 — used by _announce via check
         )
 
         if self._resolver is not None:
             ai_svc = self._resolver.get_capability("ai_chat")
-            if isinstance(ai_svc, AIProvider):
+            if isinstance(ai_svc, AISamplingProvider):
                 try:
-                    from gilbert.interfaces.auth import UserContext
-
                     prompt = self._ai_prompt.format(name=name)
-                    response, *_ = await ai_svc.chat(
-                        prompt,
-                        user_ctx=UserContext.SYSTEM,
-                        ai_profile=self._ai_profile,
+                    # tools_override=[] forces a zero-tool call so the
+                    # model can't call `announce` or any other tool as
+                    # a side effect of generating roast text.
+                    response = await ai_svc.complete_one_shot(
+                        messages=[Message(role=MessageRole.USER, content=prompt)],
+                        profile_name=self._ai_profile,
+                        tools_override=[],
                     )
-                    if response and len(response) < 500:
-                        return str(response).strip()
+                    text = response.message.content.strip()
+                    if text and len(text) < 500:
+                        return text
                 except Exception:
                     logger.warning("AI roast generation failed, using template", exc_info=True)
 
