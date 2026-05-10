@@ -18,10 +18,9 @@ Layer rules (per ``CLAUDE.md``): this module imports from
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from gilbert.interfaces.configuration import ConfigParam
@@ -541,9 +540,3 @@ class MediaLibraryProvider(Protocol):
         backend_name: str,
         library_section: str,
     ) -> bool: ...
-
-
-# Type alias for fan-out callable used by the aggregator's _fanout
-# helper. Documented here so the helper signature stays stable across
-# backends; not exported.
-_FanoutOp = Callable[[MediaLibraryBackend], Awaitable[Any]]
