@@ -43,6 +43,7 @@ dependencies = [
     # shared venv, so users don't have to remember ``--all-packages``.
     "gilbert-plugin-american-standard",
     "gilbert-plugin-anthropic",
+    "gilbert-plugin-apple-health",
     "gilbert-plugin-arr",
     "gilbert-plugin-bedrock",
     "gilbert-plugin-browser",
@@ -81,6 +82,7 @@ dependencies = [
 [tool.uv.sources]
 gilbert-plugin-american-standard = { workspace = true }
 gilbert-plugin-anthropic = { workspace = true }
+gilbert-plugin-apple-health = { workspace = true }
 gilbert-plugin-arr = { workspace = true }
 gilbert-plugin-bedrock = { workspace = true }
 gilbert-plugin-browser = { workspace = true }
