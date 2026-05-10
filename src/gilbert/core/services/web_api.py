@@ -268,6 +268,22 @@ class WebApiService(Service):
                 "items": [],
             },
             {
+                # Health nav is conditionally visible — per spec §17.3
+                # users who haven't connected a backend don't need the
+                # menu item. The dashboard.get handler runs a per-user
+                # ``health_links`` count for connections that satisfy
+                # the capability + role gate.
+                "key": "health",
+                "label": "Health",
+                "description": "Personal health metrics and connected sources",
+                "url": "/health",
+                "icon": "heart-pulse",
+                "required_role": "user",
+                "requires_capability": "health",
+                "requires_user_health_data": True,
+                "items": [],
+            },
+            {
                 "key": "knowledge",
                 "label": "Knowledge",
                 "description": "Browse, search, and manage indexed documents",
@@ -456,6 +472,43 @@ class WebApiService(Service):
         acl = gilbert.service_manager.get_by_capability("access_control")
         sm = gilbert.service_manager
 
+        # Resolve "does this user have any health_links rows" once per
+        # request. Per spec §17.3 the /health nav entry only renders
+        # for users who've connected at least one backend (regardless
+        # of ``enabled``); the SPA's empty-state covers the others.
+        user_has_health_data: bool | None = None
+
+        async def _user_has_health_data() -> bool:
+            nonlocal user_has_health_data
+            if user_has_health_data is not None:
+                return user_has_health_data
+            health_svc = sm.get_by_capability("health")
+            user_has_health_data = False
+            if health_svc is not None and getattr(health_svc, "_storage", None):
+                from gilbert.interfaces.storage import (
+                    Filter as _Filter,
+                    FilterOp as _FilterOp,
+                    Query as _Query,
+                )
+
+                try:
+                    count = await health_svc._storage.count(  # type: ignore[attr-defined]
+                        _Query(
+                            collection="health_links",
+                            filters=[
+                                _Filter(
+                                    field="user_id",
+                                    op=_FilterOp.EQ,
+                                    value=conn.user_ctx.user_id,
+                                )
+                            ],
+                        )
+                    )
+                    user_has_health_data = count > 0
+                except Exception:
+                    user_has_health_data = False
+            return user_has_health_data
+
         def _visible(entry: dict[str, Any]) -> bool:
             cap = entry.get("requires_capability")
             if cap:
@@ -470,14 +523,31 @@ class WebApiService(Service):
                     return False
             return True
 
+        async def _visible_async(entry: dict[str, Any]) -> bool:
+            if not _visible(entry):
+                return False
+            if entry.get("requires_user_health_data"):
+                if not await _user_has_health_data():
+                    return False
+            return True
+
         visible_nav: list[dict[str, Any]] = []
         for group in nav_groups:
             raw_items = group.get("items") or []
-            visible_items = [
-                {k: v for k, v in it.items() if k != "requires_capability"}
-                for it in raw_items
-                if _visible(it)
-            ]
+            visible_items: list[dict[str, Any]] = []
+            for it in raw_items:
+                if await _visible_async(it):
+                    visible_items.append(
+                        {
+                            k: v
+                            for k, v in it.items()
+                            if k
+                            not in (
+                                "requires_capability",
+                                "requires_user_health_data",
+                            )
+                        }
+                    )
             if raw_items:
                 # Group: hide if every child was filtered out.
                 if not visible_items:
@@ -504,8 +574,8 @@ class WebApiService(Service):
                     }
                 )
             else:
-                # Leaf: filter by its own role/capability.
-                if not _visible(group):
+                # Leaf: filter by its own role/capability + per-user data.
+                if not await _visible_async(group):
                     continue
                 visible_nav.append(
                     {
