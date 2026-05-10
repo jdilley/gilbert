@@ -20,7 +20,7 @@ Multi-user support with local accounts, external provider syncing, role-based ac
 - `GoogleDirectoryBackend` — lives in `std-plugins/google/google_directory.py`. Reads users/groups from Google Admin Directory API. User provider backend.
 
 ### Services
-- `UserService` — capability: `users`, `ai_tools`. Always registered. Wraps `StorageUserBackend`. Creates root user on startup. Owns `UserProviderBackend` instances (as a dict keyed on `backend_name`) and syncs on demand during `list_users()`.
+- `UserService` — capability: `users`, `ai_tools`. Always registered. Wraps `StorageUserBackend`. Creates root user on startup. Owns `UserProviderBackend` instances (as a dict keyed on `backend_name`) and syncs on demand during `list_users()`. Publishes `auth.user.deleted` (`{user_id, deleted_at}`) after `delete_user()` completes — used by HealthService and future per-user services for cascade-delete. The publish is fire-and-forget on the resolved `EventBusProvider`; no-op if no bus is registered (acceptable in many test scenarios).
 - `AuthService` — capability: `authentication`. Owns `AuthBackend` instances internally (no separate services per backend). Manages sessions in `auth_sessions` collection. Methods: `authenticate()`, `handle_callback()`, `get_login_methods()`, `validate_session()`, `invalidate_session()`.
 
 ### Storage
