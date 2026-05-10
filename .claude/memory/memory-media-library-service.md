@@ -78,18 +78,27 @@ fallback to `get_current_user()`.
   via `get_item(backend_user_id=<clicker>)` so `view_offset_seconds`
   belongs to the clicker, not the searcher.
 - `recently_added` (`/media recent`) — gated on
-  `supports_recently_added`.
+  `supports_recently_added`. Backends with `supports_per_user=True`
+  (Jellyfin) get fanned out per mapped user (one query per
+  `(backend, gilbert_user)`), deduped by `(backend, item.id)`. The
+  poll path runs as SYSTEM and iterates every mapped Gilbert user;
+  the tool path uses the calling user's mapping.
 - `continue_watching` (`/media on-deck`) — gated on
-  `supports_continue_watching`. Per-user fan-out follows the
-  missing-mapping policy: backends with mapping are queried with
-  `backend_user_id=<mapped>`; backends without mapping are silently
-  skipped (NEVER admin-token fallback) and surface in
-  `unmapped_backends: [...]` metadata with a hint.
+  `supports_continue_watching`. The Protocol method
+  `MediaLibraryProvider.continue_watching` returns
+  `list[ContinueWatchingEntry]`; the tool-facing
+  `continue_watching_for_user` returns the dict envelope
+  (`entries`, `unmapped_backends`, `hint?`, `error?`). Backends
+  without mapping are silently skipped (NEVER admin-token fallback).
 - `now_playing` (`/media now`) — gated on `supports_now_playing`.
   **Live, NOT cached** — bypasses `self._poll_last_sessions`.
-- `playback_control` (`/media pause` / `resume` / `stop` / `seek`)
-  — one tool with `action` enum, four pre-filled-action slashes.
-  `seek` action gated on `supports_seek`. Lenient position parser
+- `playback_control` / `playback_resume` / `playback_stop` /
+  `playback_seek` — four ToolDefinitions delegating to a single
+  `_tool_playback_control` handler with `action` pre-filled.
+  Slashes `/media pause` / `resume` / `stop` / `seek`. `seek`
+  gated on `supports_seek`. Each call wraps the backend in
+  `asyncio.wait_for(timeout=play_timeout)` (10s default) so a hung
+  backend can't hang the AI turn. Lenient position parser
   (`parse_position`) accepts "5m", "1h22m", "1:22:00" (H:MM:SS),
   "1:22" (M:SS), raw seconds.
 - `recommend_next` (`/media recommend`) — gated on
@@ -141,11 +150,19 @@ Two scheduled jobs via `SchedulerProvider`:
 - `media_library.poll_now_playing` — default 30s with adaptive
   backoff (idle threshold 10 polls → interval doubles up to 300s
   cap; resets on any session observed OR on a
-  `media.playback.started` bus event).
+  `media.playback.started` bus event). When the interval changes,
+  `_reschedule_now_playing_poll` calls
+  `scheduler.remove_job` + `add_job` so the scheduler actually
+  honors the new cadence — mutating
+  `self._now_playing_current_interval` alone is invisible to the
+  scheduler.
 - `media_library.poll_recently_added` — default 300s, baseline-run
   sentinel (`self._poll_first_run_done: set[str]`) — first cycle
   populates the cache and emits NO events. Without it every restart
-  would emit one event per item in the entire feed.
+  would emit one event per item in the entire feed. Diff state is a
+  per-`(backend, library_section)` set of `(item_id, added_at)`
+  pairs (bounded at 200 entries) so equal-timestamp items don't drop
+  on a shared second-precision `added_at`.
 
 Both jobs explicitly set `set_current_user(UserContext.SYSTEM)` at
 job entry and run `asyncio.wait_for`-wrapped per-backend fan-out so
@@ -161,9 +178,30 @@ a 31-second pause from a stop+restart; v2 webhook/SSE work will add
 ### Health
 `BackendHealth(status, last_error, …)` per backend. Successful op →
 healthy; timeout → degraded; auth failure → unhealthy. Transitions
-emit `media.backend.health_changed`. The Settings Media-library
-panel renders one row per backend with a colored dot. Tools never
+emit `media.backend.health_changed` via a `create_task` with
+`context=copy_context()` and a strong reference held in
+`self._pending_event_tasks` (so CPython doesn't GC the task mid-
+flight). The Settings Media-library panel subscribes to that event
+via `useEventBus` and refetches the health snapshot on every flip
+— the 30s polling refetch is kept as a fallback. Tools never
 disappear because of health flips.
+
+### Privacy
+`media_library.user_can_see(gilbert_user_id, backend_name,
+library_section) -> bool` lets downstream subscribers
+(notifications) re-filter restricted-library
+`media.recently_added` events before delivering. Cache is keyed by
+`(backend_name, backend_user_id)` (backend-side identity, NOT
+Gilbert user) with 60s TTL — two Gilbert users mapped to the same
+Plex Home account share the entry.
+
+### Log redaction
+`MediaLogRedactor` (a `logging.Filter`) is installed on the core
+service logger plus `gilbert_plugin_plex.plex_backend` and
+`gilbert_plugin_jellyfin.jellyfin_backend` at service start.
+Strips `X-Plex-Token=`, `?api_key=`, and `&api_key=` from log
+records (acceptance #9 — `grep` against captured log output finds
+nothing).
 
 ### Open Questions Deferred
 N:M Gilbert↔backend mapping (1:1 in v1, deferred to v2). Webhook /

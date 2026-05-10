@@ -39,6 +39,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, replace
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from gilbert.core.context import set_current_user
@@ -3945,7 +3946,37 @@ class MediaLibraryService(Service):
         ]
         return (None, ", ".join(names))
 
+    @staticmethod
+    def _require_admin(arguments: dict[str, Any]) -> str | None:
+        """Defense-in-depth role check for admin-only tools.
+
+        The AI service already gates on ``required_role="admin"`` (spec
+        §11), but a misconfigured ACL could let a non-admin reach
+        ``execute_tool`` directly. Returning a JSON error here keeps
+        the privacy/security promise even if the upstream check is
+        bypassed.
+
+        Returns ``None`` when the call is allowed; otherwise returns
+        the JSON error string the tool should hand back.
+        """
+        roles_raw = arguments.get("_user_roles") or []
+        roles: set[str] = set()
+        if isinstance(roles_raw, (list, tuple, set, frozenset)):
+            roles = {str(r) for r in roles_raw}
+        if "admin" not in roles:
+            return json.dumps(
+                {
+                    "error": (
+                        "Permission denied: this tool requires the admin role"
+                    )
+                }
+            )
+        return None
+
     async def _tool_link_user(self, arguments: dict[str, Any]) -> str:
+        denied = self._require_admin(arguments)
+        if denied is not None:
+            return denied
         gilbert_user_arg = str(arguments.get("gilbert_user") or "").strip()
         backend_name = str(arguments.get("backend") or "").strip()
         backend_username = str(arguments.get("backend_username") or "").strip()
@@ -4024,6 +4055,9 @@ class MediaLibraryService(Service):
         )
 
     async def _tool_unlink_user(self, arguments: dict[str, Any]) -> str:
+        denied = self._require_admin(arguments)
+        if denied is not None:
+            return denied
         gilbert_user_arg = str(arguments.get("gilbert_user") or "").strip()
         backend_name = str(arguments.get("backend") or "").strip()
         if not gilbert_user_arg or not backend_name:
@@ -4076,14 +4110,17 @@ def _as_float(value: object) -> float:
         return 0.0
 
 
-def _now_dt() -> Any:
-    """Return a naive-local ``datetime`` for SchedulerProvider start_at."""
-    from datetime import datetime
-    return datetime.now()
+def _now_dt() -> datetime:
+    """Return a UTC ``datetime`` for SchedulerProvider start_at.
+
+    Use ``datetime.now(UTC)`` for parity with the rest of the codebase
+    — the scheduler converts to UTC anyway, but a tz-aware now is
+    safer and matches the calendar-service convention.
+    """
+    return datetime.now(UTC)
 
 
-def _seconds(s: float) -> Any:
-    from datetime import timedelta
+def _seconds(s: float) -> timedelta:
     return timedelta(seconds=max(0.0, s))
 
 

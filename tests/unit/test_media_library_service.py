@@ -775,8 +775,8 @@ def test_log_redaction_filter_is_installed_on_module_logger() -> None:
     import logging
 
     from gilbert.core.services.media_library import (
-        _install_log_redactor,
         MediaLogRedactor,
+        _install_log_redactor,
     )
 
     _install_log_redactor("test.media_redactor.demo")
@@ -1219,7 +1219,13 @@ async def test_per_client_lock_does_not_serialize_across_clients(
 async def test_play_emits_event(
     storage: SQLiteStorage, event_bus: InMemoryEventBus
 ) -> None:
-    movie = _movie("m1", "Title", backend="alpha")
+    movie = _movie(
+        "m1",
+        "Title",
+        backend="alpha",
+        year=2024,
+        library_section="Movies",
+    )
     client = _client("tv-1", "TV", backend="alpha")
     _register_fake(
         "alpha", lambda: {"items": [movie], "clients": [client]}
@@ -1242,10 +1248,19 @@ async def test_play_emits_event(
     await svc.start(resolver)
     await svc.play_item(movie, client, gilbert_user_id="alice")
     assert len(received) == 1
-    assert received[0].data["item_title"] == "Title"
-    assert received[0].data["client_name"] == "TV"
-    assert received[0].data["initiator"] == "user"
-    assert received[0].data["user_id"] == "alice"
+    data = received[0].data
+    assert data["item_title"] == "Title"
+    assert data["client_name"] == "TV"
+    assert data["initiator"] == "user"
+    assert data["user_id"] == "alice"
+    # Spec §6.5 load-bearing payload fields — re-filter helpers and
+    # downstream subscribers depend on these.
+    assert data["library_section"] == "Movies"
+    assert data["item_kind"] == "movie"
+    assert data["item_year"] == 2024
+    assert data["backend"] == "alpha"
+    assert data["client_id"] == "tv-1"
+    assert data["item_id"] == "m1"
     await svc.stop()
 
 
@@ -1296,6 +1311,11 @@ async def test_play_button_reresolves_view_offset(
             "backend": "alpha",
             "item_id": "m1",
             "client": "TV",
+            # Pretend the button payload encoded user A's stale offset.
+            # The handler MUST ignore this and re-resolve via
+            # backend.get_item(backend_user_id=<bob>) — which returns
+            # offset 0 for bob.
+            "offset_seconds": 1842,
         },
     )
     # B's offset (0), NOT 1842 from the original button payload.
@@ -1613,6 +1633,246 @@ async def test_recently_added_poll_includes_library_section_for_filtering(
 # ── Capability gating ──────────────────────────────────────────────
 
 
+async def test_link_user_rejected_for_non_admin(
+    storage: SQLiteStorage, event_bus: InMemoryEventBus
+) -> None:
+    """Spec §24 acceptance #8: ``media_library_link_user`` is admin-
+    only. A non-admin ``_user_roles`` payload gets the standard
+    permission-denied response (defense-in-depth in case the AI
+    service's ACL gate is bypassed).
+    """
+    _register_fake(
+        "alpha",
+        lambda: {
+            "backend_users": [
+                {"id": "u_alice", "username": "alice_plex", "display_name": "Alice"},
+            ],
+        },
+    )
+    svc = MediaLibraryService()
+    resolver = _make_resolver(
+        storage=storage,
+        bus=event_bus,
+        section={
+            "enabled": True,
+            "backends": {"alpha": {"enabled": True, "settings": {}}},
+        },
+        users=_StubUsersService(
+            [{"_id": "alice", "display_name": "Alice", "email": "a@x"}]
+        ),
+    )
+    await svc.start(resolver)
+    out = await svc.execute_tool(
+        "media_library_link_user",
+        {
+            "_user_id": "alice",
+            "_user_roles": ["user"],
+            "gilbert_user": "alice",
+            "backend": "alpha",
+            "backend_username": "alice_plex",
+        },
+    )
+    assert isinstance(out, str)
+    parsed = json.loads(out)
+    assert "error" in parsed
+    assert "admin" in parsed["error"].lower()
+
+    # Admin call succeeds.
+    out2 = await svc.execute_tool(
+        "media_library_link_user",
+        {
+            "_user_id": "alice",
+            "_user_roles": ["admin"],
+            "gilbert_user": "alice",
+            "backend": "alpha",
+            "backend_username": "alice_plex",
+        },
+    )
+    parsed2 = json.loads(out2)
+    assert parsed2.get("status") == "linked"
+    await svc.stop()
+
+
+async def test_unauthorized_emits_backend_health_changed_event(
+    storage: SQLiteStorage, event_bus: InMemoryEventBus
+) -> None:
+    """Spec §24 acceptance #7: a backend going unhealthy fires a
+    ``media.backend.health_changed`` event. Recovery (next successful
+    call) fires another with ``status="healthy"``.
+    """
+    movie = _movie("m1", "Title", backend="alpha")
+
+    class _Flaky(FakeMediaLibraryBackend):
+        backend_name = "alpha"
+
+        def __init__(self) -> None:
+            super().__init__(items=[movie])
+
+    MediaLibraryBackend._registry["alpha"] = _Flaky
+
+    health_events: list[Event] = []
+
+    async def _h(e: Event) -> None:
+        health_events.append(e)
+
+    event_bus.subscribe("media.backend.health_changed", _h)
+    svc = MediaLibraryService()
+    resolver = _make_resolver(
+        storage=storage,
+        bus=event_bus,
+        section={
+            "enabled": True,
+            "backends": {"alpha": {"enabled": True, "settings": {}}},
+        },
+    )
+    await svc.start(resolver)
+    backend = svc._backends["alpha"]
+
+    # Force a 401-equivalent fault on the next search.
+    backend.fail_next(
+        "search", MediaLibraryUnavailableError("Plex token revoked")
+    )
+    # Trigger health = healthy → unhealthy via the fan-out.
+    await svc.search("Title")
+    # Let the fire-and-forget event-publish task drain.
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    unhealthy = [e for e in health_events if e.data.get("status") == "unhealthy"]
+    assert unhealthy
+    assert unhealthy[-1].data["backend"] == "alpha"
+
+    # Successful call → event flips back to healthy.
+    health_events.clear()
+    await svc.search("Title")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    healthy = [e for e in health_events if e.data.get("status") == "healthy"]
+    assert healthy
+    assert healthy[-1].data["backend"] == "alpha"
+    await svc.stop()
+
+
+async def test_list_clients_returns_offline_cached_clients_with_is_online_false(
+    storage: SQLiteStorage, event_bus: InMemoryEventBus
+) -> None:
+    """Spec §6.9 + §8.8: a client that was online on the previous
+    fetch but is missing from the current fetch re-surfaces from the
+    cache with ``is_online=False`` so the AI can phrase 'asleep'.
+    """
+    # Backend whose client list is mutable between calls.
+    online_client = _client("tv-1", "Living TV", backend="alpha")
+
+    class _CycleClients(FakeMediaLibraryBackend):
+        backend_name = "alpha"
+
+        def __init__(self) -> None:
+            super().__init__(clients=[online_client])
+
+        def take_offline(self) -> None:
+            self._clients = []
+
+    MediaLibraryBackend._registry["alpha"] = _CycleClients
+    svc = MediaLibraryService()
+    resolver = _make_resolver(
+        storage=storage,
+        bus=event_bus,
+        section={
+            "enabled": True,
+            "backends": {"alpha": {"enabled": True, "settings": {}}},
+        },
+    )
+    await svc.start(resolver)
+    backend = svc._backends["alpha"]
+    assert isinstance(backend, _CycleClients)
+
+    # First call: client is online.
+    first = await svc.list_clients()
+    assert len(first) == 1
+    assert first[0].is_online is True
+
+    # Take offline, re-fetch — cache resurfaces it as is_online=False.
+    backend.take_offline()
+    second = await svc.list_clients()
+    assert len(second) == 1
+    assert second[0].client_id == "tv-1"
+    assert second[0].is_online is False
+    await svc.stop()
+
+
+async def test_search_media_tool_excludes_music_kinds_by_default(
+    storage: SQLiteStorage, event_bus: InMemoryEventBus
+) -> None:
+    """Spec §24 acceptance #15: ``search_media`` default-excludes
+    MUSIC_* kinds when the caller doesn't pass ``kind``. The MusicService
+    seam owns audio playback to speakers; this tool covers the video
+    library.
+    """
+    movie = _movie("m1", "The Movie", backend="alpha")
+    track = MediaItem(
+        id="t1",
+        backend_name="alpha",
+        server_id="server-1",
+        title="The Movie Theme",
+        kind=MediaKind.MUSIC_TRACK,
+    )
+    _register_fake("alpha", lambda: {"items": [movie, track]})
+    svc = MediaLibraryService()
+    resolver = _make_resolver(
+        storage=storage,
+        bus=event_bus,
+        section={
+            "enabled": True,
+            "backends": {"alpha": {"enabled": True, "settings": {}}},
+        },
+    )
+    await svc.start(resolver)
+    out = await svc.execute_tool(
+        "search_media", {"_user_id": "alice", "query": "Movie"}
+    )
+    parsed = json.loads(out.text)
+    kinds = {r["kind"] for r in parsed["results"]}
+    assert "movie" in kinds
+    assert "music_track" not in kinds
+    await svc.stop()
+
+
+async def test_search_media_tool_includes_music_when_kind_opt_in(
+    storage: SQLiteStorage, event_bus: InMemoryEventBus
+) -> None:
+    """When the caller explicitly passes ``kind=music_track``, MUSIC_*
+    items DO surface — the seam allows opt-in.
+    """
+    movie = _movie("m1", "The Movie", backend="alpha")
+    track = MediaItem(
+        id="t1",
+        backend_name="alpha",
+        server_id="server-1",
+        title="The Movie Theme",
+        kind=MediaKind.MUSIC_TRACK,
+    )
+    _register_fake("alpha", lambda: {"items": [movie, track]})
+    svc = MediaLibraryService()
+    resolver = _make_resolver(
+        storage=storage,
+        bus=event_bus,
+        section={
+            "enabled": True,
+            "backends": {"alpha": {"enabled": True, "settings": {}}},
+        },
+    )
+    await svc.start(resolver)
+    out = await svc.execute_tool(
+        "search_media",
+        {"_user_id": "alice", "query": "Movie", "kind": "music_track"},
+    )
+    parsed = json.loads(out.text)
+    kinds = {r["kind"] for r in parsed["results"]}
+    assert "music_track" in kinds
+    assert "movie" not in kinds
+    await svc.stop()
+
+
 async def test_capability_gating_now_playing_off(
     storage: SQLiteStorage, event_bus: InMemoryEventBus
 ) -> None:
@@ -1773,8 +2033,78 @@ async def test_tool_remains_registered_when_only_backend_unhealthy(
 async def test_recommend_next_prompt_falls_back_to_default_when_blank(
     storage: SQLiteStorage, event_bus: InMemoryEventBus
 ) -> None:
+    """Verifies BOTH halves of spec §6.5: (a) the cached attribute
+    falls back to the default when the section value is blank, and
+    (b) the call site reads the cached attribute (NOT the default
+    constant) — mentally inlining the constant at the call site
+    would now fail this test.
+    """
     from gilbert.core.services.media_library import (
         _DEFAULT_RECOMMEND_NEXT_PROMPT,
+    )
+
+    movie = _movie("m1", "Movie", backend="alpha")
+    _register_fake(
+        "alpha",
+        lambda: {
+            "items": [movie],
+            "recently_added_entries": [
+                RecentlyAddedEntry(item=movie, added_at=movie.added_at)
+            ],
+        },
+    )
+    ai = _StubAIService(response_text='[{"id":"m1","reason":"x","confidence":0.9}]')
+    svc = MediaLibraryService()
+    resolver = _make_resolver(
+        storage=storage,
+        bus=event_bus,
+        section={
+            "enabled": True,
+            "backends": {"alpha": {"enabled": True, "settings": {}}},
+            # Sentinel override that's NOT the default — proves the
+            # call site reads ``self._recommend_next_prompt``.
+            "recommend_next_prompt": "OVERRIDDEN-PROMPT",
+        },
+        ai=ai,
+    )
+    await svc.start(resolver)
+    assert svc._recommend_next_prompt == "OVERRIDDEN-PROMPT"
+    await svc.execute_tool(
+        "recommend_next", {"_user_id": "alice", "intent": "x"}
+    )
+    assert ai.calls
+    assert ai.calls[-1]["system_prompt"] == "OVERRIDDEN-PROMPT"
+
+    # Now blank it: cached attr falls back to the bundled default,
+    # AND the next call site reads that default.
+    ai.calls.clear()
+    await svc.on_config_changed(
+        {
+            "enabled": True,
+            "recommend_next_prompt": "",
+            "backends": {"alpha": {"enabled": True, "settings": {}}},
+        }
+    )
+    assert svc._recommend_next_prompt == _DEFAULT_RECOMMEND_NEXT_PROMPT
+    await svc.execute_tool(
+        "recommend_next", {"_user_id": "alice", "intent": "x"}
+    )
+    assert ai.calls[-1]["system_prompt"] == _DEFAULT_RECOMMEND_NEXT_PROMPT
+    await svc.stop()
+
+
+async def test_item_disambiguation_prompt_falsy_fallback(
+    storage: SQLiteStorage, event_bus: InMemoryEventBus
+) -> None:
+    """Same falsy-fallback contract for ``item_disambiguation_prompt``.
+    No live invocation here (the visual UIBlock disambiguation path
+    is the v1 default and AI item disambiguation is an opt-in fall-
+    back), so we assert via the cached attribute alone — but with the
+    sentinel-override pattern that the call site, when it does run,
+    reads ``self._item_disambiguation_prompt``.
+    """
+    from gilbert.core.services.media_library import (
+        _DEFAULT_ITEM_DISAMBIGUATION_PROMPT,
     )
 
     _register_fake("alpha", lambda: {})
@@ -1785,20 +2115,79 @@ async def test_recommend_next_prompt_falls_back_to_default_when_blank(
         section={
             "enabled": True,
             "backends": {"alpha": {"enabled": True, "settings": {}}},
-            "recommend_next_prompt": "",
+            "item_disambiguation_prompt": "ITEM-OVERRIDE",
         },
     )
     await svc.start(resolver)
-    assert svc._recommend_next_prompt == _DEFAULT_RECOMMEND_NEXT_PROMPT
-    # Override
+    assert svc._item_disambiguation_prompt == "ITEM-OVERRIDE"
     await svc.on_config_changed(
         {
             "enabled": True,
-            "recommend_next_prompt": "",
+            "item_disambiguation_prompt": "",
             "backends": {"alpha": {"enabled": True, "settings": {}}},
         }
     )
-    assert svc._recommend_next_prompt == _DEFAULT_RECOMMEND_NEXT_PROMPT
+    assert svc._item_disambiguation_prompt == _DEFAULT_ITEM_DISAMBIGUATION_PROMPT
+    await svc.stop()
+
+
+async def test_client_disambiguation_prompt_reaches_call_site(
+    storage: SQLiteStorage, event_bus: InMemoryEventBus
+) -> None:
+    """Sentinel-override on ``client_disambiguation_prompt``: when AI
+    is invoked to disambiguate a multi-match client, the call site
+    reads ``self._client_disambiguation_prompt``, NOT the default.
+    """
+    from gilbert.core.services.media_library import (
+        _DEFAULT_CLIENT_DISAMBIGUATION_PROMPT,
+    )
+
+    movie = _movie("m1", "Title", backend="alpha")
+    c1 = _client("tv-1", "Living TV", backend="alpha")
+    c2 = _client("tv-2", "Living Bedroom TV", backend="alpha")
+    c3 = _client("tv-3", "Living Kitchen TV", backend="alpha")
+    _register_fake(
+        "alpha",
+        lambda: {
+            "items": [movie],
+            "clients": [c1, c2, c3],
+        },
+    )
+    ai = _StubAIService(response_text='{"client_id": "tv-1"}')
+    svc = MediaLibraryService()
+    resolver = _make_resolver(
+        storage=storage,
+        bus=event_bus,
+        section={
+            "enabled": True,
+            "backends": {"alpha": {"enabled": True, "settings": {}}},
+            "client_disambiguation_prompt": "CLIENT-OVERRIDE",
+            # Threshold defaults to 3 → AI fires when 3+ candidates match.
+        },
+        ai=ai,
+    )
+    await svc.start(resolver)
+    assert svc._client_disambiguation_prompt == "CLIENT-OVERRIDE"
+    # Trigger a 3-way client disambiguation by querying for "Living".
+    await svc.find_client("Living", gilbert_user_id="alice")
+    assert ai.calls
+    assert ai.calls[-1]["system_prompt"] == "CLIENT-OVERRIDE"
+
+    # Falsy-fallback: blank string → default.
+    ai.calls.clear()
+    await svc.on_config_changed(
+        {
+            "enabled": True,
+            "client_disambiguation_prompt": "",
+            "backends": {"alpha": {"enabled": True, "settings": {}}},
+        }
+    )
+    assert (
+        svc._client_disambiguation_prompt
+        == _DEFAULT_CLIENT_DISAMBIGUATION_PROMPT
+    )
+    await svc.find_client("Living", gilbert_user_id="alice")
+    assert ai.calls[-1]["system_prompt"] == _DEFAULT_CLIENT_DISAMBIGUATION_PROMPT
     await svc.stop()
 
 
