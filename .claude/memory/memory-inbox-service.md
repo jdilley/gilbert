@@ -84,6 +84,16 @@ Drafts are persisted as `inbox_outbox` rows with a `status` state machine
 `inbox_messages` too) or `failed`. Events `inbox.outbox.sent` and
 `inbox.outbox.failed` carry `mailbox_id` and `outbox_id`.
 
+**Transient send failures.** If `backend.send()` raises
+`TransientEmailError` (defined in `interfaces/email.py` — stale TLS
+sockets, transient 429/5xx, network blips), the tick leaves the row
+`PENDING`, bumps `retry_count`, and pushes `send_at` into the future by
+`min(60s * 2^(retry-1), 600s)`. After `_OUTBOX_MAX_RETRIES` (5)
+attempts the row finally flips to `FAILED` and the `inbox.outbox.failed`
+event fires. Non-transient exceptions still fail the row on the first
+attempt as before. Backends classify what's transient — core doesn't
+introspect exception types beyond `TransientEmailError`.
+
 `send_message()` and `reply_to_message()` are **synchronous bypass paths**
 that call `backend.send()` directly — used for "send now" flows like the
 AI `inbox_send` tool. The outbox is for *delayed* or *crash-resilient*
@@ -109,7 +119,7 @@ All events carry `mailbox_id` in their data.
 - `inbox.message.replied` — direct reply-to-message sent
 - `inbox.message.sent` — direct new-compose sent
 - `inbox.outbox.sent` — outbox tick successfully flushed a draft
-- `inbox.outbox.failed` — outbox tick send raised; row transitioned to FAILED
+- `inbox.outbox.failed` — outbox row transitioned to FAILED (after retries exhausted for transient errors, or immediately for permanent errors)
 - `inbox.mailbox.created`, `inbox.mailbox.updated`, `inbox.mailbox.deleted`
 - `inbox.mailbox.shares.changed` — fires on any share_user/unshare_user/share_role/unshare_role
 
@@ -218,7 +228,7 @@ everything else lives on individual mailbox records.
 - [User & Auth System](memory-user-auth-system.md) — UserContext source
 - [Access Control](memory-access-control.md) — admin level resolution
 - `src/gilbert/interfaces/inbox.py` — Mailbox, OutboxDraft, auth helpers, InboxProvider
-- `src/gilbert/interfaces/email.py` — EmailBackend ABC (unchanged)
+- `src/gilbert/interfaces/email.py` — EmailBackend ABC + `TransientEmailError`
 - `src/gilbert/core/services/inbox.py` — InboxService with per-mailbox runtime registry
 - `std-plugins/gmail/*` — GmailBackend
 - `frontend/src/components/inbox/*` — multi-mailbox UI

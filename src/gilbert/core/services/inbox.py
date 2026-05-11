@@ -21,7 +21,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from gilbert.core.context import get_current_user
@@ -35,7 +35,13 @@ from gilbert.interfaces.configuration import (
     ConfigActionResult,
     ConfigParam,
 )
-from gilbert.interfaces.email import EmailAddress, EmailAttachment, EmailBackend, EmailMessage
+from gilbert.interfaces.email import (
+    EmailAddress,
+    EmailAttachment,
+    EmailBackend,
+    EmailMessage,
+    TransientEmailError,
+)
 from gilbert.interfaces.events import EventBusProvider
 from gilbert.interfaces.inbox import (
     InboxProvider,
@@ -70,6 +76,15 @@ _MESSAGES_COLLECTION = "inbox_messages"
 _OUTBOX_COLLECTION = "inbox_outbox"
 
 _OUTBOX_TICK_INTERVAL_SEC = 10
+
+# Outbox transient-failure policy. A backend that raises ``TransientEmailError``
+# (stale TLS sockets, 429/5xx, transient network blips) gets re-queued with
+# exponential backoff instead of being failed outright. After
+# ``_OUTBOX_MAX_RETRIES`` send attempts we give up and mark the row FAILED so
+# a human (or the AI) can intervene.
+_OUTBOX_MAX_RETRIES = 5
+_OUTBOX_BACKOFF_BASE_SEC = 60
+_OUTBOX_BACKOFF_MAX_SEC = 600
 
 
 class InboxPermissionError(PermissionError):
@@ -1392,6 +1407,54 @@ class InboxService(Service):
                         source="inbox",
                     )
                 )
+        except TransientEmailError as exc:
+            retry_count = int(row.get("retry_count", 0) or 0) + 1
+            row["retry_count"] = retry_count
+            row["error"] = str(exc)
+
+            if retry_count >= _OUTBOX_MAX_RETRIES:
+                logger.warning(
+                    "Outbox %s exhausted transient retries (%d): %s",
+                    outbox_id,
+                    retry_count,
+                    exc,
+                )
+                row["status"] = OutboxStatus.FAILED.value
+                await self._storage.put(_OUTBOX_COLLECTION, outbox_id, row)
+                if self._event_bus is not None:
+                    from gilbert.interfaces.events import Event
+
+                    await self._event_bus.publish(
+                        Event(
+                            event_type="inbox.outbox.failed",
+                            data={
+                                "mailbox_id": mailbox.id,
+                                "outbox_id": outbox_id,
+                                "error": str(exc),
+                            },
+                            source="inbox",
+                        )
+                    )
+                return
+
+            # Re-queue with exponential backoff. The next tick will skip
+            # this row until ``send_at`` is due.
+            backoff_s = min(
+                _OUTBOX_BACKOFF_BASE_SEC * (2 ** (retry_count - 1)),
+                _OUTBOX_BACKOFF_MAX_SEC,
+            )
+            next_attempt = datetime.now(UTC) + timedelta(seconds=backoff_s)
+            row["status"] = OutboxStatus.PENDING.value
+            row["send_at"] = next_attempt.isoformat()
+            logger.info(
+                "Outbox %s transient failure (attempt %d/%d), retrying in %ds: %s",
+                outbox_id,
+                retry_count,
+                _OUTBOX_MAX_RETRIES,
+                backoff_s,
+                exc,
+            )
+            await self._storage.put(_OUTBOX_COLLECTION, outbox_id, row)
         except Exception as exc:
             logger.exception("Outbox send failed for %s", outbox_id)
             row["status"] = OutboxStatus.FAILED.value

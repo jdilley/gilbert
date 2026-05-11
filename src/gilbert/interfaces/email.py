@@ -53,6 +53,15 @@ class EmailAttachment:
     mime_type: str = "application/octet-stream"
 
 
+class TransientEmailError(Exception):
+    """Raised by an ``EmailBackend`` when a send failed for a reason that
+    is likely to clear up on its own — stale TLS sockets dropped by the
+    upstream edge, transient 429/5xx responses, network blips. Callers
+    (e.g. the outbox flusher) should re-queue with backoff instead of
+    marking the work permanently failed.
+    """
+
+
 class EmailBackend(ABC):
     """Abstract email transport — sync source and outbound sender.
 

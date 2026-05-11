@@ -16,7 +16,12 @@ import pytest
 from gilbert.core.context import set_current_user
 from gilbert.core.services.inbox import InboxService, _MailboxRuntime
 from gilbert.interfaces.auth import UserContext
-from gilbert.interfaces.email import EmailAddress, EmailBackend, EmailMessage
+from gilbert.interfaces.email import (
+    EmailAddress,
+    EmailBackend,
+    EmailMessage,
+    TransientEmailError,
+)
 from gilbert.interfaces.inbox import (
     InboxProvider,
     Mailbox,
@@ -942,6 +947,90 @@ class TestOutbox:
         assert entries[0].status == OutboxStatus.FAILED
         assert "smtp down" in (entries[0].error or "")
         assert any(e.event_type == "inbox.outbox.failed" for e in event_bus_svc.bus.published)
+
+    @pytest.mark.asyncio
+    async def test_outbox_tick_requeues_on_transient_error(
+        self,
+        inbox_service: InboxService,
+        event_bus_svc: FakeEventBusService,
+    ) -> None:
+        """A ``TransientEmailError`` should leave the row PENDING with a
+        bumped retry_count and a future send_at, not flip it to FAILED."""
+
+        class FlakyBackend(FakeEmailBackend):
+            async def send(self, *args: Any, **kwargs: Any) -> str:
+                raise TransientEmailError("stale TLS socket")
+
+        backend = FlakyBackend()
+        mb = _make_mailbox()
+        await _attach_runtime(inbox_service, mb, backend)
+
+        draft = OutboxDraft(
+            to=[EmailAddress(email="x@y.z")],
+            subject="x",
+            body_html="<p>x</p>",
+        )
+        outbox_id = await inbox_service.schedule_send(mb.id, draft, _owner())
+        await inbox_service._outbox_tick()
+
+        set_current_user(_owner())
+        entries = await inbox_service.list_outbox(mailbox_id=mb.id)
+        entry = next(e for e in entries if e.id == outbox_id)
+        assert entry.status == OutboxStatus.PENDING
+        assert entry.retry_count == 1
+        assert "stale TLS socket" in (entry.error or "")
+        # send_at should be pushed into the future (we backoff before retry)
+        assert datetime.fromisoformat(entry.send_at) > datetime.now(UTC)
+        # No failure event yet — we still expect a retry
+        assert not any(
+            e.event_type == "inbox.outbox.failed" for e in event_bus_svc.bus.published
+        )
+
+    @pytest.mark.asyncio
+    async def test_outbox_tick_marks_failed_after_max_transient_retries(
+        self,
+        inbox_service: InboxService,
+        event_bus_svc: FakeEventBusService,
+    ) -> None:
+        """After ``_OUTBOX_MAX_RETRIES`` transient failures the row is
+        promoted to FAILED so a human can take over."""
+
+        from gilbert.core.services.inbox import _OUTBOX_MAX_RETRIES
+
+        class AlwaysFlakyBackend(FakeEmailBackend):
+            async def send(self, *args: Any, **kwargs: Any) -> str:
+                raise TransientEmailError("still flaky")
+
+        backend = AlwaysFlakyBackend()
+        mb = _make_mailbox()
+        await _attach_runtime(inbox_service, mb, backend)
+
+        draft = OutboxDraft(
+            to=[EmailAddress(email="x@y.z")],
+            subject="x",
+            body_html="<p>x</p>",
+        )
+        outbox_id = await inbox_service.schedule_send(mb.id, draft, _owner())
+
+        # Simulate enough ticks to exhaust the retry budget. We reset
+        # send_at to now between ticks so the row stays "due" each pass —
+        # in production the scheduler would just wait for the backoff
+        # window to elapse.
+        for _ in range(_OUTBOX_MAX_RETRIES):
+            await inbox_service._outbox_tick()
+            row = await inbox_service._storage.get("inbox_outbox", outbox_id)
+            assert row is not None
+            row["send_at"] = datetime.now(UTC).isoformat()
+            await inbox_service._storage.put("inbox_outbox", outbox_id, row)
+
+        set_current_user(_owner())
+        entries = await inbox_service.list_outbox(mailbox_id=mb.id)
+        entry = next(e for e in entries if e.id == outbox_id)
+        assert entry.status == OutboxStatus.FAILED
+        assert entry.retry_count == _OUTBOX_MAX_RETRIES
+        assert any(
+            e.event_type == "inbox.outbox.failed" for e in event_bus_svc.bus.published
+        )
 
 
 # ── AI tool shape ─────────────────────────────────────────────────
