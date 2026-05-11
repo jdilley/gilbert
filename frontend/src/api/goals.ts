@@ -122,7 +122,8 @@ export interface CreateGoalPayload {
   name: string;
   description?: string;
   cost_cap_usd?: number | null;
-  /** Peer agent names to assign. First entry defaults to DRIVER. */
+  /** Peer agent names to assign. The first entry gets the "driver"
+   * label — display-only; any assignee can mutate the goal. */
   assign_to?: string[];
 }
 

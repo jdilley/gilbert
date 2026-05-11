@@ -50,6 +50,7 @@ export interface Agent {
   dream_quiet_hours: string;
   dream_probability: number;
   dream_max_per_night: number;
+  max_tool_rounds: number;
   created_at: string;
   updated_at: string;
 }
@@ -119,6 +120,7 @@ export interface AgentDefaults {
   default_dream_quiet_hours?: string;
   default_dream_probability?: number;
   default_dream_max_per_night?: number;
+  default_max_tool_rounds?: number;
   default_avatar_kind?: AvatarKind;
   default_avatar_value?: string;
 }
@@ -151,6 +153,7 @@ export interface AgentCreatePayload {
   dream_quiet_hours?: string;
   dream_probability?: number;
   dream_max_per_night?: number;
+  max_tool_rounds?: number;
 }
 
 export type AgentUpdatePayload = Partial<AgentCreatePayload> & {

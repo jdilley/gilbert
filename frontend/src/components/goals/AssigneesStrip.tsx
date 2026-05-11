@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { PlusIcon, XIcon } from "lucide-react";
 import { useAgents } from "@/api/agents";
 import {
@@ -6,6 +6,8 @@ import {
   useGoalAssignments,
   useUnassignAgent,
 } from "@/api/goals";
+import { useEventBus } from "@/hooks/useEventBus";
+import type { GilbertEvent } from "@/types/events";
 import { AgentAvatar } from "@/components/agent/AgentAvatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,6 +61,35 @@ export function AssigneesStrip({ goalId }: Props) {
   const unassign = useUnassignAgent();
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Live "currently running" tracking — shows a pulsing dot on each
+  // assignee whose run is in flight. Initialized empty (so a run that
+  // started before the page mounted won't show until the next event);
+  // the backend doesn't expose a "list running runs across agents"
+  // query so we rely on event-stream truth.
+  const [runningIds, setRunningIds] = useState<Set<string>>(new Set());
+  const onRunStarted = useCallback((event: GilbertEvent) => {
+    const aid = event.data?.agent_id;
+    if (typeof aid !== "string" || !aid) return;
+    setRunningIds((prev) => {
+      if (prev.has(aid)) return prev;
+      const next = new Set(prev);
+      next.add(aid);
+      return next;
+    });
+  }, []);
+  const onRunCompleted = useCallback((event: GilbertEvent) => {
+    const aid = event.data?.agent_id;
+    if (typeof aid !== "string" || !aid) return;
+    setRunningIds((prev) => {
+      if (!prev.has(aid)) return prev;
+      const next = new Set(prev);
+      next.delete(aid);
+      return next;
+    });
+  }, []);
+  useEventBus("agent.run.started", onRunStarted);
+  useEventBus("agent.run.completed", onRunCompleted);
+
   const agentById: Record<string, Agent> = {};
   for (const a of agents ?? []) agentById[a._id] = a;
 
@@ -81,21 +112,34 @@ export function AssigneesStrip({ goalId }: Props) {
       <div className="flex flex-wrap items-center gap-2">
         {(assignments ?? []).map((assignment) => {
           const agent = agentById[assignment.agent_id];
+          const isRunning = runningIds.has(assignment.agent_id);
           return (
             <div
               key={assignment._id}
               className="flex items-center gap-1.5 rounded-full border bg-muted/30 py-0.5 pr-1 pl-1.5"
             >
-              {agent ? (
-                <AgentAvatar agent={agent} size="sm" />
-              ) : (
-                <span
-                  className="inline-flex size-6 items-center justify-center rounded-full bg-muted text-xs"
-                  aria-hidden
-                >
-                  ?
-                </span>
-              )}
+              <span className="relative inline-flex">
+                {agent ? (
+                  <AgentAvatar agent={agent} size="sm" />
+                ) : (
+                  <span
+                    className="inline-flex size-6 items-center justify-center rounded-full bg-muted text-xs"
+                    aria-hidden
+                  >
+                    ?
+                  </span>
+                )}
+                {isRunning && (
+                  <span
+                    className="absolute -bottom-0.5 -right-0.5 inline-flex size-2.5"
+                    title="Currently running"
+                    aria-label="Currently running"
+                  >
+                    <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500/60" />
+                    <span className="relative inline-flex size-2.5 rounded-full bg-emerald-500 ring-2 ring-background" />
+                  </span>
+                )}
+              </span>
               <span className="text-xs font-medium truncate max-w-[8rem]">
                 {agent?.name ?? assignment.agent_id}
               </span>

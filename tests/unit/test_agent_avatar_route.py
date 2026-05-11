@@ -67,6 +67,7 @@ def _make_agent(agent_id: str, owner_user_id: str) -> Agent:
         dream_quiet_hours="22:00-06:00",
         dream_probability=0.1,
         dream_max_per_night=3,
+        max_tool_rounds=50,
         created_at=now,
         updated_at=now,
     )

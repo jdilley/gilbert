@@ -390,9 +390,10 @@ _TOOL_GOAL_CREATE = ToolDefinition(
     name="goal_create",
     description=(
         "Create a new goal you own. Optionally assign one or more peer "
-        "agents (by name) at specified roles. The first assignee is "
-        "promoted to DRIVER if no DRIVER is in the list. A war-room "
-        "conversation is created and bound to the goal."
+        "agents (by name) at specified roles. Roles are display-only "
+        "labels — any assignee may move status, manage assignees, and "
+        "finalize deliverables. A war-room conversation is created and "
+        "bound to the goal."
     ),
     parameters=[
         ToolParameter(
@@ -430,8 +431,10 @@ _TOOL_GOAL_CREATE = ToolDefinition(
 _TOOL_GOAL_ASSIGN = ToolDefinition(
     name="goal_assign",
     description=(
-        "Assign a peer agent to a goal at the given role. Only the "
-        "current DRIVER on the goal may call this."
+        "Assign a peer agent to a goal at the given role. Roles "
+        "('driver' | 'collaborator' | 'reviewer') are display-only "
+        "labels and do not gate access — any assignee can mutate the "
+        "goal."
     ),
     parameters=[
         ToolParameter(
@@ -460,8 +463,7 @@ _TOOL_GOAL_ASSIGN = ToolDefinition(
 _TOOL_GOAL_UNASSIGN = ToolDefinition(
     name="goal_unassign",
     description=(
-        "Remove an agent from a goal. Driver-only, except an agent may "
-        "remove itself."
+        "Remove an agent from a goal. Any same-owner agent may call this."
     ),
     parameters=[
         ToolParameter(
@@ -484,8 +486,11 @@ _TOOL_GOAL_UNASSIGN = ToolDefinition(
 _TOOL_GOAL_HANDOFF = ToolDefinition(
     name="goal_handoff",
     description=(
-        "Hand off DRIVER on a goal to a peer agent. Only the current "
-        "DRIVER may call this. The from-agent becomes COLLABORATOR."
+        "Re-label the DRIVER on a goal — promotes the target to DRIVER "
+        "and demotes the from-agent (default: COLLABORATOR). The DRIVER "
+        "label is display-only; this tool exists so personas / prompts "
+        "that key off the label can be transferred. Any same-owner "
+        "agent may call it."
     ),
     parameters=[
         ToolParameter(
@@ -552,10 +557,11 @@ _TOOL_GOAL_POST = ToolDefinition(
 _TOOL_GOAL_STATUS = ToolDefinition(
     name="goal_status",
     description=(
-        "Set a goal's status. Only the current DRIVER may call this. "
-        "Statuses: 'new' | 'in_progress' | 'blocked' | 'complete' | "
-        "'cancelled'. Use 'cancelled' to abandon a goal — there is no "
-        "goal-deletion path."
+        "Set a goal's status. Any same-owner agent may call this — "
+        "coordinate via prompts/persona so only the agent currently "
+        "driving the goal moves it. Statuses: 'new' | 'in_progress' | "
+        "'blocked' | 'complete' | 'cancelled'. Use 'cancelled' to "
+        "abandon a goal — there is no goal-deletion path."
     ),
     parameters=[
         ToolParameter(
@@ -639,10 +645,10 @@ _TOOL_DELIVERABLE_CREATE = ToolDefinition(
 _TOOL_DELIVERABLE_FINALIZE = ToolDefinition(
     name="deliverable_finalize",
     description=(
-        "Flip a deliverable from DRAFT to READY. Only the producer or "
-        "the goal's DRIVER may call this. Finalizing a deliverable with "
-        "the same ``name`` as a prior READY one supersedes the prior "
-        "(marks it OBSOLETE) — only one READY per (goal, name)."
+        "Flip a deliverable from DRAFT to READY. Any same-owner agent "
+        "may call this. Finalizing a deliverable with the same ``name`` "
+        "as a prior READY one supersedes the prior (marks it OBSOLETE) "
+        "— only one READY per (goal, name)."
     ),
     parameters=[
         ToolParameter(
@@ -661,8 +667,7 @@ _TOOL_DELIVERABLE_SUPERSEDE = ToolDefinition(
     description=(
         "Mark a deliverable OBSOLETE and create a new one (DRAFT, or "
         "READY if ``finalize=True``) with the same ``name`` and "
-        "``kind`` on the same goal. Only the producer or the goal's "
-        "DRIVER may call this."
+        "``kind`` on the same goal. Any same-owner agent may call this."
     ),
     parameters=[
         ToolParameter(
@@ -693,8 +698,8 @@ _TOOL_GOAL_ADD_DEPENDENCY = ToolDefinition(
     description=(
         "Register that ``goal_id`` depends on ``source_goal_id`` "
         "producing a READY deliverable named "
-        "``required_deliverable_name``. DRIVER-only on the dependent "
-        "goal. Idempotent on (dependent, source, name). If the source "
+        "``required_deliverable_name``. Any same-owner agent may call "
+        "this. Idempotent on (dependent, source, name). If the source "
         "already has a matching READY deliverable, the new dependency "
         "is created satisfied — and assignees on ``goal_id`` are "
         "signaled immediately."
@@ -726,8 +731,7 @@ _TOOL_GOAL_ADD_DEPENDENCY = ToolDefinition(
 _TOOL_GOAL_REMOVE_DEPENDENCY = ToolDefinition(
     name="goal_remove_dependency",
     description=(
-        "Remove a goal dependency edge. Only the DRIVER on the dependent "
-        "goal may call this."
+        "Remove a goal dependency edge. Any same-owner agent may call this."
     ),
     parameters=[
         ToolParameter(
@@ -804,6 +808,7 @@ def _agent_to_dict(a: Agent) -> dict[str, Any]:
         "dream_quiet_hours": a.dream_quiet_hours,
         "dream_probability": a.dream_probability,
         "dream_max_per_night": a.dream_max_per_night,
+        "max_tool_rounds": a.max_tool_rounds,
         "created_at": a.created_at.isoformat(),
         "updated_at": a.updated_at.isoformat(),
     }
@@ -835,6 +840,7 @@ def _agent_from_dict(row: dict[str, Any]) -> Agent:
         dream_quiet_hours=row.get("dream_quiet_hours", "22:00-06:00"),
         dream_probability=float(row.get("dream_probability", 0.1)),
         dream_max_per_night=int(row.get("dream_max_per_night", 3)),
+        max_tool_rounds=int(row.get("max_tool_rounds", 50)),
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
@@ -1161,6 +1167,17 @@ class AgentService(Service):
         # safe boundary instead of waiting for the round to end.
         self._urgent_pending: dict[str, bool] = {}
 
+        # Per-agent ``complete_run`` flag. Set when the model invokes
+        # ``complete_run`` during a turn so the AI service's
+        # ``mid_round_interrupt`` callback returns True and the agentic
+        # loop breaks out instead of continuing to spin until
+        # max_tool_rounds. Cleared at run start in
+        # ``_run_agent_internal``. Without this, ``complete_run`` only
+        # marks the run row as complete but the AI loop keeps calling
+        # tools until the cap is hit — wasting tokens and producing
+        # "incomplete" turns in the chat UI.
+        self._complete_run_requested: dict[str, bool] = {}
+
         # Service-level defaults merged into create_agent calls
         self._defaults: dict[str, Any] = {}
 
@@ -1246,6 +1263,16 @@ class AgentService(Service):
                 type=ToolParameterType.INTEGER,
                 description="Default maximum dream runs allowed per night for new agents.",
                 default=3,
+            ),
+            ConfigParam(
+                key="default_max_tool_rounds",
+                type=ToolParameterType.INTEGER,
+                description=(
+                    "Default per-run cap on AI tool-use rounds for new agents. "
+                    "Each agent stores its own value; this is just the default "
+                    "applied at creation time."
+                ),
+                default=50,
             ),
             ConfigParam(
                 key="default_avatar_kind",
@@ -1488,6 +1515,10 @@ class AgentService(Service):
                 "dream_max_per_night",
                 int(defaults.get("default_dream_max_per_night", 3)),
             ),
+            max_tool_rounds=int(fields.get(
+                "max_tool_rounds",
+                int(defaults.get("default_max_tool_rounds", 50)),
+            )),
             created_at=now,
             updated_at=now,
         )
@@ -1535,7 +1566,8 @@ class AgentService(Service):
             "tools_include", "tools_exclude",
             "heartbeat_enabled", "heartbeat_interval_s",
             "heartbeat_checklist", "dream_enabled", "dream_quiet_hours",
-            "dream_probability", "dream_max_per_night", "status",
+            "dream_probability", "dream_max_per_night", "max_tool_rounds",
+            "status",
         }
         for k, v in patch.items():
             if k not in _allowed_patch_fields:
@@ -1801,15 +1833,31 @@ class AgentService(Service):
         try:
             chain_raw = sig.metadata.get("chain", []) if sig.metadata else []
             chain = [str(x) for x in chain_raw] if isinstance(chain_raw, list) else []
+            # Resolve a goal context for this signal, if any, so the run
+            # can route workspace tools to the war-room workspace. Two
+            # paths surface a goal_id: signals fired by goal events
+            # (goal_assigned / deliverable_ready) carry it in metadata;
+            # war-room posts carry their war-room conv id in
+            # ``source_conv_id`` and we look the goal up by that.
+            goal_id = ""
+            meta_goal = (sig.metadata or {}).get("goal_id")
+            if isinstance(meta_goal, str) and meta_goal:
+                goal_id = meta_goal
+            elif sig.source_conv_id:
+                goal_id = await self._goal_id_for_war_room(sig.source_conv_id)
+
+            ctx: dict[str, Any] = {
+                "signal_id": sig.id,
+                "sender_id": sig.sender_id,
+                "chain": chain,
+                "delegation_id": sig.delegation_id,
+            }
+            if goal_id:
+                ctx["goal_id"] = goal_id
             await self._run_agent_internal(
                 a,
                 triggered_by=signal_kind,
-                trigger_context={
-                    "signal_id": sig.id,
-                    "sender_id": sig.sender_id,
-                    "chain": chain,
-                    "delegation_id": sig.delegation_id,
-                },
+                trigger_context=ctx,
                 user_message=None,
             )
         finally:
@@ -2091,17 +2139,33 @@ class AgentService(Service):
                     for s in sigs
                 ]
 
+            # Clear any stale ``complete_run`` flag from a prior run on
+            # this same agent — the per-agent dict persists across runs.
+            self._complete_run_requested.pop(a.id, None)
+
             def _interrupt_check() -> bool:
                 """Mid-round boundary check (between tool-call groups).
 
-                Returns True iff an ``urgent`` signal has been queued for
-                this agent since the last drain. ``AIService.chat``
-                stubs out remaining tool calls in the current round,
-                completes the round, and the existing
-                ``between_rounds_callback`` flow drains the urgent
-                signal into the next round.
+                Returns True iff:
+                - An ``urgent`` signal has been queued for this agent
+                  since the last drain — the existing
+                  ``between_rounds_callback`` flow then drains the
+                  urgent signal into the next round.
+                - The agent invoked ``complete_run`` this turn — we
+                  short-circuit any remaining tool calls in the current
+                  round; ``_should_stop_check`` then breaks the loop.
                 """
-                return self._urgent_pending.get(a.id, False)
+                return (
+                    self._urgent_pending.get(a.id, False)
+                    or self._complete_run_requested.get(a.id, False)
+                )
+
+            def _should_stop_check() -> bool:
+                """Per-round stop signal. Returns True iff the model
+                invoked ``complete_run`` this turn — the agentic loop
+                breaks out cleanly instead of spinning to
+                ``max_tool_rounds``."""
+                return self._complete_run_requested.get(a.id, False)
 
             from gilbert.interfaces.auth import UserContext
             user_ctx = UserContext.from_user_id(a.owner_user_id) if hasattr(UserContext, "from_user_id") else None
@@ -2115,6 +2179,41 @@ class AgentService(Service):
             agent_token = _active_agent_id.set(a.id)
             chain = list(trigger_context.get("chain") or [])
             chain_token = _active_delegation_chain.set(chain)
+            # When the run is on a goal, redirect workspace tools to the
+            # goal's war-room workspace so artifacts the agent produces
+            # land in the shared room rather than its personal scratch.
+            #
+            # Goal context comes from one of two places:
+            #  1. ``trigger_context["goal_id"]`` — set by signal-driven
+            #     paths (goal_assigned, deliverable_ready, war-room
+            #     inbox via ``_run_with_signal``).
+            #  2. The agent's active assignments — covers manual /
+            #     heartbeat runs that don't carry a goal_id directly.
+            #     If the agent is on exactly one in-progress / new goal
+            #     we route to it; if they're on multiple, we don't pick
+            #     for them (the agent's prompt has the assignments list
+            #     and can disambiguate via subsequent tool calls).
+            ws_token = None
+            target_goal_id = str(trigger_context.get("goal_id") or "")
+            if not target_goal_id:
+                try:
+                    asgns = await self.list_assignments(
+                        agent_id=a.id, active_only=True,
+                    )
+                except Exception:
+                    asgns = []
+                # Only auto-route when the agent has exactly one active
+                # assignment — avoids guessing wrong when an agent is
+                # juggling multiple goals.
+                if len(asgns) == 1:
+                    target_goal_id = asgns[0].goal_id
+            if target_goal_id:
+                goal = await self.get_goal(target_goal_id)
+                if goal and goal.war_room_conversation_id:
+                    from gilbert.core.context import _workspace_conversation_id
+                    ws_token = _workspace_conversation_id.set(
+                        goal.war_room_conversation_id
+                    )
             try:
                 result = await self._ai.chat(  # type: ignore[union-attr]
                     user_message=user_msg,
@@ -2125,10 +2224,15 @@ class AgentService(Service):
                     ai_profile=a.profile_id,
                     between_rounds_callback=_between_rounds,
                     mid_round_interrupt=_interrupt_check,
+                    should_stop_callback=_should_stop_check,
+                    max_tool_rounds=a.max_tool_rounds or None,
                 )
             finally:
                 _active_agent_id.reset(agent_token)
                 _active_delegation_chain.reset(chain_token)
+                if ws_token is not None:
+                    from gilbert.core.context import _workspace_conversation_id
+                    _workspace_conversation_id.reset(ws_token)
 
             # ChatTurnResult uses `response_text`; map to run.final_message_text.
             run.final_message_text = result.response_text
@@ -2792,9 +2896,10 @@ class AgentService(Service):
         new_role_for_from: AssignmentRole = AssignmentRole.COLLABORATOR,
         note: str = "",
     ) -> tuple[GoalAssignment, GoalAssignment]:
-        """Hand off DRIVER from one agent to another.
+        """Re-label the DRIVER on a goal.
 
-        Asserts ``from_agent_id`` is currently DRIVER on ``goal_id``.
+        DRIVER is a display-only label (no enforcement); this method
+        just rewrites two assignment rows so the to-agent carries it.
         Demotes the from-agent to ``new_role_for_from`` (defaults
         COLLABORATOR), promotes the to-agent to DRIVER. Both rows get
         the ``handoff_note`` stamped. Returns ``(from_assignment,
@@ -2803,7 +2908,7 @@ class AgentService(Service):
         if self._storage is None:
             raise RuntimeError("not started")
 
-        # Find the current DRIVER row for from_agent.
+        # Find the from-agent's active assignment row (if any).
         from_rows = await self._storage.query(
             Query(
                 collection=_GOAL_ASSIGNMENTS_COLLECTION,
@@ -2816,10 +2921,6 @@ class AgentService(Service):
         from_active = next((r for r in from_rows if not r.get("removed_at")), None)
         if from_active is None:
             raise KeyError(f"agent {from_agent_id} is not assigned to goal {goal_id}")
-        if from_active.get("role") != AssignmentRole.DRIVER.value:
-            raise ValueError(
-                f"agent {from_agent_id} is not DRIVER on goal {goal_id}"
-            )
 
         # Demote from-agent.
         from_active["role"] = new_role_for_from.value
@@ -3427,6 +3528,11 @@ class AgentService(Service):
         row["ended_at"] = _now().isoformat()
         row["final_message_text"] = reason
         await self._storage.put(_AGENT_RUNS_COLLECTION, row["_id"], row)  # type: ignore[union-attr]
+        # Signal the agentic loop to stop at the next safe boundary —
+        # ``_interrupt_check`` reads this flag. Without this the loop
+        # keeps calling tools until max_tool_rounds, even though the run
+        # row is already marked completed.
+        self._complete_run_requested[agent_id] = True
         return f"run {row['_id']} marked complete: {reason}"
 
     async def _exec_commitment_create(self, args: dict[str, Any]) -> str:
@@ -3703,9 +3809,31 @@ class AgentService(Service):
                 return a
         return None
 
-    async def _is_driver(self, *, goal_id: str, agent_id: str) -> bool:
-        a = await self._is_active_assignee(goal_id=goal_id, agent_id=agent_id)
-        return a is not None and a.role is AssignmentRole.DRIVER
+    async def _goal_id_for_war_room(self, conv_id: str) -> str:
+        """Reverse-lookup: given a war-room conversation id, return the
+        owning goal's id, or "" if the conv isn't a war room.
+
+        Used to recover goal context for signals that originate from a
+        war-room post — those signals carry ``source_conv_id`` (the war
+        room) but not ``goal_id`` directly.
+        """
+        if not conv_id or self._storage is None:
+            return ""
+        rows = await self._storage.query(
+            Query(
+                collection=_GOALS_COLLECTION,
+                filters=[
+                    Filter(
+                        field="war_room_conversation_id",
+                        op=FilterOp.EQ,
+                        value=conv_id,
+                    ),
+                ],
+            )
+        )
+        if not rows:
+            return ""
+        return str(rows[0].get("_id", ""))
 
     def _coerce_role(self, raw: Any) -> AssignmentRole | None:
         """Map a string to AssignmentRole. Returns None on bad input."""
@@ -3792,8 +3920,6 @@ class AgentService(Service):
         me = await self.get_agent(agent_id)
         if me is None or me.owner_user_id != goal.owner_user_id:
             return "error: not authorized for this goal"
-        if not await self._is_driver(goal_id=goal_id, agent_id=agent_id):
-            return "error: only the goal's DRIVER may assign agents"
         try:
             target = await self._load_peer_by_name(
                 caller_agent_id=agent_id, target_name=target_name,
@@ -3828,10 +3954,6 @@ class AgentService(Service):
             )
         except PermissionError as exc:
             return f"error: {exc}"
-        # DRIVER may unassign anyone; non-DRIVER may only unassign self.
-        is_driver = await self._is_driver(goal_id=goal_id, agent_id=agent_id)
-        if not is_driver and target.id != agent_id:
-            return "error: only the DRIVER (or yourself) may unassign on this goal"
         try:
             await self.unassign_agent_from_goal(goal_id=goal_id, agent_id=target.id)
         except KeyError as exc:
@@ -3866,8 +3988,6 @@ class AgentService(Service):
         me = await self.get_agent(agent_id)
         if me is None or me.owner_user_id != goal.owner_user_id:
             return "error: not authorized for this goal"
-        if not await self._is_driver(goal_id=goal_id, agent_id=agent_id):
-            return "error: only the current DRIVER may hand off"
         try:
             target = await self._load_peer_by_name(
                 caller_agent_id=agent_id, target_name=target_name,
@@ -3931,6 +4051,21 @@ class AgentService(Service):
         conv_row["updated_at"] = now.isoformat()
         await self._storage.put(_AI_CONVERSATIONS_COLLECTION, conv_id, conv_row)
 
+        # Notify subscribers (SPA war-room view) that a new post landed
+        # so they can refresh without polling. Mentions still create
+        # inbox signals separately below — this event is purely for
+        # presentational refresh.
+        await self._publish(
+            "goal.post.created",
+            {
+                "goal_id": goal_id,
+                "war_room_conversation_id": conv_id,
+                "message_id": msg_id,
+                "author_id": me.id,
+                "author_name": me.name,
+            },
+        )
+
         # Process mentions: each named peer gets an inbox signal.
         mentions_raw = args.get("mention") or []
         mention_count = 0
@@ -3976,8 +4111,6 @@ class AgentService(Service):
         me = await self.get_agent(agent_id)
         if me is None or me.owner_user_id != goal.owner_user_id:
             return "error: not authorized for this goal"
-        if not await self._is_driver(goal_id=goal_id, agent_id=agent_id):
-            return "error: only the goal's DRIVER may change status"
         await self.update_goal_status(goal_id, new_status)
         return f"goal {goal_id} status set to {new_status.value}"
 
@@ -4074,10 +4207,6 @@ class AgentService(Service):
         me = await self.get_agent(agent_id)
         if me is None or me.owner_user_id != goal.owner_user_id:
             return "error: not authorized for this goal"
-        is_producer = d.produced_by_agent_id == agent_id
-        is_driver = await self._is_driver(goal_id=d.goal_id, agent_id=agent_id)
-        if not (is_producer or is_driver):
-            return "error: only the producer or DRIVER may finalize"
         try:
             finalized = await self.finalize_deliverable(deliverable_id)
         except (KeyError, ValueError) as exc:
@@ -4102,10 +4231,6 @@ class AgentService(Service):
         me = await self.get_agent(agent_id)
         if me is None or me.owner_user_id != goal.owner_user_id:
             return "error: not authorized for this goal"
-        is_producer = d.produced_by_agent_id == agent_id
-        is_driver = await self._is_driver(goal_id=d.goal_id, agent_id=agent_id)
-        if not (is_producer or is_driver):
-            return "error: only the producer or DRIVER may supersede"
         try:
             obs, new = await self.supersede_deliverable(
                 deliverable_id, new_content_ref=new_content_ref,
@@ -4145,10 +4270,6 @@ class AgentService(Service):
         # Source goal must also be same-owner — no cross-owner reach.
         if src_goal.owner_user_id != dep_goal.owner_user_id:
             return "error: source and dependent goals must share owner"
-        if not await self._is_driver(
-            goal_id=dependent_goal_id, agent_id=agent_id,
-        ):
-            return "error: only the dependent goal's DRIVER may add dependencies"
         dep = await self.add_goal_dependency(
             dependent_goal_id=dependent_goal_id,
             source_goal_id=source_goal_id,
@@ -4180,10 +4301,6 @@ class AgentService(Service):
         me = await self.get_agent(agent_id)
         if me is None or me.owner_user_id != dep_goal.owner_user_id:
             return "error: not authorized for the dependent goal"
-        if not await self._is_driver(
-            goal_id=dep.dependent_goal_id, agent_id=agent_id,
-        ):
-            return "error: only the DRIVER may remove dependencies"
         try:
             await self.remove_goal_dependency(dependency_id)
         except KeyError as exc:
@@ -4321,7 +4438,7 @@ class AgentService(Service):
             "tools_include", "tools_exclude",
             "heartbeat_enabled", "heartbeat_interval_s",
             "heartbeat_checklist", "dream_enabled", "dream_quiet_hours",
-            "dream_probability", "dream_max_per_night",
+            "dream_probability", "dream_max_per_night", "max_tool_rounds",
         }
         fields = {k: v for k, v in params.items() if k in allowed_fields}
         a = await self.create_agent(owner_user_id=owner, name=name, **fields)

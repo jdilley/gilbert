@@ -318,9 +318,13 @@ semantics.
 ## Phase 4 — Multi-agent goals
 
 First-class `Goal` entity with one or more agent assignees. A Goal
-owns a war-room conversation; assignments come in three roles —
-DRIVER (the responsible owner), COLLABORATOR (peer worker), REVIEWER
-(read-mostly). Same-owner only in Phase 4; cross-user is Phase 6.
+owns a war-room conversation; assignments carry one of three role
+labels — DRIVER, COLLABORATOR, REVIEWER — but **the labels are
+display-only and gate nothing**. Any same-owner agent can change
+status, manage assignees, finalize deliverables, etc. The DRIVER
+label survives so personas/system prompts can key off "you're the
+driver on this goal" semantically; coordination is via prompting,
+not enforcement. Same-owner only in Phase 4; cross-user is Phase 6.
 
 **Entities** (`src/gilbert/interfaces/agent.py`):
 - `Goal` — id, owner_user_id, name, description, status (NEW /
@@ -347,19 +351,21 @@ delete), `handoff_goal` (atomically demotes DRIVER →
 DRIVER). `_recent_war_room_posts(goal_id, limit)` reads the conv's
 last N user-role messages for prompt assembly.
 
-**Tools (seven new):**
+**Tools (seven new):** All goal-mutation tools are gated only by
+same-owner — there is no DRIVER-only enforcement. Coordination
+(who-does-what) is via prompts and procedural rules, not RBAC.
 - `goal_create` — creates goal + assignments. Caller becomes the
   owner. Resolves `assign_to` agent names via `_load_peer_by_name`.
-- `goal_assign` — DRIVER-only.
-- `goal_unassign` — DRIVER-only OR self-unassign.
-- `goal_handoff` — current DRIVER only. Defaults `new_role_for_from`
-  to COLLABORATOR.
+- `goal_assign` — same-owner.
+- `goal_unassign` — same-owner.
+- `goal_handoff` — re-labels the DRIVER on a goal (display-only).
+  Defaults `new_role_for_from` to COLLABORATOR. Same-owner.
 - `goal_post(goal_id, body, mention=[])` — assignee-only. Appends
   USER-role row to the war-room conv with
   `metadata.sender = {kind, id, name}`. Mentioned peers receive an
   `inbox` signal with body `[mentioned in war room <name>]: <body>`.
   Joins `_CORE_AGENT_TOOLS`.
-- `goal_status(goal_id, new_status)` — DRIVER-only.
+- `goal_status(goal_id, new_status)` — same-owner.
 - `goal_summary(goal_id)` — assignee-only. Returns JSON
   `{name, description, status, assignees, recent_posts (last 10),
   lifetime_cost_usd, is_dependency_blocked: false}`.
@@ -385,6 +391,29 @@ ACTIVE ASSIGNMENTS:
 
 Recent posts default to last 10. The block is omitted entirely when
 the agent has no active assignments.
+
+**Workspace routing on goal context.** ``_run_agent_internal`` sets
+``core.context._workspace_conversation_id`` to a goal's
+``war_room_conversation_id`` for the duration of the run when any of
+these is true: (a) ``trigger_context["goal_id"]`` is set
+(signal-driven path); (b) the agent has *exactly one* active goal
+assignment (manual / heartbeat / delegation paths). The AI service's
+tool-execution path checks that ContextVar and overrides
+``_conversation_id`` *for tools whose name contains ``"workspace"``*
+— matches the WorkspaceService tool family
+(``read_workspace_file`` / ``write_workspace_file`` /
+``browse_workspace`` / ``run_workspace_script`` /
+``attach_workspace_file`` / ``annotate_workspace_file`` /
+``delete_workspace_file`` / ``share_workspace_file``). Chat history
+still goes to the agent's personal conv; only workspace artifacts
+land in the war room. Goal context arrives via four paths:
+``goal_assigned`` / ``deliverable_ready`` signals carry ``goal_id``
+in metadata; war-room post inboxes carry ``source_conv_id`` and
+``_run_with_signal`` reverse-looks-up the goal via
+``_goal_id_for_war_room``; manual / heartbeat / delegation runs
+auto-route via the active-assignment fallback. Agents acting on
+multiple goals concurrently are not auto-routed (we don't pick for
+them); they fall back to their personal workspace.
 
 **Events:** `goal.created`, `goal.updated`, `goal.status.changed`,
 `goal.assignment.changed` published by the relevant methods. The
@@ -470,23 +499,23 @@ it is out of scope.
 `False`. Phase 5 computes it: True iff any `goal_dependencies` row
 with `dependent_goal_id == goal_id` has `satisfied_at IS NULL`.
 
-**Tools (five new):**
+**Tools (five new):** Same-owner gating only — no DRIVER/producer
+enforcement.
 - `deliverable_create(goal_id, name, kind, content_ref?)` — assignee-
   only. Creates a DRAFT row owned by the caller agent.
-- `deliverable_finalize(deliverable_id)` — producer OR DRIVER. Flips
+- `deliverable_finalize(deliverable_id)` — same-owner. Flips
   DRAFT → READY, fires `goal.deliverable.finalized`, runs
   propagation.
 - `deliverable_supersede(deliverable_id, new_content_ref, finalize=False)`
-  — producer OR DRIVER. Marks the predecessor OBSOLETE and creates a
+  — same-owner. Marks the predecessor OBSOLETE and creates a
   successor DRAFT (or READY when `finalize=True`). When the successor
   is finalized, propagation runs as above.
 - `goal_add_dependency(dependent_goal_id, source_goal_id,
-  required_deliverable_name)` — DRIVER of the dependent goal.
-  Idempotent on `(dependent, source, name)`. If the source goal
-  *already* has a READY deliverable matching the name, the row is
-  created with `satisfied_at = now` immediately.
-- `goal_remove_dependency(dependency_id)` — DRIVER of the dependent
-  goal.
+  required_deliverable_name)` — same-owner. Idempotent on
+  `(dependent, source, name)`. If the source goal *already* has a
+  READY deliverable matching the name, the row is created with
+  `satisfied_at = now` immediately.
+- `goal_remove_dependency(dependency_id)` — same-owner.
 
 **WS RPCs (six new):**
 - `deliverables.list / create / finalize / supersede`
@@ -500,11 +529,11 @@ ACL: `"deliverables.": 100` and `"goals.dependencies.": 100` in
 `goal.dependency.satisfied`, `goal.dependency.removed`.
 
 **Frontend:** `DeliverablesPanel` and `DependenciesPanel` replace the
-Phase 4 placeholders in the war-room right rail. The viewer is a
-human user, not an agent, so the SPA forwards a permissive
-``isDriver=true`` and surfaces backend errors inline if the user lacks
-the producer/DRIVER role on the goal. The deliverables panel
-subscribes to `goal.deliverable.finalized` for live refresh. New
+Phase 4 placeholders in the war-room right rail. With DRIVER demoted
+to a label, the SPA's permissive ``isDriver=true`` no longer
+encodes anything meaningful — backend gating is purely same-owner.
+The deliverables panel subscribes to `goal.deliverable.finalized`
+for live refresh. New
 React Query hooks live in `frontend/src/api/goals.ts`:
 `useDeliverables`, `useCreateDeliverable`, `useFinalizeDeliverable`,
 `useSupersedeDeliverable`, `useDependencies`, `useAddDependency`,

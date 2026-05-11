@@ -1,12 +1,11 @@
 /**
  * DeliverablesPanel — right-rail card on the war-room page that lists
- * a goal's deliverables (drafts + finalized + obsolete) and lets a
- * driver/producer mutate them.
+ * a goal's deliverables (drafts + finalized + obsolete) and lets the
+ * viewer mutate them.
  *
- * Backend authority: the WS layer ultimately gates each mutation
- * (producer OR DRIVER for finalize/supersede). The SPA forwards a
- * permissive ``isDriver`` flag and surfaces backend errors inline if a
- * mutation is rejected.
+ * Backend authority: the WS layer gates each mutation (same-owner
+ * only). Anyone with access to the goal can finalize/supersede;
+ * inline errors surface anything the backend rejects.
  *
  * Real-time: the panel subscribes to ``goal.deliverable.finalized`` so
  * a finalize fired by another agent shows up without a manual refresh.
@@ -47,11 +46,6 @@ import type { GilbertEvent } from "@/types/events";
 
 interface Props {
   goalId: string;
-  isDriver: boolean;
-  /** When set, the viewer is the producer agent themselves (gives access
-   * to actions even without DRIVER role). Currently always undefined
-   * from the war-room page since the viewer is a user, not an agent. */
-  viewerAgentId?: string;
 }
 
 const STATE_BADGE_CLASS: Record<DeliverableState, string> = {
@@ -68,7 +62,7 @@ const STATE_LABEL: Record<DeliverableState, string> = {
 
 const KIND_HINTS = ["spec", "code", "report", "image"];
 
-export function DeliverablesPanel({ goalId, isDriver, viewerAgentId }: Props) {
+export function DeliverablesPanel({ goalId }: Props) {
   const qc = useQueryClient();
   const deliverablesQuery = useDeliverables(goalId);
   const { data: agents } = useAgents();
@@ -165,10 +159,6 @@ export function DeliverablesPanel({ goalId, isDriver, viewerAgentId }: Props) {
           <ul className="mt-3 space-y-2">
             {sorted.map((deliverable) => {
               const producer = agentById[deliverable.produced_by_agent_id];
-              const canAct =
-                isDriver ||
-                (viewerAgentId !== undefined &&
-                  deliverable.produced_by_agent_id === viewerAgentId);
               const isObsolete = deliverable.state === "obsolete";
               return (
                 <li
@@ -213,7 +203,7 @@ export function DeliverablesPanel({ goalId, isDriver, viewerAgentId }: Props) {
                     </div>
                   </div>
 
-                  {canAct && !isObsolete && (
+                  {!isObsolete && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {deliverable.state === "draft" && (
                         <Button

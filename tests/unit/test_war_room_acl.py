@@ -1,5 +1,6 @@
-"""Phase 4 — War-room ACL: assignee-only post + driver-only status +
-assignee summary."""
+"""Phase 4 — War-room ACL: assignee-only post + same-owner status +
+assignee summary. Driver-role gating was dropped in favor of
+prompting; the only remaining ACL boundary is same-owner."""
 
 from __future__ import annotations
 
@@ -33,7 +34,8 @@ async def test_non_assignee_post_blocked(started_agent_service: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_non_driver_status_blocked(started_agent_service: Any) -> None:
+async def test_collaborator_can_change_status(started_agent_service: Any) -> None:
+    """COLLABORATOR can move status — DRIVER is just a label now."""
     svc = started_agent_service
     driver = await svc.create_agent(owner_user_id="usr_1", name="driver")
     collab = await svc.create_agent(owner_user_id="usr_1", name="collab")
@@ -50,9 +52,9 @@ async def test_non_driver_status_blocked(started_agent_service: Any) -> None:
         "goal_id": g.id,
         "new_status": "complete",
     })
-    assert res.startswith("error:")
+    assert "complete" in res
     fresh = await svc.get_goal(g.id)
-    assert fresh.status is GoalStatus.NEW
+    assert fresh.status is GoalStatus.COMPLETE
 
 
 @pytest.mark.asyncio

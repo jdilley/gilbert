@@ -92,6 +92,7 @@ interface FormState {
   dream_quiet_hours: string;
   dream_probability: number;
   dream_max_per_night: number;
+  max_tool_rounds: number;
   profile_id: string;
   cost_cap_usd: string; // text — empty string => null
   tools_include: string[] | null;
@@ -153,6 +154,7 @@ function emptyState(): FormState {
     dream_quiet_hours: "",
     dream_probability: 0,
     dream_max_per_night: 0,
+    max_tool_rounds: 50,
     profile_id: "",
     cost_cap_usd: "",
     tools_include: null,
@@ -181,6 +183,8 @@ function stateFromDefaults(defaults: AgentDefaults): FormState {
       defaults.default_dream_probability ?? base.dream_probability,
     dream_max_per_night:
       defaults.default_dream_max_per_night ?? base.dream_max_per_night,
+    max_tool_rounds:
+      defaults.default_max_tool_rounds ?? base.max_tool_rounds,
   };
 }
 
@@ -202,6 +206,7 @@ function stateFromAgent(agent: Agent): FormState {
     dream_quiet_hours: agent.dream_quiet_hours,
     dream_probability: agent.dream_probability,
     dream_max_per_night: agent.dream_max_per_night,
+    max_tool_rounds: agent.max_tool_rounds,
     profile_id: agent.profile_id,
     cost_cap_usd:
       agent.cost_cap_usd === null || agent.cost_cap_usd === undefined
@@ -220,6 +225,7 @@ interface ValidationErrors {
   cost_cap_usd?: string;
   dream_probability?: string;
   heartbeat_interval_s?: string;
+  max_tool_rounds?: string;
 }
 
 function validate(state: FormState): ValidationErrors {
@@ -250,6 +256,13 @@ function validate(state: FormState): ValidationErrors {
   }
   if (state.heartbeat_interval_s < 60) {
     errors.heartbeat_interval_s = "Must be at least 60 seconds.";
+  }
+  if (
+    !Number.isInteger(state.max_tool_rounds) ||
+    state.max_tool_rounds < 1 ||
+    state.max_tool_rounds > 500
+  ) {
+    errors.max_tool_rounds = "Must be a whole number between 1 and 500.";
   }
   return errors;
 }
@@ -393,6 +406,7 @@ export function AgentEditForm(props: Props) {
       dream_quiet_hours: state.dream_quiet_hours,
       dream_probability: state.dream_probability,
       dream_max_per_night: state.dream_max_per_night,
+      max_tool_rounds: state.max_tool_rounds,
       profile_id: state.profile_id,
       cost_cap_usd:
         state.cost_cap_usd.trim() === "" ? null : Number(state.cost_cap_usd),
@@ -426,6 +440,7 @@ export function AgentEditForm(props: Props) {
       dream_quiet_hours: state.dream_quiet_hours,
       dream_probability: state.dream_probability,
       dream_max_per_night: state.dream_max_per_night,
+      max_tool_rounds: state.max_tool_rounds,
       profile_id: state.profile_id,
       cost_cap_usd:
         state.cost_cap_usd.trim() === "" ? null : Number(state.cost_cap_usd),
@@ -868,6 +883,38 @@ export function AgentEditForm(props: Props) {
             {errors.cost_cap_usd && (
               <p className="text-xs text-destructive">
                 {errors.cost_cap_usd}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="agent-max-tool-rounds">
+              Max tool rounds per run
+            </Label>
+            <Input
+              id="agent-max-tool-rounds"
+              type="number"
+              min={1}
+              max={500}
+              step={1}
+              value={state.max_tool_rounds}
+              onChange={(e) =>
+                update(
+                  "max_tool_rounds",
+                  e.target.value === "" ? 0 : Number(e.target.value),
+                )
+              }
+              aria-invalid={errors.max_tool_rounds ? true : undefined}
+            />
+            <p className="text-xs text-muted-foreground">
+              Caps how many tool-use rounds the agent can take in a single
+              run before the loop is forced to stop. Higher values let the
+              agent finish complex multi-step work; lower values bound runaway
+              loops. Overrides the global <code>ai.settings.max_tool_rounds</code>.
+            </p>
+            {errors.max_tool_rounds && (
+              <p className="text-xs text-destructive">
+                {errors.max_tool_rounds}
               </p>
             )}
           </div>

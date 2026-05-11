@@ -2006,6 +2006,7 @@ class AIService(Service):
         max_tool_rounds: int | None = None,
         between_rounds_callback: Any = None,
         mid_round_interrupt: Callable[[], bool] | None = None,
+        should_stop_callback: Callable[[], bool] | None = None,
     ) -> ChatTurnResult:
         """Send a user message and get an AI response (with full agentic loop).
 
@@ -2042,6 +2043,16 @@ class AIService(Service):
                 ``urgent`` peer signal arrives. When ``None`` or always
                 returns ``False``, behavior is identical to prior
                 phases.
+            should_stop_callback: Optional sync callable ``() -> bool``
+                checked at the top of each round (after the
+                ``between_rounds_callback`` has had a chance to inject
+                messages). When it returns ``True``, the agentic loop
+                breaks out cleanly — no further model calls, the turn
+                ends with whatever assistant content was produced in
+                the prior round. Used by AgentService so that
+                ``complete_run`` actually stops the loop instead of
+                only marking the run row complete and letting the loop
+                spin to ``max_tool_rounds``.
         """
         if not self._backends:
             raise RuntimeError("No AI backends initialized")
@@ -2280,6 +2291,23 @@ class AIService(Service):
                             len(injected),
                             conversation_id,
                         )
+                # Caller-driven early stop: e.g. AgentService asks us to
+                # break out when the model invoked ``complete_run``. We
+                # check after between_rounds_callback so any final
+                # messages the caller wanted to inject are still in
+                # play; we only skip the next *model* call.
+                if (
+                    round_num > 0
+                    and should_stop_callback is not None
+                    and should_stop_callback()
+                ):
+                    logger.info(
+                        "Agentic loop stopped early by should_stop_callback "
+                        "for conversation %s at round %d",
+                        conversation_id,
+                        round_num,
+                    )
+                    break
                 truncated = self._truncate_history(
                     messages, compression_state=compression_state
                 )
@@ -3370,6 +3398,22 @@ class AIService(Service):
                 arguments["_user_email"] = user_ctx.email
         if conv_id:
             arguments["_conversation_id"] = conv_id
+        # Workspace tools may be redirected to a different conversation's
+        # workspace via the ``_workspace_conversation_id`` ContextVar —
+        # AgentService sets it when an agent is acting on a goal so the
+        # goal's war-room workspace is targeted instead of the agent's
+        # personal one. Match by the WorkspaceService tool family —
+        # browse_workspace / read_workspace_file / write_workspace_file /
+        # run_workspace_script / attach_workspace_file /
+        # annotate_workspace_file / delete_workspace_file /
+        # share_workspace_file. The substring "workspace" in the tool
+        # name is the family marker; other ``_conversation_id``
+        # consumers (knowledge, attachments, etc.) don't have that
+        # substring and keep their normal conv.
+        from gilbert.core.context import get_workspace_conversation_id
+        ws_conv = get_workspace_conversation_id()
+        if ws_conv and "workspace" in tc.tool_name:
+            arguments["_conversation_id"] = ws_conv
         arguments["_invocation_source"] = "ai"
         if room_members is not None:
             arguments["_room_members"] = room_members
@@ -4496,10 +4540,18 @@ class AIService(Service):
         instead of a blind last-N. The summary itself is injected into the
         system prompt separately — this method only decides which raw messages
         to include in the request.
+
+        If ``compressed_up_to`` is out of range (e.g. the messages list was
+        externally truncated, leaving a stale checkpoint), fall back to
+        sending the full list. Without this guard, the chat call goes out
+        with an empty ``messages`` array and the upstream provider rejects
+        it ("messages: at least one message is required").
         """
         start = 0
         if compression_state and isinstance(compression_state.get("compressed_up_to"), int):
-            start = compression_state["compressed_up_to"]
+            candidate = compression_state["compressed_up_to"]
+            if 0 <= candidate < len(messages):
+                start = candidate
 
         tail = messages[start:]
 

@@ -237,9 +237,10 @@ async def test_deliverable_create_blocks_non_assignee(
     assert out.startswith("error:")
 
 
-async def test_deliverable_finalize_producer_or_driver(
+async def test_deliverable_finalize_any_same_owner(
     started_agent_service,
 ) -> None:
+    """Any same-owner agent can finalize; cross-owner stays blocked."""
     svc = started_agent_service
     a, b = await _make_two_agents(svc)
     g = await svc.create_goal(
@@ -263,10 +264,9 @@ async def test_deliverable_finalize_producer_or_driver(
             "content_ref": "inline:body",
         },
     )
-    payload = json.loads(out)
-    did = payload["deliverable_id"]
+    did = json.loads(out)["deliverable_id"]
 
-    # ... and finalizes it (producer path).
+    # ... and finalizes it (producer path still works).
     fout = await svc.execute_tool(
         "deliverable_finalize",
         {"_agent_id": b.id, "deliverable_id": did},
@@ -276,7 +276,7 @@ async def test_deliverable_finalize_producer_or_driver(
     assert fetched is not None
     assert fetched.state is DeliverableState.READY
 
-    # Make a second draft, owned by bravo, then finalize via DRIVER (alpha).
+    # Make a second draft, finalize via DRIVER label-holder (alpha).
     out2 = await svc.execute_tool(
         "deliverable_create",
         {
@@ -291,7 +291,7 @@ async def test_deliverable_finalize_producer_or_driver(
     )
     assert "READY" in fout2 or "ready" in fout2
 
-    # And a non-producer non-driver is blocked.
+    # A same-owner agent who is neither producer nor assigned can also finalize.
     c = await svc.create_agent(owner_user_id="usr_1", name="charlie")
     out3 = await svc.execute_tool(
         "deliverable_create",
@@ -302,7 +302,20 @@ async def test_deliverable_finalize_producer_or_driver(
         "deliverable_finalize",
         {"_agent_id": c.id, "deliverable_id": did3},
     )
-    assert fout3.startswith("error:")
+    assert "READY" in fout3 or "ready" in fout3
+
+    # Cross-owner remains blocked.
+    stranger = await svc.create_agent(owner_user_id="usr_2", name="stranger")
+    out4 = await svc.execute_tool(
+        "deliverable_create",
+        {"_agent_id": b.id, "goal_id": g.id, "name": "spec4", "kind": "spec"},
+    )
+    did4 = json.loads(out4)["deliverable_id"]
+    fout4 = await svc.execute_tool(
+        "deliverable_finalize",
+        {"_agent_id": stranger.id, "deliverable_id": did4},
+    )
+    assert fout4.startswith("error:")
 
 
 async def test_deliverable_supersede_via_tool(started_agent_service) -> None:

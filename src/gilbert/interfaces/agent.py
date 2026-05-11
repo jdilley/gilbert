@@ -104,6 +104,10 @@ class Agent:
     dream_quiet_hours: str
     dream_probability: float
     dream_max_per_night: int
+    max_tool_rounds: int            # per-run cap on AI tool-use rounds;
+                                    # overrides the global
+                                    # ``ai.settings.max_tool_rounds`` for
+                                    # this agent's runs.
     created_at: datetime
     updated_at: datetime
 
@@ -212,10 +216,12 @@ class Goal:
     """A multi-agent goal. One war-room conversation per goal; one or
     more agent assignees with role DRIVER / COLLABORATOR / REVIEWER.
 
-    A DRIVER is the only assignee who can change ``status``, hand off,
-    or add/remove other assignees. ``lifetime_cost_usd`` is informational
-    in Phase 4 (no auto-disable). ``cost_cap_usd`` is stored but not
-    enforced until later phases.
+    Roles are display-only labels — any assignee (any same-owner
+    agent, in fact) may change ``status``, manage assignees, finalize
+    deliverables, etc. DRIVER survives so personas / system prompts
+    can key off "you're the driver on this goal" semantically.
+    ``lifetime_cost_usd`` is informational in Phase 4 (no auto-disable).
+    ``cost_cap_usd`` is stored but not enforced until later phases.
     """
 
     id: str

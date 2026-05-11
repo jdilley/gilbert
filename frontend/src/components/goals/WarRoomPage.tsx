@@ -4,7 +4,8 @@
  * Layout:
  *  - Back link to ``/goals``.
  *  - Header card: name, description, status pill, lifetime cost,
- *    "Status" dropdown (DRIVER mutates via ``goals.update_status``),
+ *    "Status" dropdown (mutates via ``goals.update_status`` —
+ *    same-owner only, no role gating),
  *    "Handoff" button (opens dialog).
  *  - AssigneesStrip below the header.
  *  - Two-column body: scrollable post list + a right rail with
@@ -23,7 +24,7 @@
  *    posts query auto-refreshes when React Query re-validates.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgents } from "@/api/agents";
@@ -68,6 +69,7 @@ import type {
 import { AssigneesStrip } from "./AssigneesStrip";
 import { DeliverablesPanel } from "./DeliverablesPanel";
 import { DependenciesPanel } from "./DependenciesPanel";
+import { WarRoomFilesPanel } from "./WarRoomFilesPanel";
 import { GoalStatusPill } from "./GoalCard";
 import type { GilbertEvent } from "@/types/events";
 
@@ -131,9 +133,20 @@ export function WarRoomPage() {
     [goalId, qc],
   );
 
+  const onPostCreated = useCallback(
+    (event: GilbertEvent) => {
+      if (event.data.goal_id === goalId) {
+        qc.invalidateQueries({ queryKey: ["goals", "posts", goalId] });
+        qc.invalidateQueries({ queryKey: ["goals", "summary", goalId] });
+      }
+    },
+    [goalId, qc],
+  );
+
   useEventBus("goal.updated", onGoalChanged);
   useEventBus("goal.status.changed", onGoalChanged);
   useEventBus("goal.assignment.changed", onAssignmentChanged);
+  useEventBus("goal.post.created", onPostCreated);
 
   // ── Loading / error states ────────────────────────────────────────
 
@@ -288,14 +301,15 @@ export function WarRoomPage() {
 
         <div className="space-y-3">
           {/*
-           * The viewer here is a user, not an agent. The backend gates
-           * each mutation (producer OR DRIVER for finalize/supersede;
-           * caller owner for dependency add/remove), so we forward a
-           * permissive ``isDriver={true}`` and surface backend errors
-           * inline. Future polish can compute true ownership/role.
+           * Same-owner only — no role gating on these mutations. Any
+           * surfacing constraint is handled by the backend; errors
+           * appear inline in each panel.
            */}
-          <DeliverablesPanel goalId={goal._id} isDriver={true} />
-          <DependenciesPanel goalId={goal._id} isDriver={true} />
+          <DeliverablesPanel goalId={goal._id} />
+          <WarRoomFilesPanel
+            conversationId={goal.war_room_conversation_id}
+          />
+          <DependenciesPanel goalId={goal._id} />
         </div>
       </div>
 
@@ -411,8 +425,30 @@ function PostsList({ posts }: { posts: WarRoomPost[] }) {
     (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
   );
 
+  // Auto-scroll to bottom whenever the post count grows AND the user
+  // is already near the bottom — preserves manual scroll-up to read
+  // history. The 80px threshold matches one or two typical posts; if
+  // the user is further up than that, leave their position alone.
+  const listRef = useRef<HTMLOListElement | null>(null);
+  const lastCount = useRef(0);
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const grew = ordered.length > lastCount.current;
+    lastCount.current = ordered.length;
+    if (!grew) return;
+    const distanceFromBottom =
+      el.scrollHeight - (el.scrollTop + el.clientHeight);
+    if (distanceFromBottom < 80) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [ordered.length]);
+
   return (
-    <ol className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
+    <ol
+      ref={listRef}
+      className="space-y-3 max-h-[60vh] overflow-y-auto pr-2"
+    >
       {ordered.map((p, i) => {
         const agent =
           p.author_kind === "agent" ? agentByName[p.author_name] : undefined;
@@ -516,9 +552,11 @@ function HandoffDialog({
       <DialogContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <DialogHeader>
-            <DialogTitle>Handoff DRIVER role</DialogTitle>
+            <DialogTitle>Reassign driver label</DialogTitle>
             <DialogDescription>
-              Transfer the DRIVER role to another assignee. The current
+              Move the "driver" label to another assignee. The label is
+              display-only — useful for personas / system prompts that
+              key off who's driving — and gates nothing. The previous
               driver becomes a collaborator (or a role you choose), and
               the note is recorded on both assignment rows.
             </DialogDescription>

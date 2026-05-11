@@ -485,3 +485,28 @@ async def test_system_prompt_no_block_without_assignments(
     a = await svc.create_agent(owner_user_id="usr_1", name="a1")
     prompt = await svc._build_system_prompt(a, "manual", {})
     assert "ACTIVE ASSIGNMENTS:" not in prompt
+
+
+# ── war-room workspace routing helper ────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_goal_id_for_war_room_resolves(started_agent_service: Any) -> None:
+    """The reverse lookup from a war-room conv id to its goal id powers
+    workspace routing for inbox-triggered runs that lack a goal_id in
+    metadata."""
+    svc = started_agent_service
+    g = await svc.create_goal(owner_user_id="usr_1", name="x")
+    assert g.war_room_conversation_id
+    found = await svc._goal_id_for_war_room(g.war_room_conversation_id)
+    assert found == g.id
+
+
+@pytest.mark.asyncio
+async def test_goal_id_for_war_room_unknown_conv(
+    started_agent_service: Any,
+) -> None:
+    """An unknown / non-war-room conv id resolves to the empty string."""
+    svc = started_agent_service
+    assert await svc._goal_id_for_war_room("not-a-real-conv") == ""
+    assert await svc._goal_id_for_war_room("") == ""

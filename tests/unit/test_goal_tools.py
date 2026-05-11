@@ -196,8 +196,8 @@ async def test_goal_post_mentions_signal_targets(started_agent_service: Any) -> 
 
 
 @pytest.mark.asyncio
-async def test_goal_status_driver_only(started_agent_service: Any) -> None:
-    """A non-DRIVER assignee gets an error; DRIVER succeeds."""
+async def test_goal_status_any_same_owner_agent(started_agent_service: Any) -> None:
+    """Any same-owner agent can change a goal's status — DRIVER is just a label."""
     svc = started_agent_service
     driver = await svc.create_agent(owner_user_id="usr_1", name="driver")
     collab = await svc.create_agent(owner_user_id="usr_1", name="collab")
@@ -210,25 +210,44 @@ async def test_goal_status_driver_only(started_agent_service: Any) -> None:
         ],
     )
 
-    # Non-driver blocked.
-    bad = await svc._exec_goal_status({
-        "_agent_id": collab.id,
-        "goal_id": g.id,
-        "new_status": "in_progress",
-    })
-    assert bad.startswith("error:")
-    fresh = await svc.get_goal(g.id)
-    assert fresh.status is GoalStatus.NEW
-
-    # Driver succeeds.
+    # COLLABORATOR can move status (no DRIVER gating).
     ok = await svc._exec_goal_status({
-        "_agent_id": driver.id,
+        "_agent_id": collab.id,
         "goal_id": g.id,
         "new_status": "in_progress",
     })
     assert "in_progress" in ok
     fresh = await svc.get_goal(g.id)
     assert fresh.status is GoalStatus.IN_PROGRESS
+
+    # DRIVER can also move status (still works, of course).
+    ok = await svc._exec_goal_status({
+        "_agent_id": driver.id,
+        "goal_id": g.id,
+        "new_status": "complete",
+    })
+    assert "complete" in ok
+    fresh = await svc.get_goal(g.id)
+    assert fresh.status is GoalStatus.COMPLETE
+
+
+@pytest.mark.asyncio
+async def test_goal_status_cross_owner_blocked(started_agent_service: Any) -> None:
+    """Cross-owner remains blocked — that's the only auth boundary left."""
+    svc = started_agent_service
+    me = await svc.create_agent(owner_user_id="usr_1", name="mine")
+    stranger = await svc.create_agent(owner_user_id="usr_2", name="theirs")
+    g = await svc.create_goal(
+        owner_user_id="usr_1",
+        name="x",
+        assign_to=[(me.name, AssignmentRole.DRIVER)],
+    )
+    bad = await svc._exec_goal_status({
+        "_agent_id": stranger.id,
+        "goal_id": g.id,
+        "new_status": "in_progress",
+    })
+    assert bad.startswith("error:")
 
 
 # ── goal_handoff ─────────────────────────────────────────────────────
@@ -264,8 +283,16 @@ async def test_goal_handoff_via_tool(started_agent_service: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_goal_handoff_non_driver_blocked(started_agent_service: Any) -> None:
-    """A non-DRIVER cannot hand off."""
+async def test_goal_handoff_relabels_driver_for_any_assignee(
+    started_agent_service: Any,
+) -> None:
+    """Handoff is now a label-rewrite that any assignee can trigger.
+
+    Previously DRIVER-only; with the role demoted to a display label,
+    any same-owner assignee can promote a peer to DRIVER. The from-agent
+    referenced in ``_agent_id`` only needs to exist — handoff_goal moves
+    the DRIVER label off of ``from_agent_id`` regardless of its prior role.
+    """
     svc = started_agent_service
     a = await svc.create_agent(owner_user_id="usr_1", name="a1")
     b = await svc.create_agent(owner_user_id="usr_1", name="b1")
@@ -279,15 +306,16 @@ async def test_goal_handoff_non_driver_blocked(started_agent_service: Any) -> No
             (c.name, AssignmentRole.COLLABORATOR),
         ],
     )
+    # B (a COLLABORATOR) re-labels itself out of the way and promotes C.
     res = await svc._exec_goal_handoff({
         "_agent_id": b.id,
         "goal_id": g.id,
         "target_name": "c1",
     })
-    assert res.startswith("error:")
+    assert "handed off" in res
     asgns = await svc.list_assignments(goal_id=g.id, active_only=True)
     by_agent = {x.agent_id: x for x in asgns}
-    assert by_agent[a.id].role is AssignmentRole.DRIVER
+    assert by_agent[c.id].role is AssignmentRole.DRIVER
 
 
 # ── goal_summary ─────────────────────────────────────────────────────
@@ -338,28 +366,31 @@ async def test_goal_summary_assignee_only(started_agent_service: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_goal_assign_driver_only(started_agent_service: Any) -> None:
-    """Only the DRIVER may assign new agents."""
+async def test_goal_assign_any_same_owner(started_agent_service: Any) -> None:
+    """Any same-owner agent can assign peers; cross-owner remains blocked."""
     svc = started_agent_service
     a = await svc.create_agent(owner_user_id="usr_1", name="a1")
     b = await svc.create_agent(owner_user_id="usr_1", name="b1")
     c = await svc.create_agent(owner_user_id="usr_1", name="c1")
+    stranger = await svc.create_agent(owner_user_id="usr_2", name="theirs")
     g = await svc.create_goal(
         owner_user_id="usr_1",
         name="g",
         assign_to=[(a.name, AssignmentRole.DRIVER)],
     )
 
+    # Cross-owner stays blocked.
     bad = await svc._exec_goal_assign({
-        "_agent_id": b.id,  # not a driver (and not assigned)
+        "_agent_id": stranger.id,
         "goal_id": g.id,
         "agent_name": "c1",
         "role": "collaborator",
     })
     assert bad.startswith("error:")
 
+    # B is not assigned and not DRIVER, but is same-owner — succeeds now.
     ok = await svc._exec_goal_assign({
-        "_agent_id": a.id,
+        "_agent_id": b.id,
         "goal_id": g.id,
         "agent_name": "c1",
         "role": "collaborator",
@@ -371,8 +402,8 @@ async def test_goal_assign_driver_only(started_agent_service: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_goal_unassign_self_or_driver(started_agent_service: Any) -> None:
-    """Self-unassign always works; non-DRIVER can't unassign others."""
+async def test_goal_unassign_any_same_owner(started_agent_service: Any) -> None:
+    """Any same-owner agent can unassign anyone (self or peer)."""
     svc = started_agent_service
     a = await svc.create_agent(owner_user_id="usr_1", name="a1")
     b = await svc.create_agent(owner_user_id="usr_1", name="b1")
@@ -387,13 +418,13 @@ async def test_goal_unassign_self_or_driver(started_agent_service: Any) -> None:
         ],
     )
 
-    # B unassigning C → blocked (B is not driver).
-    bad = await svc._exec_goal_unassign({
+    # B (COLLABORATOR) unassigning C — now works.
+    ok_peer = await svc._exec_goal_unassign({
         "_agent_id": b.id,
         "goal_id": g.id,
         "agent_name": "c1",
     })
-    assert bad.startswith("error:")
+    assert "unassigned" in ok_peer
 
     # B unassigning self → ok.
     ok_self = await svc._exec_goal_unassign({
@@ -402,11 +433,3 @@ async def test_goal_unassign_self_or_driver(started_agent_service: Any) -> None:
         "agent_name": "b1",
     })
     assert "unassigned" in ok_self
-
-    # Driver A unassigning C → ok.
-    ok_drv = await svc._exec_goal_unassign({
-        "_agent_id": a.id,
-        "goal_id": g.id,
-        "agent_name": "c1",
-    })
-    assert "unassigned" in ok_drv

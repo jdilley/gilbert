@@ -1,8 +1,8 @@
 /**
  * DependenciesPanel — right-rail card on the war-room page that lists
  * outgoing (this goal depends on …) and incoming (… depends on this
- * goal) dependency rows. Drivers can add/remove outgoing deps; the
- * backend ultimately gates each mutation.
+ * goal) dependency rows. Anyone with goal access can add/remove
+ * outgoing deps; the backend gates same-owner only.
  *
  * Each dep row points at a goal by id; we resolve names via
  * ``useGoals()`` so deleted/cross-owner goals fall back to the raw id.
@@ -41,10 +41,9 @@ import type { Goal, GoalDependency } from "@/types/agent";
 
 interface Props {
   goalId: string;
-  isDriver: boolean;
 }
 
-export function DependenciesPanel({ goalId, isDriver }: Props) {
+export function DependenciesPanel({ goalId }: Props) {
   const outgoingQuery = useDependencies(goalId, undefined);
   const incomingQuery = useDependencies(undefined, goalId);
   const { data: goals } = useGoals();
@@ -74,15 +73,13 @@ export function DependenciesPanel({ goalId, isDriver }: Props) {
       <CardContent>
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold">Dependencies</h3>
-          {isDriver && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setAddOpen(true)}
-            >
-              <PlusIcon /> Add
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setAddOpen(true)}
+          >
+            <PlusIcon /> Add
+          </Button>
         </div>
 
         {actionError && (
@@ -105,7 +102,7 @@ export function DependenciesPanel({ goalId, isDriver }: Props) {
                 dep={dep}
                 otherGoal={goalById[dep.source_goal_id]}
                 otherGoalId={dep.source_goal_id}
-                canRemove={isDriver}
+                canRemove={true}
                 isPending={remove.isPending}
                 onRemove={() => handleRemove(dep._id)}
               />

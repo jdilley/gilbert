@@ -91,7 +91,8 @@ interface NewGoalDialogProps {
 /**
  * "New goal" dialog — name + description + multi-select assignee
  * checkboxes. Submitting calls ``goals.create`` with the chosen peer
- * names (first becomes DRIVER on the backend).
+ * names. The first assignee gets the "driver" label, but the label
+ * is display-only — any assignee can mutate the goal.
  */
 function NewGoalDialog({ open, onOpenChange, onCreated }: NewGoalDialogProps) {
   const { data: agents } = useAgents();
@@ -150,8 +151,7 @@ function NewGoalDialog({ open, onOpenChange, onCreated }: NewGoalDialogProps) {
           <DialogHeader>
             <DialogTitle>New goal</DialogTitle>
             <DialogDescription>
-              Create a goal and optionally assign one or more agents. The
-              first assignee becomes DRIVER.
+              Create a goal and optionally assign one or more agents.
             </DialogDescription>
           </DialogHeader>
 
@@ -224,7 +224,9 @@ function NewGoalDialog({ open, onOpenChange, onCreated }: NewGoalDialogProps) {
             )}
             {assigneeNames.length > 0 && (
               <div className="text-xs text-muted-foreground">
-                First assignee ({assigneeNames[0]}) will be DRIVER.
+                {assigneeNames[0]} will be labelled the goal's driver
+                — a display-only hint for personas; any assignee can
+                act on the goal.
               </div>
             )}
           </div>
