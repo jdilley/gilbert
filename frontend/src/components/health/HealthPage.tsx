@@ -45,7 +45,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export function HealthPage(): JSX.Element {
+export function HealthPage() {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<DailySummary | null>(null);
   const [metrics, setMetrics] = useState<HealthMetric[]>([]);
