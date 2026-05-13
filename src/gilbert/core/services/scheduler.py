@@ -403,15 +403,19 @@ class SchedulerService(Service):
         )
         return job.info
 
-    def remove_job(self, name: str, requester_id: str = "") -> None:
-        """Remove a job. System jobs cannot be removed.
+    def remove_job(
+        self, name: str, requester_id: str = "", *, force: bool = False
+    ) -> None:
+        """Remove a job. System jobs cannot be removed by external callers.
 
-        Non-admin users can only remove jobs they own.
+        Non-admin users can only remove jobs they own. The owning
+        service of a system job can pass ``force=True`` to replace it
+        (e.g. AgentService re-arming a heartbeat).
         """
         job = self._jobs.get(name)
         if job is None:
             raise KeyError(f"Job not found: {name}")
-        if job.info.system:
+        if job.info.system and not force:
             raise ValueError(f"Cannot remove system job: {name}")
         # Ownership check: if requester is set and doesn't match owner, deny
         if requester_id and job.info.owner and requester_id != job.info.owner:
