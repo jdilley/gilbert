@@ -295,7 +295,13 @@ function ThingRow({ thing, users, onMap, onRelabel, onUnmap }: ThingRowProps) {
         }}
       >
         <SelectTrigger className="w-44">
-          <SelectValue placeholder="Map to user…" />
+          <SelectValue placeholder="Map to user…">
+            {(v: string | null) => {
+              if (!v || v === "__unmapped__") return "Map to user…";
+              const u = users.find((x) => x.user_id === v);
+              return u ? u.display_name || u.user_id : v;
+            }}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="__unmapped__">— unmapped —</SelectItem>

@@ -229,13 +229,22 @@ function FieldControl({
   // {value, label} objects for friendly labels (e.g. mailbox dropdown).
   if (param.type === "string" && param.choices && param.choices.length > 0) {
     const options = param.choices.map(normalizeChoice);
+    // base-ui's SelectValue defaults to showing the raw value (e.g.
+    // ``usr_abc123``), which is useless for value-vs-label pairs.
+    // Map the selected value back to its label so the trigger reads
+    // like the user expects.
+    const labelByValue = new Map(options.map((o) => [o.value, o.label]));
     return (
       <Select
         value={String(value ?? "")}
         onValueChange={(v) => onChange(param.key, v ?? "")}
       >
         <SelectTrigger className="w-full">
-          <SelectValue placeholder="Select..." />
+          <SelectValue placeholder="Select...">
+            {(v: string | null) =>
+              v ? (labelByValue.get(v) ?? v) : "Select..."
+            }
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           {options.map((opt) => (

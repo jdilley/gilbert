@@ -400,7 +400,12 @@ function CreateClientDialog({
               }}
             >
               <SelectTrigger id="mcp-client-owner">
-                <SelectValue placeholder="Pick the identity this client acts as" />
+                <SelectValue placeholder="Pick the identity this client acts as">
+                  {(v: string | null) => {
+                    const u = (users ?? []).find((x) => x.user_id === v);
+                    return u ? u.display_name || u.user_id : "Pick the identity this client acts as";
+                  }}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {(users ?? []).map((u) => (
