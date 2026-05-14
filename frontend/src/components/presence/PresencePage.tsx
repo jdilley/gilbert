@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CheckIcon, PencilIcon, XIcon } from "lucide-react";
+import { CheckIcon, PencilIcon, RefreshCwIcon, XIcon } from "lucide-react";
 
 /**
  * Admin page for mapping raw presence observations to Gilbert users.
@@ -79,6 +79,11 @@ export function PresencePage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["presence-things"] }),
   });
 
+  const pollMut = useMutation({
+    mutationFn: api.forcePresencePoll,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["presence-things"] }),
+  });
+
   if (isLoading || !things) {
     return (
       <div className="flex items-center justify-center min-h-[40vh]">
@@ -103,14 +108,25 @@ export function PresencePage() {
 
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-6xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold">Presence mapping</h1>
-        <p className="text-sm text-muted-foreground">
-          Map the raw things the presence backends see to Gilbert users.
-          Backends consult these mappings on the next poll, so changes take
-          effect within seconds. Backends report observations on their poll
-          cycle — if nothing's listed yet, give the next poll a moment.
-        </p>
+      <div className="flex flex-wrap items-start gap-4 justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold">Presence mapping</h1>
+          <p className="text-sm text-muted-foreground">
+            Map the raw things the presence backends see to Gilbert users.
+            Backends consult these mappings on the next poll, so changes take
+            effect within seconds. Hit "Poll now" if you don't want to wait.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          onClick={() => pollMut.mutate()}
+          disabled={pollMut.isPending}
+        >
+          <RefreshCwIcon
+            className={pollMut.isPending ? "size-4 animate-spin" : "size-4"}
+          />
+          Poll now
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6">

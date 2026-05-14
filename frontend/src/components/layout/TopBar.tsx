@@ -120,7 +120,7 @@ export function TopBar() {
       {/* Desktop primary nav — top-level groups only. No popovers; the
           secondary nav for the active group renders in the SideNav. */}
       {!isMobile && (
-        <nav className="hidden md:flex items-center gap-0.5 overflow-x-auto">
+        <nav className="hidden md:flex items-center gap-0.5 overflow-x-auto overflow-y-hidden">
           {groups.map((group) => (
             <TopGroupButton
               key={group.key}

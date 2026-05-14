@@ -1034,6 +1034,7 @@ class PresenceService(Service):
             "presence.things.map": self._ws_things_map,
             "presence.things.unmap": self._ws_things_unmap,
             "presence.things.relabel": self._ws_things_relabel,
+            "presence.poll.now": self._ws_poll_now,
         }
 
     def _require_admin(self, conn: Any, frame: dict[str, Any]) -> dict[str, Any] | None:
@@ -1180,4 +1181,36 @@ class PresenceService(Service):
             "type": "presence.things.relabel.result",
             "ref": frame.get("id"),
             "thing": row,
+        }
+
+    async def _ws_poll_now(
+        self,
+        conn: Any,
+        frame: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Force an immediate poll instead of waiting for the next tick.
+
+        Useful from the mapping screen — the admin doesn't want to
+        wait 30 s for the next scheduled poll to surface a brand-new
+        observation. Returns the count of things currently known so
+        the UI can refresh from a known consistent state.
+        """
+        err = self._require_admin(conn, frame)
+        if err:
+            return err
+        try:
+            await self._check_for_changes()
+        except Exception as exc:
+            logger.exception("Forced presence poll failed")
+            return {
+                "type": "gilbert.error",
+                "ref": frame.get("id"),
+                "error": f"Poll failed: {exc}",
+                "code": 500,
+            }
+        things = await self.list_observations()
+        return {
+            "type": "presence.poll.now.result",
+            "ref": frame.get("id"),
+            "thing_count": len(things),
         }

@@ -935,6 +935,11 @@ export function useWsApi() {
         label,
       }).then((r) => r.thing),
 
+    forcePresencePoll: () =>
+      rpc<{ thing_count: number }>({ type: "presence.poll.now" }).then(
+        (r) => r.thing_count,
+      ),
+
   }), [rpc, rpcWithRef]);
 }
 
