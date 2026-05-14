@@ -27,6 +27,28 @@ class UserPresence:
     source: str = ""  # which provider reported this (e.g., "unifi", "bluetooth")
 
 
+@dataclass(frozen=True)
+class PresenceDetection:
+    """One day's worth of detections for a single user from a single source.
+
+    The presence service records one of these per (user_id, date, source)
+    every time the backend reports that user as present or nearby, and
+    rolls up first/last seen times and the observation count across the
+    day. Rows older than ``presence.history_retention_days`` are pruned
+    by a background sweep.
+
+    Other services / tools query the rolled-up history through
+    ``PresenceHistoryProvider.get_detection_history``.
+    """
+
+    user_id: str
+    date: str  # ISO 8601 calendar date ("YYYY-MM-DD"), in the configured timezone.
+    source: str  # The backend that recorded the detection (e.g. "unifi:protect").
+    first_seen: str  # ISO 8601 datetime — earliest detection that day.
+    last_seen: str  # ISO 8601 datetime — most recent detection that day.
+    observation_count: int = 1  # Number of polls in the day that saw this user.
+
+
 class PresenceBackend(ABC):
     """Abstract presence detection backend. Implementation-agnostic."""
 
@@ -79,4 +101,29 @@ class PresenceProvider(Protocol):
 
     async def who_is_here(self) -> list[UserPresence]:
         """Get all users who are present or nearby."""
+        ...
+
+
+@runtime_checkable
+class PresenceHistoryProvider(Protocol):
+    """Protocol for querying recent-detection history from the presence service.
+
+    Other services (the greet tool, sales/notification cadence pickers,
+    "when was X last around" lookups, etc.) call this instead of asking
+    the backend directly so they get a consistent rolled-up view across
+    every source the presence service has stored.
+    """
+
+    async def get_detection_history(
+        self,
+        user_id: str,
+        since: str = "",
+        until: str = "",
+    ) -> list[PresenceDetection]:
+        """Return detection rows for the user between two ISO dates.
+
+        ``since`` / ``until`` are inclusive ``YYYY-MM-DD`` calendar dates;
+        empty strings mean "no bound" (use the full retention window).
+        Rows are returned sorted by date ascending.
+        """
         ...

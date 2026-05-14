@@ -25,6 +25,7 @@ from gilbert.interfaces.configuration import (
 from gilbert.interfaces.events import Event, EventBus, EventBusProvider
 from gilbert.interfaces.presence import (
     PresenceBackend,
+    PresenceDetection,
     PresenceState,
     UserPresence,
 )
@@ -39,6 +40,14 @@ logger = logging.getLogger(__name__)
 
 # Default polling interval in seconds
 _DEFAULT_POLL_INTERVAL = 30
+
+# Default retention for the per-day presence detection history.
+_DEFAULT_HISTORY_RETENTION_DAYS = 30
+
+# How often (seconds) to run the retention sweep. Tied to the day
+# boundary rather than the poll cadence — sweeping more than once an
+# hour buys nothing and just touches storage.
+_HISTORY_SWEEP_INTERVAL = 3600.0
 
 
 class PresenceService(Service):
@@ -57,11 +66,13 @@ class PresenceService(Service):
         self._storage: Any = None
         self._resolver: ServiceResolver | None = None
         self._first_poll: bool = True
+        self._history_retention_days: int = _DEFAULT_HISTORY_RETENTION_DAYS
+        self._timezone: str = "UTC"
 
     def service_info(self) -> ServiceInfo:
         return ServiceInfo(
             name="presence",
-            capabilities=frozenset({"presence", "ai_tools"}),
+            capabilities=frozenset({"presence", "presence_history", "ai_tools"}),
             requires=frozenset({"users", "scheduler"}),
             optional=frozenset({"configuration", "event_bus", "credentials", "entity_storage"}),
             events=frozenset({"presence.arrived", "presence.departed"}),
@@ -148,6 +159,12 @@ class PresenceService(Service):
                     callback=self._check_for_changes,
                     system=True,
                 )
+                scheduler.add_job(
+                    name="presence-history-sweep",
+                    schedule=Schedule.every(_HISTORY_SWEEP_INTERVAL),
+                    callback=self._prune_old_history,
+                    system=True,
+                )
 
         logger.info(
             "Presence service started (poll_interval=%.0fs)",
@@ -159,6 +176,12 @@ class PresenceService(Service):
         poll = section.get("poll_interval_seconds")
         if poll is not None:
             self._poll_interval = float(poll)
+        retention = section.get("history_retention_days")
+        if retention is not None:
+            self._history_retention_days = max(0, int(retention))
+        tz = section.get("timezone")
+        if tz:
+            self._timezone = str(tz)
 
     # --- Configurable protocol ---
 
@@ -187,6 +210,25 @@ class PresenceService(Service):
                 type=ToolParameterType.NUMBER,
                 description="How often to poll for presence changes (seconds).",
                 default=_DEFAULT_POLL_INTERVAL,
+            ),
+            ConfigParam(
+                key="history_retention_days",
+                type=ToolParameterType.INTEGER,
+                description=(
+                    "Days of per-user detection history kept. Older rows are "
+                    "pruned hourly. 0 disables retention (rows are kept "
+                    "until manually deleted)."
+                ),
+                default=_DEFAULT_HISTORY_RETENTION_DAYS,
+            ),
+            ConfigParam(
+                key="timezone",
+                type=ToolParameterType.STRING,
+                description=(
+                    "IANA timezone for bucketing detection history by day "
+                    "(e.g. 'America/Los_Angeles'). Defaults to UTC."
+                ),
+                default="UTC",
             ),
         ]
         backends = PresenceBackend.registered_backends()
@@ -273,6 +315,13 @@ class PresenceService(Service):
         # 6. Persist: delete departed, upsert current
         await self._sync_stored_presence(previously_here, currently_here)
 
+        # 7. Record detection history: every poll that sees a user as
+        # present/nearby rolls into a daily aggregate per source. This
+        # keeps the time-series cheap (one row per user/day/source) and
+        # lets other services answer "when was X around recently" with
+        # a single bounded query.
+        await self._record_detection_history(currently_here)
+
         self._first_poll = False
 
     async def _emit_arrived(self, presence: UserPresence) -> None:
@@ -311,6 +360,120 @@ class PresenceService(Service):
     # --- Entity persistence ---
 
     _COLLECTION = "user_presence"
+    _HISTORY_COLLECTION = "presence_detections"
+
+    def _today_str(self) -> str:
+        """Calendar date in the configured timezone — used as the bucket
+        key for daily detection aggregates."""
+        from datetime import datetime
+
+        try:
+            from zoneinfo import ZoneInfo
+
+            return datetime.now(ZoneInfo(self._timezone)).strftime("%Y-%m-%d")
+        except Exception:
+            return datetime.now(UTC).strftime("%Y-%m-%d")
+
+    @staticmethod
+    def _detection_row_id(user_id: str, date: str, source: str) -> str:
+        """Composite key for a detection row. ``source`` is part of the
+        key so a multi-source backend (badge + face + wifi) produces
+        independent daily aggregates that the UI can break down by
+        signal type."""
+        return f"{user_id}|{date}|{source}"
+
+    async def _record_detection_history(
+        self,
+        currently_here: dict[str, UserPresence],
+    ) -> None:
+        """Upsert a daily detection row for each user the backend sees
+        as present or nearby. ``observation_count`` is incremented in
+        place; ``first_seen`` is preserved across the day; ``last_seen``
+        is bumped each poll."""
+        if self._storage is None or self._history_retention_days < 0:
+            return
+        if not currently_here:
+            return
+        try:
+            from datetime import datetime
+
+            now_iso = datetime.now(UTC).isoformat()
+            today = self._today_str()
+            for p in currently_here.values():
+                if p.state not in (PresenceState.PRESENT, PresenceState.NEARBY):
+                    continue
+                source = p.source or "unknown"
+                row_id = self._detection_row_id(p.user_id, today, source)
+                existing = await self._storage.get(self._HISTORY_COLLECTION, row_id)
+                if existing:
+                    first_seen = existing.get("first_seen") or now_iso
+                    count = int(existing.get("observation_count", 0)) + 1
+                else:
+                    first_seen = now_iso
+                    count = 1
+                await self._storage.put(
+                    self._HISTORY_COLLECTION,
+                    row_id,
+                    {
+                        "user_id": p.user_id,
+                        "date": today,
+                        "source": source,
+                        "first_seen": first_seen,
+                        "last_seen": now_iso,
+                        "observation_count": count,
+                    },
+                )
+        except Exception:
+            logger.warning("Failed to record detection history", exc_info=True)
+
+    async def _prune_old_history(self) -> None:
+        """Drop detection rows whose date is older than retention.
+
+        A retention of 0 disables pruning. We compute the cutoff date
+        once per sweep in the configured timezone and delete in a
+        single query — much cheaper than reading rows then deleting,
+        and the storage layer enforces per-collection isolation."""
+        if self._storage is None or self._history_retention_days <= 0:
+            return
+        try:
+            from datetime import datetime, timedelta
+
+            from gilbert.interfaces.storage import Filter, FilterOp, Query
+
+            try:
+                from zoneinfo import ZoneInfo
+
+                today = datetime.now(ZoneInfo(self._timezone)).date()
+            except Exception:
+                today = datetime.now(UTC).date()
+            cutoff = (today - timedelta(days=self._history_retention_days)).isoformat()
+
+            # Storage backends that expose ``query`` reliably across
+            # filter ops let us scope the prune to the rows that
+            # actually need to go. Fall back to a full scan if the
+            # backend doesn't support LT (older SQLite path).
+            old_rows = await self._storage.query(
+                Query(
+                    collection=self._HISTORY_COLLECTION,
+                    filters=[Filter(field="date", op=FilterOp.LT, value=cutoff)],
+                )
+            )
+            for row in old_rows:
+                row_id = row.get("_id") or self._detection_row_id(
+                    row.get("user_id", ""),
+                    row.get("date", ""),
+                    row.get("source", ""),
+                )
+                if row_id:
+                    await self._storage.delete(self._HISTORY_COLLECTION, row_id)
+            if old_rows:
+                logger.info(
+                    "Pruned %d presence detection rows older than %s",
+                    len(old_rows),
+                    cutoff,
+                )
+        except Exception:
+            logger.warning("Failed to prune presence history", exc_info=True)
 
     async def _load_present_user_ids(self) -> set[str]:
         """Load the set of user IDs that have a stored presence record (= were here)."""
@@ -399,6 +562,52 @@ class PresenceService(Service):
         all_presence = await self._backend.get_all_presence()
         return [p for p in all_presence if p.state in (PresenceState.PRESENT, PresenceState.NEARBY)]
 
+    async def get_detection_history(
+        self,
+        user_id: str,
+        since: str = "",
+        until: str = "",
+    ) -> list[PresenceDetection]:
+        """Return detection history rows for the user within an optional
+        inclusive date window. Empty bounds = unbounded. Rows sorted
+        ascending by date.
+
+        Implements ``PresenceHistoryProvider``. Other services should
+        capability-resolve this rather than instantiating ``UserPresence``
+        themselves — the rolled-up rows give a stable across-source view.
+        """
+        if self._storage is None or not user_id:
+            return []
+        from gilbert.interfaces.storage import Filter, FilterOp, Query, SortField
+
+        filters: list[Filter] = [Filter(field="user_id", op=FilterOp.EQ, value=user_id)]
+        if since:
+            filters.append(Filter(field="date", op=FilterOp.GTE, value=since))
+        if until:
+            filters.append(Filter(field="date", op=FilterOp.LTE, value=until))
+        try:
+            rows = await self._storage.query(
+                Query(
+                    collection=self._HISTORY_COLLECTION,
+                    filters=filters,
+                    sort=[SortField(field="date")],
+                )
+            )
+        except Exception:
+            logger.warning("Failed to query detection history", exc_info=True)
+            return []
+        return [
+            PresenceDetection(
+                user_id=str(r.get("user_id", "")),
+                date=str(r.get("date", "")),
+                source=str(r.get("source", "")),
+                first_seen=str(r.get("first_seen", "")),
+                last_seen=str(r.get("last_seen", "")),
+                observation_count=int(r.get("observation_count", 0) or 0),
+            )
+            for r in rows
+        ]
+
     # --- ToolProvider protocol ---
 
     @property
@@ -443,6 +652,36 @@ class PresenceService(Service):
                 required_role="everyone",
                 parallel_safe=True,
             ),
+            ToolDefinition(
+                name="presence_history",
+                slash_group="presence",
+                slash_command="history",
+                slash_help=(
+                    "Recent detection history for a person: "
+                    "/presence history <name_or_user_id> [days]"
+                ),
+                description=(
+                    "Show the last N days of presence detections for a "
+                    "person. Accepts a free-form name (display name, first "
+                    "name, or email local part) or a user_id; falls back "
+                    "to user_id if the name is ambiguous. Default 7 days."
+                ),
+                parameters=[
+                    ToolParameter(
+                        name="name_or_user_id",
+                        type=ToolParameterType.STRING,
+                        description="Free-form name or exact user_id to look up.",
+                    ),
+                    ToolParameter(
+                        name="days",
+                        type=ToolParameterType.INTEGER,
+                        description="How many days back to include (default 7, max retention window).",
+                        required=False,
+                    ),
+                ],
+                required_role="user",
+                parallel_safe=True,
+            ),
         ]
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
@@ -453,8 +692,114 @@ class PresenceService(Service):
                 return await self._tool_who_is_here()
             case "list_all_presence":
                 return await self._tool_list_all()
+            case "presence_history":
+                return await self._tool_presence_history(arguments)
             case _:
                 raise KeyError(f"Unknown tool: {name}")
+
+    async def _tool_presence_history(self, arguments: dict[str, Any]) -> str:
+        """Return rolled-up detection history for a person.
+
+        ``name_or_user_id`` is resolved through
+        ``UserManagementProvider.resolve_user_id_by_name`` so callers
+        can pass first names, display names, or email local parts as
+        well as exact user_ids. If the string is itself a known
+        user_id, we use it directly (no resolver round-trip).
+        """
+        raw = str(arguments.get("name_or_user_id", "")).strip()
+        if not raw:
+            return json.dumps({"error": "name_or_user_id is required"})
+        # ``or 7`` would turn an explicit 0 back into 7, masking the
+        # validation — only treat None / missing as "default to 7."
+        raw_days = arguments.get("days", 7)
+        try:
+            days = int(raw_days) if raw_days is not None else 7
+        except (TypeError, ValueError):
+            return json.dumps({"error": "days must be an integer >= 1"})
+        if days <= 0:
+            return json.dumps({"error": "days must be >= 1"})
+
+        user_id = await self._resolve_name_or_id(raw)
+        if not user_id:
+            return json.dumps(
+                {"error": f"Could not resolve '{raw}' to a known user."},
+            )
+
+        from datetime import datetime, timedelta
+
+        try:
+            from zoneinfo import ZoneInfo
+
+            today = datetime.now(ZoneInfo(self._timezone)).date()
+        except Exception:
+            today = datetime.now(UTC).date()
+        since = (today - timedelta(days=days - 1)).isoformat()
+        until = today.isoformat()
+
+        history = await self.get_detection_history(user_id, since=since, until=until)
+
+        # Roll up across sources per day so the tool output is one
+        # entry per calendar day (the per-source detail is preserved
+        # under ``by_source`` if the model needs it).
+        by_date: dict[str, dict[str, Any]] = {}
+        for det in history:
+            bucket = by_date.setdefault(
+                det.date,
+                {
+                    "date": det.date,
+                    "first_seen": det.first_seen,
+                    "last_seen": det.last_seen,
+                    "observation_count": 0,
+                    "by_source": {},
+                },
+            )
+            if det.first_seen and (not bucket["first_seen"] or det.first_seen < bucket["first_seen"]):
+                bucket["first_seen"] = det.first_seen
+            if det.last_seen and det.last_seen > bucket["last_seen"]:
+                bucket["last_seen"] = det.last_seen
+            bucket["observation_count"] += det.observation_count
+            bucket["by_source"][det.source] = {
+                "first_seen": det.first_seen,
+                "last_seen": det.last_seen,
+                "observation_count": det.observation_count,
+            }
+
+        days_payload = [by_date[d] for d in sorted(by_date)]
+        return json.dumps(
+            {
+                "user_id": user_id,
+                "since": since,
+                "until": until,
+                "days": days_payload,
+            }
+        )
+
+    async def _resolve_name_or_id(self, raw: str) -> str:
+        """Try the input as-is first (might be a user_id), then fall
+        back to UserService.resolve_user_id_by_name."""
+        if self._resolver is None:
+            return ""
+        from gilbert.interfaces.users import UserManagementProvider
+
+        user_svc = self._resolver.get_capability("users")
+        if not isinstance(user_svc, UserManagementProvider):
+            return ""
+        # Direct user_id match — cheap.
+        try:
+            row = await user_svc.backend.get_user(raw)
+            if row is not None:
+                return raw
+        except Exception:
+            pass
+        # Free-form name → resolver. Accept any confidence the user
+        # service is willing to produce — this is a read-only tool and
+        # the model will see the resolved user_id in the response so
+        # the human can sanity-check the mapping if it looks off.
+        try:
+            match = await user_svc.resolve_user_id_by_name(raw)
+        except Exception:
+            match = None
+        return match.user_id if match else ""
 
     async def _tool_check_presence(self, arguments: dict[str, Any]) -> str:
         user_id = arguments["user_id"]
