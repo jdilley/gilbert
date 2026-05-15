@@ -1,21 +1,12 @@
 /**
  * ConfigSection — collapsible card for a single service namespace.
  *
- * Visual structure follows the design-system Card vocabulary:
- *   - Clickable header (eyebrow namespace + title + state pill)
- *   - Body (gated by ``enabled`` if present)
- *   - Backend selector in its own inset Card so the boundary
- *     between service-level and backend-specific is obvious
- *   - Actions section
- *   - Footer with Save / Reset + dirty status
- *
- * State management is preserved verbatim — only the rendering surface
- * changes.
+ * Visual structure follows the design-system Card vocabulary. State
+ * lives in SettingsContext so the page-level StatusBar can aggregate
+ * dirty edits across every section and "Save all".
  */
 
-import { useState, useCallback, useMemo } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useWsApi } from "@/hooks/useWsApi";
+import { useCallback, useMemo, useState } from "react";
 import {
   Card,
   CardContent,
@@ -26,7 +17,9 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useWsApi } from "@/hooks/useWsApi";
 import { ConfigField } from "./ConfigField";
+import { useSettingsSection } from "./SettingsContext";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -45,6 +38,9 @@ import type {
 
 interface ConfigSectionProps {
   section: ConfigSectionType;
+  /** When non-null, force-expand this section if any of its params /
+   *  namespace / description matches. Wired by the page's search box. */
+  searchQuery?: string;
 }
 
 function humanize(key: string): string {
@@ -59,18 +55,12 @@ function backendGroups(
   singleBackendName: string,
   hasBackendSelector: boolean,
 ): { label: string; params: ConfigParamMeta[] }[] {
-  // Service with a backend selector — all backend params belong to
-  // the currently-selected backend; show as one group.
   if (hasBackendSelector) {
     const label = singleBackendName
       ? `${humanize(singleBackendName)} backend`
       : "Backend";
     return [{ label, params }];
   }
-
-  // Multi-backend service (e.g. AI with backends.anthropic.*,
-  // backends.openai.*). Group by the second path segment when keys
-  // start with "backends.", otherwise by the first segment.
   const groups: { label: string; params: ConfigParamMeta[] }[] = [];
   const seen = new Set<string>();
   for (const p of params) {
@@ -93,22 +83,34 @@ function backendGroups(
 interface ActionUIState {
   status: "idle" | "running" | "ok" | "error" | "pending";
   message: string;
-  /** When set, the button becomes a "Continue" that invokes this key instead. */
   followup: string;
 }
 
-export function ConfigSection({ section }: ConfigSectionProps) {
-  const queryClient = useQueryClient();
+export function ConfigSection({ section, searchQuery }: ConfigSectionProps) {
   const api = useWsApi();
-  const [expanded, setExpanded] = useState(false);
-  const [localValues, setLocalValues] = useState<Record<string, unknown>>({});
-  const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const sectionState = useSettingsSection(section.namespace);
+  const localValues = sectionState.dirty;
+  const saveStatus = sectionState.saveStatus;
+
+  const [userExpanded, setUserExpanded] = useState(false);
   const [actionStates, setActionStates] = useState<Record<string, ActionUIState>>(
     {},
   );
 
-  // Merge defaults → server values → local edits so fields show
-  // their declared default when no value has been stored yet.
+  // Auto-expand when search matches this section.
+  const searchMatches = useMemo(() => {
+    if (!searchQuery) return false;
+    const q = searchQuery.toLowerCase();
+    if (section.namespace.toLowerCase().includes(q)) return true;
+    return section.params.some(
+      (p) =>
+        p.key.toLowerCase().includes(q) ||
+        (p.description ?? "").toLowerCase().includes(q),
+    );
+  }, [searchQuery, section.namespace, section.params]);
+  const expanded = userExpanded || searchMatches;
+
+  // Merge defaults → server values → local edits.
   const merged = useMemo(() => {
     const defaults: Record<string, unknown> = {};
     for (const p of section.params) {
@@ -119,40 +121,12 @@ export function ConfigSection({ section }: ConfigSectionProps) {
 
   const hasChanges = Object.keys(localValues).length > 0;
 
-  const handleFieldChange = useCallback((key: string, value: unknown) => {
-    setLocalValues((prev) => ({ ...prev, [key]: value }));
-    setSaveStatus(null);
-  }, []);
-
-  const saveMutation = useMutation({
-    mutationFn: () => api.setConfigSection(section.namespace, localValues),
-    onSuccess: (result) => {
-      setLocalValues({});
-      queryClient.invalidateQueries({ queryKey: ["config"] });
-      const results = result?.results ?? {};
-      const restarted = Object.values(results).some(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (r: any) =>
-          r?.message?.includes("restarted") || r?.message?.includes("enabled"),
-      );
-      setSaveStatus(restarted ? "Saved — service restarting…" : "Saved");
-      setTimeout(() => setSaveStatus(null), 3000);
+  const handleFieldChange = useCallback(
+    (key: string, value: unknown) => {
+      sectionState.setField(key, value);
     },
-    onError: () => {
-      setSaveStatus("Save failed");
-      setTimeout(() => setSaveStatus(null), 3000);
-    },
-  });
-
-  const resetMutation = useMutation({
-    mutationFn: () => api.resetConfigSection(section.namespace),
-    onSuccess: () => {
-      setLocalValues({});
-      queryClient.invalidateQueries({ queryKey: ["config"] });
-      setSaveStatus("Reset to defaults");
-      setTimeout(() => setSaveStatus(null), 3000);
-    },
-  });
+    [sectionState],
+  );
 
   const runAction = useCallback(
     async (action: ConfigActionMeta, keyOverride?: string) => {
@@ -168,16 +142,11 @@ export function ConfigSection({ section }: ConfigSectionProps) {
         const resp = await api.invokeConfigAction(section.namespace, invokeKey);
         const result: ConfigActionResult = resp.result;
 
-        // If the backend asked us to persist values, push them into
-        // localValues as if the user had typed them. Lets the user
-        // see the new values as pending changes and click Save
-        // explicitly — matches how every other field behaves.
         const persistRaw = (result.data ?? {})["persist"];
         if (persistRaw && typeof persistRaw === "object") {
           const persist = persistRaw as Record<string, unknown>;
           if (Object.keys(persist).length > 0) {
-            setLocalValues((prev) => ({ ...prev, ...persist }));
-            setSaveStatus(null);
+            sectionState.setFields(persist);
           }
         }
 
@@ -194,9 +163,6 @@ export function ConfigSection({ section }: ConfigSectionProps) {
           window.open(result.open_url, "_blank", "noopener,noreferrer");
         }
 
-        // Auto-clear ok messages; leave errors / pending up.
-        // Persist-bearing actions stay visible longer (the user
-        // still has to click Save).
         const hasPersist =
           persistRaw &&
           typeof persistRaw === "object" &&
@@ -224,7 +190,7 @@ export function ConfigSection({ section }: ConfigSectionProps) {
         }));
       }
     },
-    [api, section.namespace],
+    [api, section.namespace, sectionState],
   );
 
   // Split params into groups
@@ -260,27 +226,9 @@ export function ConfigSection({ section }: ConfigSectionProps) {
 
   // ── Status pill ────────────────────────────────────────────────
   const statusPill = (() => {
-    if (section.started) {
-      return (
-        <Badge variant="active" dot>
-          running
-        </Badge>
-      );
-    }
-    if (section.failed) {
-      return (
-        <Badge variant="error" dot>
-          failed
-        </Badge>
-      );
-    }
-    if (!section.enabled) {
-      return (
-        <Badge variant="off" dot>
-          off
-        </Badge>
-      );
-    }
+    if (section.started) return <Badge variant="active" dot>running</Badge>;
+    if (section.failed) return <Badge variant="error" dot>failed</Badge>;
+    if (!section.enabled) return <Badge variant="off" dot>off</Badge>;
     return null;
   })();
 
@@ -288,10 +236,9 @@ export function ConfigSection({ section }: ConfigSectionProps) {
 
   return (
     <Card>
-      {/* Header — clickable, toggles expansion. */}
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setUserExpanded((v) => !v)}
         className={cn(
           "group/header w-full text-left",
           "transition-colors duration-(--duration-fast) ease-(--ease-out)",
@@ -317,11 +264,8 @@ export function ConfigSection({ section }: ConfigSectionProps) {
         </CardHeader>
       </button>
 
-      {/* Body */}
       {expanded && (
         <CardContent className="py-4 space-y-4">
-          {/* Enabled toggle — the "root" gate. Sits above the gated
-              body so the dependency relationship is visually obvious. */}
           {enabledParam && (
             <ConfigField
               param={enabledParam}
@@ -333,7 +277,6 @@ export function ConfigSection({ section }: ConfigSectionProps) {
 
           {sectionEnabled && (
             <>
-              {/* Service-level params */}
               {serviceParams.length > 0 && (
                 <div className="space-y-4">
                   {serviceParams.map((p) => (
@@ -348,9 +291,6 @@ export function ConfigSection({ section }: ConfigSectionProps) {
                 </div>
               )}
 
-              {/* Backend selector — last service-level option, sits
-                  outside the backend Card to encode that it picks WHICH
-                  backend goes inside that card. */}
               {backendParam && (
                 <ConfigField
                   param={backendParam}
@@ -360,9 +300,6 @@ export function ConfigSection({ section }: ConfigSectionProps) {
                 />
               )}
 
-              {/* Backend-specific settings — inset Card per backend
-                  group. Makes the "these are only relevant when this
-                  backend is selected" boundary visible. */}
               {backendSettingsParams.length > 0 &&
                 (!backendParam || backendName) &&
                 backendGroups(
@@ -370,12 +307,6 @@ export function ConfigSection({ section }: ConfigSectionProps) {
                   backendName,
                   !!backendParam,
                 ).map((group) => {
-                  // Multi-backend groups collapse unless explicitly
-                  // enabled. An unset / null / undefined stored value
-                  // counts as disabled — otherwise every newly-
-                  // registered backend would expand its full config on
-                  // first render just because its declared default is
-                  // True.
                   const enableParam = group.params.find((p) =>
                     p.key.endsWith(".enabled"),
                   );
@@ -417,12 +348,7 @@ export function ConfigSection({ section }: ConfigSectionProps) {
             </>
           )}
 
-          {/* Actions — one-click ops declared by the service / backend.
-              Filtered to the current backend so switching backends
-              (even unsaved) immediately surfaces the right buttons.
-              Actions with empty ``backend`` are service-level. */}
           <ActionsBlock
-            section={section}
             actions={section.actions ?? []}
             actionStates={actionStates}
             runAction={runAction}
@@ -437,8 +363,6 @@ export function ConfigSection({ section }: ConfigSectionProps) {
         </CardContent>
       )}
 
-      {/* Footer — Save / Reset + dirty status. Only shown when
-          expanded (no point dangling when the body is collapsed). */}
       {expanded && (
         <CardFooter className="justify-between">
           <div className="text-xs">
@@ -446,12 +370,10 @@ export function ConfigSection({ section }: ConfigSectionProps) {
               <span
                 className={cn(
                   "font-mono",
-                  saveStatus.includes("fail")
-                    ? "text-destructive"
-                    : "text-success",
+                  saveStatus.ok ? "text-success" : "text-destructive",
                 )}
               >
-                {saveStatus}
+                {saveStatus.message}
               </span>
             ) : hasChanges ? (
               <span className="font-mono text-(--signal)">
@@ -466,19 +388,18 @@ export function ConfigSection({ section }: ConfigSectionProps) {
             <Button
               variant="outline"
               size="sm"
-              disabled={resetMutation.isPending}
-              onClick={() => resetMutation.mutate()}
+              onClick={() => sectionState.resetToDefaults()}
             >
               <RotateCcwIcon />
               Reset
             </Button>
             <Button
               size="sm"
-              disabled={!hasChanges || saveMutation.isPending}
-              onClick={() => saveMutation.mutate()}
+              disabled={!hasChanges}
+              onClick={() => sectionState.save()}
             >
               <SaveIcon />
-              {saveMutation.isPending ? "Saving…" : "Save"}
+              Save
             </Button>
           </div>
         </CardFooter>
@@ -488,12 +409,10 @@ export function ConfigSection({ section }: ConfigSectionProps) {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// Actions block — extracted for readability. Same behavior; the
-// surface now reads as a list with mono action keys + state text.
+// Actions block — extracted for readability. Same behavior.
 // ──────────────────────────────────────────────────────────────────
 
 interface ActionsBlockProps {
-  section: ConfigSectionType;
   actions: ConfigActionMeta[];
   actionStates: Record<string, ActionUIState>;
   runAction: (action: ConfigActionMeta, keyOverride?: string) => Promise<void>;

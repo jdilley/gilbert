@@ -1,14 +1,13 @@
 /**
  * ServiceToggles — flat list of on/off toggles for optional services.
  *
- * Renders as a single card with one row per toggleable service. The
- * "_services" pseudo-namespace exposes one boolean param per service,
- * matching the rest of the config surface.
+ * The ``_services`` pseudo-namespace exposes one boolean param per
+ * toggleable service. State is held in SettingsContext alongside
+ * every other section so the global StatusBar aggregates this one's
+ * unsaved edits too.
  */
 
-import { useState, useMemo } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useWsApi } from "@/hooks/useWsApi";
+import { useMemo } from "react";
 import {
   Card,
   CardContent,
@@ -21,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { SaveIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useSettingsSection } from "./SettingsContext";
 import type { ConfigSection } from "@/types/config";
 
 interface Props {
@@ -34,35 +34,16 @@ function humanize(key: string): string {
 }
 
 export function ServiceToggles({ sections }: Props) {
-  const queryClient = useQueryClient();
-  const api = useWsApi();
-  const [localValues, setLocalValues] = useState<Record<string, boolean>>({});
-  const [saveStatus, setSaveStatus] = useState<string | null>(null);
-
-  // The _services section has one boolean param per toggleable service.
   const svcSection = sections.find((s) => s.namespace === "_services");
+  const state = useSettingsSection(svcSection?.namespace ?? "_services");
 
   const merged = useMemo(
-    () => ({ ...(svcSection?.values ?? {}), ...localValues }),
-    [svcSection?.values, localValues],
+    () => ({ ...(svcSection?.values ?? {}), ...state.dirty }),
+    [svcSection?.values, state.dirty],
   );
 
-  const hasChanges = Object.keys(localValues).length > 0;
-
-  const saveMutation = useMutation({
-    mutationFn: () =>
-      api.setConfigSection(svcSection!.namespace, localValues),
-    onSuccess: () => {
-      setLocalValues({});
-      queryClient.invalidateQueries({ queryKey: ["config"] });
-      setSaveStatus("Saved — services restarting…");
-      setTimeout(() => setSaveStatus(null), 3000);
-    },
-    onError: () => {
-      setSaveStatus("Save failed");
-      setTimeout(() => setSaveStatus(null), 3000);
-    },
-  });
+  const dirtyCount = Object.keys(state.dirty).length;
+  const hasChanges = dirtyCount > 0;
 
   if (!svcSection) return null;
 
@@ -91,10 +72,7 @@ export function ServiceToggles({ sections }: Props) {
                 </div>
                 <Switch
                   checked={checked}
-                  onCheckedChange={(v: boolean) => {
-                    setLocalValues((prev) => ({ ...prev, [p.key]: v }));
-                    setSaveStatus(null);
-                  }}
+                  onCheckedChange={(v: boolean) => state.setField(p.key, v)}
                 />
               </li>
             );
@@ -103,20 +81,20 @@ export function ServiceToggles({ sections }: Props) {
       </CardContent>
       <CardFooter className="justify-between">
         <div className="text-xs">
-          {saveStatus ? (
+          {state.saveStatus ? (
             <span
               className={cn(
                 "font-mono",
-                saveStatus.includes("fail")
-                  ? "text-destructive"
-                  : "text-success",
+                state.saveStatus.ok
+                  ? "text-success"
+                  : "text-destructive",
               )}
             >
-              {saveStatus}
+              {state.saveStatus.message}
             </span>
           ) : hasChanges ? (
             <span className="font-mono text-(--signal)">
-              {Object.keys(localValues).length} unsaved
+              {dirtyCount} unsaved
             </span>
           ) : (
             <span className="text-muted-foreground">No changes.</span>
@@ -124,11 +102,11 @@ export function ServiceToggles({ sections }: Props) {
         </div>
         <Button
           size="sm"
-          disabled={!hasChanges || saveMutation.isPending}
-          onClick={() => saveMutation.mutate()}
+          disabled={!hasChanges}
+          onClick={() => state.save()}
         >
           <SaveIcon />
-          {saveMutation.isPending ? "Saving…" : "Save"}
+          Save
         </Button>
       </CardFooter>
     </Card>
