@@ -84,6 +84,112 @@ sync_python_deps() {
     cd "$SCRIPT_DIR" && uv sync
 }
 
+run_migrations_unattended() {
+    # Apply every pending migration without prompting. Used by the
+    # ``update`` flow where we've already committed to upgrading.
+    cd "$SCRIPT_DIR" && uv run python -m gilbert.cli.migrate up
+}
+
+check_pending_migrations() {
+    # On ``start``: list pending migrations and, if there are any AND
+    # we're on a TTY, ask the user whether to apply them before
+    # launching. On non-TTY (systemd, CI, etc.) we print a warning and
+    # skip — the user can run ``./gilbert.sh migrate up`` explicitly.
+    #
+    # ``gilbert.cli.migrate list`` exits 0 when nothing is pending and
+    # 1 when there's work — that exit code is what we branch on.
+    cd "$SCRIPT_DIR"
+    local exit_code=0
+    set +e
+    uv run python -m gilbert.cli.migrate list
+    exit_code=$?
+    set -e
+    if [ "$exit_code" -eq 0 ]; then
+        return 0
+    fi
+    if [ ! -t 0 ]; then
+        echo
+        echo "Pending migrations detected, but stdin is not a TTY." >&2
+        echo "Run './gilbert.sh migrate up' to apply them." >&2
+        echo
+        return 0
+    fi
+    echo
+    read -r -p "Apply pending migrations now? [y/N] " reply
+    case "$reply" in
+        y|Y|yes|YES)
+            run_migrations_unattended
+            ;;
+        *)
+            echo "Skipping migrations. Run './gilbert.sh migrate up' when ready."
+            ;;
+    esac
+}
+
+pull_latest_plugin() {
+    # Helper: fast-forward a single plugin checkout if it's a git
+    # repo with a clean working tree. Plugins under local-plugins/
+    # and installed-plugins/ are independent clones (not submodules),
+    # so each gets its own ``git pull``. Non-git directories are
+    # silently skipped — they're user code or extracted tarballs, not
+    # something we know how to update.
+    local plugin_dir="$1"
+    local label
+    label=$(basename "$plugin_dir")
+    if [ ! -d "$plugin_dir/.git" ]; then
+        return 0
+    fi
+    local dirty
+    dirty=$(git -C "$plugin_dir" status --porcelain --untracked-files=no || true)
+    if [ -n "$dirty" ]; then
+        echo "  skipping $label — uncommitted changes" >&2
+        return 0
+    fi
+    echo "  pulling $label..."
+    if ! git -C "$plugin_dir" pull --ff-only --quiet; then
+        echo "  $label: git pull failed (continuing)" >&2
+    fi
+}
+
+pull_latest() {
+    # Fast-forward the core repo to origin, then bring the std-plugins
+    # submodule and every git-managed plugin under local-plugins/ and
+    # installed-plugins/ along. Refuses to run when the working tree
+    # is dirty because a hard pull on top of WIP changes would either
+    # reject with a merge conflict or surprise the user. Individual
+    # plugins with dirty trees are skipped with a warning rather than
+    # aborting the whole update — they're independent checkouts.
+    cd "$SCRIPT_DIR"
+    local dirty
+    dirty=$(git status --porcelain --untracked-files=no || true)
+    if [ -n "$dirty" ]; then
+        echo "Refusing to update — working tree has uncommitted changes:" >&2
+        echo "$dirty" | sed 's/^/  /' >&2
+        return 1
+    fi
+    echo "Pulling latest Gilbert from origin..."
+    git pull --ff-only
+    echo "Updating std-plugins submodule..."
+    git submodule update --init --recursive --remote std-plugins
+
+    # Independent plugin checkouts. local-plugins/ holds user / org
+    # plugins; installed-plugins/ holds plugins cloned at runtime
+    # from a GitHub URL. Both can be plain git checkouts pinned to
+    # their own remotes.
+    local any_plugins=false
+    for parent in "$SCRIPT_DIR/local-plugins" "$SCRIPT_DIR/installed-plugins"; do
+        [ -d "$parent" ] || continue
+        for plugin in "$parent"/*/; do
+            [ -d "$plugin" ] || continue
+            if [ ! "$any_plugins" = "true" ]; then
+                echo "Updating plugin checkouts..."
+                any_plugins=true
+            fi
+            pull_latest_plugin "${plugin%/}"
+        done
+    done
+}
+
 run_gilbert_supervised() {
     # Supervisor loop: run Gilbert, inspect its exit code, restart on
     # ``RESTART_EXIT_CODE`` (re-syncing the venv first so new plugin
@@ -201,10 +307,14 @@ build_frontend() {
 
 case "$1" in
     start)
+        sync_python_deps
+        check_pending_migrations
         build_frontend
         run_gilbert_supervised
         ;;
     dev)
+        sync_python_deps
+        check_pending_migrations
         build_frontend
         run_gilbert_supervised
         ;;
@@ -223,6 +333,24 @@ case "$1" in
             echo "No PID file found — Gilbert may not be running"
         fi
         ;;
+    update)
+        # Pull latest from origin (refuses if dirty), update submodules,
+        # re-sync Python deps, then run every pending migration. Leaves
+        # Gilbert stopped — user re-launches with ``./gilbert.sh start``.
+        pull_latest
+        sync_python_deps
+        run_migrations_unattended
+        echo
+        echo "Update complete. Run './gilbert.sh start' to launch."
+        ;;
+    migrate)
+        # Forward subcommands to ``gilbert.cli.migrate``:
+        #   ./gilbert.sh migrate list    — print pending
+        #   ./gilbert.sh migrate status  — applied + pending
+        #   ./gilbert.sh migrate up      — apply every pending
+        shift
+        cd "$SCRIPT_DIR" && uv run python -m gilbert.cli.migrate "$@"
+        ;;
     doctor)
         # Iterate every loaded plugin and run its declared runtime
         # dependency checks. The implementation lives in
@@ -233,7 +361,7 @@ case "$1" in
         cd "$SCRIPT_DIR" && uv run python -m gilbert.cli.doctor "$@"
         ;;
     *)
-        echo "Usage: gilbert.sh {start|dev|build|stop|doctor}"
+        echo "Usage: gilbert.sh {start|dev|build|stop|update|migrate|doctor}"
         exit 1
         ;;
 esac

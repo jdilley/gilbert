@@ -47,3 +47,4 @@
 - [NotificationService](memory-notification-service.md) — notifications + WS dispatch via per-event filter
 - [Plugin UI Extensions](memory-plugin-ui-extensions.md) — Plugin.ui_panels() + <PluginPanelSlot> + per-plugin frontend/ dir
 - [Plugin runtime_dependencies](memory-runtime-dependencies.md) — Plugin.runtime_dependencies() + 'gilbert doctor' for non-pip OS deps
+- [Migration System](memory-migrations.md) — arbitrary one-shot upgrade scripts (core + per-plugin), `gilbert.cli.migrate`, `./gilbert.sh update` and prompt at start

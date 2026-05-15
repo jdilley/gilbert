@@ -201,6 +201,7 @@ class KnowledgeService(Service):
                     schedule=Schedule.every(self._sync_interval),
                     callback=self._sync_all,
                     system=True,
+                    replace_existing=True,
                 )
 
         # Schedule initial sync as a one-shot background job so it doesn't block startup.
@@ -214,6 +215,7 @@ class KnowledgeService(Service):
                     schedule=Schedule.once_after(2),
                     callback=self._sync_all,
                     system=True,
+                    replace_existing=True,
                 )
 
         logger.info(
