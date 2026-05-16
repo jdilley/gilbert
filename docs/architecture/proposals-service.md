@@ -117,5 +117,5 @@ Published by `AIService._ws_conversation_delete` and the room-destroy path in `_
 - `interfaces/proposals.py`, `core/services/proposals.py`, `interfaces/acl.py`
 - `core/services/ai.py` (publishes `chat.conversation.archiving`)
 - `core/app.py` (registration), `core/services/web_api.py` (nav entry)
-- [Service System](memory-service-system.md), [Capability Protocols](memory-capability-protocols.md), [Backend Pattern](memory-backend-pattern.md)
-- [Configuration Service](memory-configuration-service.md), [Scheduler Service](memory-scheduler-service.md), [Event System](memory-event-system.md)
+- `CLAUDE.md` — service system, capability protocols, backend pattern (architectural rules)
+- `src/gilbert/core/services/configuration.py`, `src/gilbert/core/services/scheduler.py`, `src/gilbert/interfaces/events.py`

@@ -575,6 +575,6 @@ React Query hooks live in `frontend/src/api/goals.ts`:
 - `docs/superpowers/plans/2026-05-04-agent-messaging-phase-2-peer-messaging.md`
 - `docs/superpowers/plans/2026-05-04-agent-messaging-phase-3-mid-stream-interrupt.md`
 - `docs/superpowers/plans/2026-05-04-agent-messaging-phase-4-goals.md`
-- `.claude/memory/memory-agent-loop.md` (run_loop primitive)
-- `.claude/memory/memory-multi-user-isolation.md`
-- `.claude/memory/memory-ai-prompts-configurable.md`
+- `src/gilbert/core/agent_loop.py` — `run_loop` primitive
+- `validate-architecture` skill category 6 — multi-user isolation rules
+- `validate-architecture` skill category 5 — configurable AI prompts contract

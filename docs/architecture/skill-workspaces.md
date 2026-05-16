@@ -106,7 +106,7 @@ Brian noticed: a fresh chat where he hadn't enabled the pdf skill was using it a
 
 ## Related
 
-- [AI Service](memory-ai-service.md) — defines the `_conversation_id` / `_invocation_source` injection pattern, and the `chat.conversation.destroyed` event flow
+- `src/gilbert/core/services/ai.py` — defines the `_conversation_id` / `_invocation_source` injection pattern, and the `chat.conversation.destroyed` event flow
 - `src/gilbert/core/services/skills.py` — workspace resolvers, gate, cleanup handler
 - `src/gilbert/interfaces/attachments.py` — `FileAttachment.workspace_conv` field
 - `src/gilbert/core/services/ai.py` — `_execute_tool_calls` / `_execute_slash_command` injection

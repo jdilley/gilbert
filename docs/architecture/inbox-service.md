@@ -222,11 +222,11 @@ everything else lives on individual mailbox records.
   auto-populate from backend if available.
 
 ## Related
-- [Event System](memory-event-system.md) — events published by inbox
-- [Scheduler Service](memory-scheduler-service.md) — per-mailbox poll jobs + outbox tick
-- [Storage Backend](memory-storage-backend.md) — message/outbox/mailbox persistence
-- [User & Auth System](memory-user-auth-system.md) — UserContext source
-- [Access Control](memory-access-control.md) — admin level resolution
+- `src/gilbert/interfaces/events.py` — events published by inbox
+- `src/gilbert/core/services/scheduler.py` — per-mailbox poll jobs + outbox tick
+- `src/gilbert/storage/` — message/outbox/mailbox persistence
+- `src/gilbert/core/services/users.py` — UserContext source
+- `src/gilbert/interfaces/acl.py` — admin level resolution
 - `src/gilbert/interfaces/inbox.py` — Mailbox, OutboxDraft, auth helpers, InboxProvider
 - `src/gilbert/interfaces/email.py` — EmailBackend ABC + `TransientEmailError`
 - `src/gilbert/core/services/inbox.py` — InboxService with per-mailbox runtime registry

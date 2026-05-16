@@ -97,5 +97,5 @@ Three Protocols in `interfaces/ai.py` let other services consume AI features wit
 - `src/gilbert/interfaces/ai.py` — `AIContextProfile` dataclass, `AISamplingProvider`, `AIToolDiscoveryProvider`, `AIModelProvider`, `SharedConversationProvider`
 - `src/gilbert/core/services/ai.py` — built-in profiles, assignments, `_resolve_backend_and_model`, `discover_tools`
 - `frontend/src/components/roles/AIProfiles.tsx` — `/security/profiles` editor with backend/model dropdowns
-- [AI Service](memory-ai-service.md) — service-level details
-- [Backend Pattern](memory-backend-pattern.md) — how AI backends register and how the multi-backend dict works
+- `src/gilbert/core/services/ai.py` — service-level details
+- `src/gilbert/interfaces/ai.py` — backend ABC; multi-backend dict comes from `Backend.registered_backends()`

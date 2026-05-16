@@ -55,7 +55,7 @@ The earlier sketch included a third "core" scope (settings-only, never tool-writ
 
 ## Related
 - `src/gilbert/core/services/ai.py` — `_MemoryHelper`, `_tool_memory_action`, memory tool definition.
-- [Soul & Identity](memory-soul-identity.md) — sibling layered system for persona (vs facts).
-- [AI Service](memory-ai-service.md) — surrounding orchestrator and system prompt builder.
-- [Access Control](memory-access-control.md) — role hierarchy that gates global writes.
+- [Soul & Identity](soul-identity.md) — sibling layered system for persona (vs facts).
+- `src/gilbert/core/services/ai.py` — surrounding orchestrator and system prompt builder.
+- `src/gilbert/interfaces/acl.py` — role hierarchy that gates global writes.
 - `tests/unit/test_memory_service.py` — coverage including scope dispatch and admin RBAC.

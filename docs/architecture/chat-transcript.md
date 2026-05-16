@@ -72,7 +72,7 @@ The `.animate-caret-blink` utility in `index.css` is the system's "Gilbert is ty
 
 Scroll behavior is non-trivial; documented inline in the file. Anchored-to-bottom detection via `ANCHOR_THRESHOLD_PX` (80px); `useLayoutEffect` re-pins on turn/block changes if anchored; `ResizeObserver` watches for late layout shifts (async image loads, UI block expansions). Don't break this.
 
-UI blocks (`<UIBlockRenderer>`) flow inline between turns at their `response_index` position. See [UI Blocks](memory-ui-blocks.md).
+UI blocks (`<UIBlockRenderer>`) flow inline between turns at their `response_index` position.
 
 ### `ChatPage.tsx` top bar
 
@@ -91,6 +91,4 @@ The `--signal` accent (warm amber) is the assistant's identity color in the chat
 - `frontend/src/components/chat/MessageList.tsx` — scroll anchoring
 - `frontend/src/components/chat/ChatInput.tsx` — composer + slash picker
 - `frontend/src/components/chat/ChatPage.tsx` — page shell, compact internal header
-- [Frontend Design System](memory-frontend-design-system.md) — the vocabulary the chat is in
-- [UI Blocks](memory-ui-blocks.md) — interactive forms that flow between turns
-- [Slash Commands](memory-slash-commands.md) — the picker's data source
+- [Frontend Design System](frontend-design-system.md) — the vocabulary the chat is in

@@ -116,6 +116,10 @@ members = [
     "local-plugins/*",
     "installed-plugins/*",
 ]
+exclude = [
+    "std-plugins/docs",
+    "local-plugins/docs",
+]
 
 # Force an older ``onnxruntime`` across the workspace. ``chromadb``
 # lists ``onnxruntime`` as a hard dep with no version bound, and uv

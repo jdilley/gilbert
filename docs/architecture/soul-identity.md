@@ -75,7 +75,6 @@ The previous `_PersonaHelper` stored a single text in collection `persona` (enti
 
 ## Related
 - `src/gilbert/core/services/ai.py` — `_SoulHelper`, `_IdentityHelper`, `_apply_persona_config`, `_build_system_prompt`, tool definitions and handlers.
-- [AI Service](memory-ai-service.md) — surrounding orchestrator.
-- [Memory Scopes](memory-memory-scopes.md) — sibling layered system for facts (vs persona).
-- [Configuration Service](memory-configuration-service.md) — how ConfigParams reach the UI.
+- `src/gilbert/core/services/ai.py` — surrounding orchestrator.
+- [Memory Scopes](memory-scopes.md) — sibling layered system for facts (vs persona).
 - `tests/unit/test_soul_identity_service.py` — coverage for layering, gating, and tool surface.

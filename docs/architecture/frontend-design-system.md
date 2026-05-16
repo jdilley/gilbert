@@ -36,8 +36,8 @@ Revised to the new vocabulary:
 
 - **`<PageHeader>`** — the canonical top-of-page block. Eyebrow + title + description + actions + hairline. Use on every route. Title supports JSX (e.g. inline avatar, inline code, breadcrumb-style eyebrow). Sub-component `<PageHeaderEyebrow>` exported for reuse outside the header.
 - **`<StatusBar>`** — sticky "n unsaved changes / Save / Cancel" pattern. Three positions (`top` / `bottom` / `static`), two tones (`default` / `dirty` — dirty adds a 2px signal-color rail on the left edge).
-- **`<SideNav>` + `<TopBar>`** — already documented in [Dashboard & Nav Structure](memory-dashboard-nav.md). SideNav is contextual (page override → group children → hidden); TopBar is primary nav.
-- **`<PageSidebar>` / `usePageSidebar`** — primitive that lets any page take over the global `SideNav` body. Two-context split (state + api) so consumers of the setter don't re-render on content updates. **This is load-bearing** — a single combined context causes an infinite render loop that visibly freezes navigation. See [Dashboard & Nav Structure](memory-dashboard-nav.md) for the gory detail.
+- **`<SideNav>` + `<TopBar>`** — SideNav is contextual (page override → group children → hidden); TopBar is primary nav.
+- **`<PageSidebar>` / `usePageSidebar`** — primitive that lets any page take over the global `SideNav` body. Two-context split (state + api) so consumers of the setter don't re-render on content updates. **This is load-bearing** — a single combined context causes an infinite render loop that visibly freezes navigation.
 
 ### Patterns codified in the spec but not (yet) primitives
 
@@ -45,7 +45,7 @@ Page header eyebrow, section header eyebrow (uppercase mono label + hairline div
 
 ### Where the system is applied
 
-Every top-level page is on the system: Dashboard, Settings (full pilot — see [Settings UI](memory-settings-ui.md)), Inbox, MCP (3 pages), Security (8 sub-routes), Notifications, Plugins, Documents, Account, Scheduler, Entities (3), System, Usage, Proposals, Agents (list + detail + edit), Goals (list + war room), Chat (see [Chat Transcript](memory-chat-transcript.md)). `ScreensPage` is the only intentional skip — it's a full-bleed kiosk display.
+Every top-level page is on the system: Dashboard, Settings, Inbox, MCP (3 pages), Security (8 sub-routes), Notifications, Plugins, Documents, Account, Scheduler, Entities (3), System, Usage, Proposals, Agents (list + detail + edit), Goals (list + war room), Chat (see [Chat Transcript](chat-transcript.md)). `ScreensPage` is the only intentional skip — it's a full-bleed kiosk display.
 
 ### Plugin authoring contract
 
@@ -53,7 +53,4 @@ Plugin TS imports from `@/components/ui/*` like any core code. Don't introduce a
 
 ## Related
 - `frontend/DESIGN.md` — the canonical visual spec (typography scale, spacing, color rules, motion, recurring patterns)
-- [Dashboard & Nav Structure](memory-dashboard-nav.md) — TopBar / SideNav / PageSidebar primitive
-- [Settings UI](memory-settings-ui.md) — pilot architecture
-- [Chat Transcript](memory-chat-transcript.md) — chat redesign
-- [Plugin UI Extensions](memory-plugin-ui-extensions.md) — slots and registry plugins use
+- [Chat Transcript](chat-transcript.md) — chat redesign

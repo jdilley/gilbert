@@ -73,5 +73,5 @@ Both live under `/mcp/*` so a bare `/mcp` redirect in `App.tsx` lands on `/mcp/s
 - `src/gilbert/web/routes/mcp.py` — raw ASGI handler class at `/api/mcp`
 - `frontend/src/components/mcp/McpPage.tsx` — servers admin page
 - `frontend/src/components/mcp/McpClientsPage.tsx` — clients admin page with profile preview
-- `memory-ai-context-profiles.md` — the profile system MCP filtering builds on
-- `memory-access-control.md` — RBAC layer applied on top of profile filtering
+- [AI Context Profiles](ai-context-profiles.md) — the profile system MCP filtering builds on
+- `src/gilbert/interfaces/acl.py` — RBAC layer applied on top of profile filtering
