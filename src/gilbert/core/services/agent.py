@@ -1696,8 +1696,12 @@ class AgentService(Service):
             await self._on_heartbeat_fired(a.id)
 
         try:
-            self._scheduler.remove_job(job_name)
-        except Exception:
+            # ``force=True`` because the heartbeat is a system job and
+            # ``remove_job`` would otherwise refuse to remove it,
+            # leaving the old registration in place and making the
+            # subsequent ``add_job`` raise "already registered".
+            self._scheduler.remove_job(job_name, force=True)
+        except KeyError:
             pass
         self._scheduler.add_job(
             name=job_name,
@@ -1711,8 +1715,11 @@ class AgentService(Service):
         if self._scheduler is None:
             return
         try:
-            self._scheduler.remove_job(f"heartbeat_{agent_id}")
-        except Exception:
+            # ``force=True`` because heartbeats are system jobs; without
+            # it ``remove_job`` would silently refuse and the job would
+            # keep firing on a deleted/disabled agent.
+            self._scheduler.remove_job(f"heartbeat_{agent_id}", force=True)
+        except KeyError:
             pass
 
     async def _on_heartbeat_fired(self, agent_id: str) -> None:

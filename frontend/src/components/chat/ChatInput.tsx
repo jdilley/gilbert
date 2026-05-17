@@ -679,29 +679,43 @@ export function ChatInput({
         {/* Autocomplete popover (commands picker) */}
         {suggestions.length > 0 && (
           <div className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-md border bg-popover shadow-lg">
-            {suggestions.map((cmd, idx) => (
-              <button
-                key={cmd.command}
-                type="button"
-                className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm ${
-                  idx === suggestionIndex
-                    ? "bg-accent text-foreground"
-                    : "text-foreground/90 hover:bg-accent/60"
-                }`}
-                onMouseEnter={() => setSuggestionIndex(idx)}
-                onClick={() => completeSuggestion(cmd)}
-              >
-                <div className="flex w-full items-center gap-2">
-                  <span className="font-mono font-medium">/{cmd.command}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {cmd.provider}
-                  </span>
-                </div>
-                <div className="line-clamp-2 text-xs text-muted-foreground">
-                  {cmd.help || cmd.description}
-                </div>
-              </button>
-            ))}
+            {suggestions.map((cmd, idx) => {
+              const isActive = idx === suggestionIndex;
+              return (
+                <button
+                  key={cmd.command}
+                  type="button"
+                  // Callback ref — when this item becomes the active
+                  // selection (arrow keys), scroll it into view if it
+                  // would otherwise overflow the popover. ``block:
+                  // 'nearest'`` keeps already-visible items still and
+                  // only scrolls when the index moves outside the
+                  // viewport.
+                  ref={(el) => {
+                    if (isActive && el) {
+                      el.scrollIntoView({ block: "nearest" });
+                    }
+                  }}
+                  className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm ${
+                    isActive
+                      ? "bg-accent text-foreground"
+                      : "text-foreground/90 hover:bg-accent/60"
+                  }`}
+                  onMouseEnter={() => setSuggestionIndex(idx)}
+                  onClick={() => completeSuggestion(cmd)}
+                >
+                  <div className="flex w-full items-center gap-2">
+                    <span className="font-mono font-medium">/{cmd.command}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {cmd.provider}
+                    </span>
+                  </div>
+                  <div className="line-clamp-2 text-xs text-muted-foreground">
+                    {cmd.help || cmd.description}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
 

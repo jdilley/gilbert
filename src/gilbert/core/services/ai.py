@@ -2919,6 +2919,27 @@ class AIService(Service):
             if directory:
                 parts.append(directory)
 
+        # Inject tool-provider context blocks. ToolProviders that own
+        # related entities can implement ``ToolContextProvider`` and
+        # contribute a markdown section describing relationships and
+        # common multi-tool sequences. The AI gets this once per turn
+        # rather than re-deriving it from per-tool descriptions.
+        if self._resolver is not None:
+            from gilbert.interfaces.tools import ToolContextProvider
+
+            for svc in self._resolver.get_all("ai_tools"):
+                if isinstance(svc, ToolContextProvider):
+                    try:
+                        ctx = svc.tool_provider_context()
+                    except Exception:
+                        logger.exception(
+                            "tool_provider_context() raised on %s",
+                            getattr(svc, "tool_provider_name", svc.__class__.__name__),
+                        )
+                        ctx = ""
+                    if ctx:
+                        parts.append(ctx)
+
         # Inject memory summaries (global + per-user) if available.
         # Global memories are visible to everyone; per-user memories only
         # appear for the calling user. ``get_summaries_for_user`` folds
